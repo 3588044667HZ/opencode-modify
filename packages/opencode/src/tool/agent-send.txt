@@ -10,3 +10,4 @@ Usage notes:
 3. Do not use this to loop: each forwarded message increments a hop counter, and messages beyond the configured hop limit (default 8) are rejected.
 4. Sending is rate limited per session (default 20 per minute). On rejection, wait before retrying.
 5. A message may wake an idle target. If waking is disabled, the message is queued in the target's inbox and delivered when it next runs; it is also readable via the `agent_inbox` tool.
+6. Delivery does not wait for the target's turn: the tool returns once the message is admitted. A running target reads it as a steer, and a reply (if any) arrives later via `agent_inbox`.

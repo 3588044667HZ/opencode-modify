@@ -188,6 +188,8 @@ ops.prompt({
 
 - **运行中的目标**：`SessionRunState`/`SessionRunCoordinator` 的 wake 合并语义保证在下一安全边界被消费（等价 steer）。
 - **空闲的目标**：`prompt` 唤醒一次 run（等价 queue+wake）；若评审倾向“不默认唤醒”，加参数 `wake: false`（仅当目标 active 时投递，否则拒回 `TLB_ACCEPT_QUEUE_LATER` 类错误——P2 用 inbox 表承接）。
+- **禁止自投递**：目标是发送方自身时直接拒绝（自指必然死锁）。
+- **投递不等待目标轮次**：`ops.prompt` 在工具 scope 内 `forkIn` 后台执行，工具写入 mailbox 审计行后立即返回。若同步等待目标 run（`Runner.ensureRunning` 在目标 Running 时只 await 当前 run），会形成永久死锁：典型是 lead 在 `task`/`dispatch` join 中等待子 agent，子 agent 发消息给 lead 时双方互等。运行中的目标会在下一安全边界把消息当 steer 消费，空闲目标由后台 fiber 启动新 run。
 - 消息信封（纯文本，模型可读、用户可见）：
 
 ```

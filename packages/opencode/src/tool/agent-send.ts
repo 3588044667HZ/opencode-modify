@@ -7,7 +7,7 @@ import { SessionID, MessageID } from "../session/schema"
 import { peerMetadata, renderPeerMessage } from "../session/peer-message"
 import type { TaskPromptOps } from "./task"
 import { Config } from "@/config/config"
-import { Effect, Schema } from "effect"
+import { Cause, Effect, Schema, Scope } from "effect"
 
 const id = "agent_send"
 const DEFAULT_MAX_HOP = 8
@@ -33,6 +33,7 @@ export const AgentSendTool = Tool.define(
     const sessions = yield* Session.Service
     const status = yield* SessionStatus.Service
     const mailbox = yield* Mailbox.Service
+    const scope = yield* Scope.Scope
 
     const sent = new Map<string, number[]>()
 
@@ -61,6 +62,8 @@ export const AgentSendTool = Tool.define(
       const target = yield* resolveTarget(params.to, { sender, senderRoot, sessions, rootOf })
       if (target.root.id !== senderRoot.id)
         return yield* Effect.fail(new Error("Peer target is outside this session tree"))
+      if (target.session.id === ctx.sessionID)
+        return yield* Effect.fail(new Error("Cannot send a peer message to the session itself"))
 
       if (!ctx.extra?.bypassAgentCheck) {
         yield* ctx.ask({
@@ -121,21 +124,6 @@ export const AgentSendTool = Tool.define(
         body: params.message,
       })
 
-      yield* ops.prompt({
-        messageID: MessageID.ascending(),
-        sessionID: target.session.id,
-        agent: target.session.agent ?? ctx.agent,
-        variant: target.session.model?.variant,
-        parts: [
-          {
-            type: "text",
-            synthetic: true,
-            metadata: peerMetadata({ from: ctx.sessionID, fromAgent: ctx.agent, kind, hop }),
-            text: envelope,
-          },
-        ],
-      })
-
       yield* mailbox.record({
         id: envelopeID,
         fromSessionID: ctx.sessionID,
@@ -147,6 +135,33 @@ export const AgentSendTool = Tool.define(
         status: "delivered",
         ...(params.reply_to === undefined ? {} : { replyTo: params.reply_to }),
       })
+
+      // Deliver without waiting for the target turn. Waiting on the target's
+      // run would deadlock whenever that run is blocked on this session (for
+      // example a lead waiting inside task/dispatch join): the message is
+      // already admitted for a running target, which picks it up as a steer,
+      // while an idle target starts a fresh run in the forked fiber.
+      yield* ops
+        .prompt({
+          messageID: MessageID.ascending(),
+          sessionID: target.session.id,
+          agent: target.session.agent ?? ctx.agent,
+          variant: target.session.model?.variant,
+          parts: [
+            {
+              type: "text",
+              synthetic: true,
+              metadata: peerMetadata({ from: ctx.sessionID, fromAgent: ctx.agent, kind, hop }),
+              text: envelope,
+            },
+          ],
+        })
+        .pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("peer message delivery failed", { to: target.session.id, cause: Cause.pretty(cause) }),
+          ),
+          Effect.forkIn(scope, { startImmediately: true }),
+        )
 
       return {
         title: `peer message to ${target.session.id}`,

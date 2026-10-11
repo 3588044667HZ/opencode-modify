@@ -17,7 +17,7 @@ import { Truncate } from "@/tool/truncate"
 import type { TaskPromptOps } from "../../src/tool/task"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { disposeAllInstances } from "../fixture/fixture"
-import { testEffect } from "../lib/effect"
+import { awaitWithTimeout, pollWithTimeout, testEffect } from "../lib/effect"
 
 afterEach(async () => {
   await disposeAllInstances()
@@ -73,6 +73,12 @@ function context(sessionID: string, promptOps: TaskPromptOps) {
 }
 
 describe("tool.agent_send", () => {
+  const delivered = (seen: any[], count: number) =>
+    pollWithTimeout(
+      Effect.sync(() => (seen.length >= count ? seen : undefined)),
+      "peer message was not delivered",
+    )
+
   it.instance("delivers to parent, root, and siblings within the tree", () =>
     Effect.gen(function* () {
       const sessions = yield* Session.Service
@@ -84,6 +90,7 @@ describe("tool.agent_send", () => {
       const seen: any[] = []
 
       yield* def.execute({ to: "parent", message: "hi root" }, context(a.id, stubOps((input) => seen.push(input))))
+      yield* delivered(seen, 1)
       expect(seen[0].sessionID).toBe(root.id)
       expect(seen[0].parts[0].synthetic).toBe(true)
       expect(seen[0].parts[0].metadata.peer.hop).toBe(1)
@@ -92,10 +99,50 @@ describe("tool.agent_send", () => {
       expect(seen[0].parts[0].text).toContain("hi root")
 
       yield* def.execute({ to: b.id, message: "hi sibling" }, context(a.id, stubOps((input) => seen.push(input))))
+      yield* delivered(seen, 2)
       expect(seen[1].sessionID).toBe(b.id)
 
       yield* def.execute({ to: "root", message: "hi root" }, context(a.id, stubOps((input) => seen.push(input))))
+      yield* delivered(seen, 3)
       expect(seen[2].sessionID).toBe(root.id)
+    }),
+  )
+
+  it.instance("returns without waiting for a blocked target turn", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const tool = yield* AgentSendTool
+      const def = yield* tool.init()
+      const root = yield* sessions.create({ title: "root" })
+      const child = yield* sessions.create({ parentID: root.id, title: "child" })
+      const promptOps: TaskPromptOps = {
+        cancel: () => Effect.void,
+        resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+        prompt: () => Effect.never,
+      }
+
+      const result = yield* awaitWithTimeout(
+        def.execute({ to: "root", message: "blocked?" }, context(child.id, promptOps)),
+        "agent_send waited for the target turn",
+        "2 seconds",
+      )
+
+      expect(result.output).toContain("Delivered")
+    }),
+  )
+
+  it.instance("rejects sending to the session itself", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const tool = yield* AgentSendTool
+      const def = yield* tool.init()
+      const root = yield* sessions.create({ title: "root" })
+      const child = yield* sessions.create({ parentID: root.id, title: "child" })
+
+      const exit = yield* def
+        .execute({ to: child.id, message: "self" }, context(child.id, stubOps()))
+        .pipe(Effect.exit)
+      expect(Exit.isFailure(exit)).toBe(true)
     }),
   )
 
