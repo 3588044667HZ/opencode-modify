@@ -1,0 +1,10 @@
+Maintain a shared key-value blackboard scoped to this session tree.
+
+All agents in the same session tree (the lead and its subagents) share one blackboard. Use it to hand off intermediate artifacts, plans, or findings without repeating them in every prompt.
+
+Usage notes:
+1. `put` writes a value; `mode: "set"` (default) overwrites, `mode: "append"` adds a new section to the existing value.
+2. `get` reads one key; `list` enumerates keys (optionally filtered by a `key` prefix); `delete` removes a key.
+3. Values are plain text (markdown is fine). Very large values and too many keys are rejected.
+4. Use `if_version` for compare-and-swap so concurrent writers do not clobber each other; `put` returns the new version.
+5. Agree on key names with the lead before writing (for example `plan/step1`, `result/tester`).
