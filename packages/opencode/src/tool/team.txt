@@ -1,0 +1,10 @@
+Inspect and control the team of subagents you dispatched with the `dispatch` tool.
+
+Use this to check on background members before they finish and to stop them when they are stuck, looping, or no longer useful.
+
+Usage notes:
+1. `op: "status"` (default scope: your direct child sessions, at most 32 listed) prints one compact line per member with `id`, `agent`, `name`, `state`, `activity`, `quiet`, `waiting_permission`, `tokens`, and `elapsed`. Treat it as an on-demand snapshot, not a polling loop.
+2. Pass `session_id` to add a detail block for one descendant member: the tail of its last text, any pending permission asks, and its last tool.
+3. `op: "stop"` cancels a member and its running job. Pass `session_id` for one target, or `all: true` to stop every descendant (partial results are reported). Give exactly one of the two.
+4. Stopping a member interrupts its pending permission asks, so you do not need to resolve them first.
+5. Members are subagent sessions; stopping applies to any descendant session, not only dispatched members.

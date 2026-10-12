@@ -4,6 +4,7 @@ import { Ripgrep } from "@opencode-ai/core/ripgrep"
 import { PlanExitTool } from "./plan"
 import { Session } from "@/session/session"
 import { SessionStatus } from "@/session/status"
+import { SessionRunState } from "@/session/run-state"
 import { QuestionTool } from "./question"
 import { ShellTool } from "./shell"
 import { EditTool } from "./edit"
@@ -12,6 +13,7 @@ import { GrepTool } from "./grep"
 import { ReadTool } from "./read"
 import { TaskTool } from "./task"
 import { DispatchTool } from "./dispatch"
+import { TeamTool } from "./team"
 import { AgentSendTool } from "./agent-send"
 import { AgentInboxTool } from "./agent-inbox"
 import { BlackboardTool } from "./blackboard"
@@ -108,6 +110,7 @@ const layer = Layer.effect(
     const invalid = yield* InvalidTool
     const task = yield* TaskTool
     const dispatch = flags.experimentalAgentTeams ? yield* DispatchTool : undefined
+    const team = flags.experimentalAgentTeams ? yield* TeamTool : undefined
     const agentSend = flags.experimentalAgentTeams ? yield* AgentSendTool : undefined
     const agentInbox = flags.experimentalAgentTeams ? yield* AgentInboxTool : undefined
     const blackboard = flags.experimentalAgentTeams ? yield* BlackboardTool : undefined
@@ -235,6 +238,7 @@ const layer = Layer.effect(
           lsp: Tool.init(lsptool),
           plan: Tool.init(plan),
           ...(dispatch ? { dispatch: Tool.init(dispatch) } : {}),
+          ...(team ? { team: Tool.init(team) } : {}),
           ...(agentSend ? { agent_send: Tool.init(agentSend) } : {}),
           ...(agentInbox ? { agent_inbox: Tool.init(agentInbox) } : {}),
           ...(blackboard ? { blackboard: Tool.init(blackboard) } : {}),
@@ -259,6 +263,7 @@ const layer = Layer.effect(
             tool.skill,
             tool.patch,
             ...(tool.dispatch ? [tool.dispatch] : []),
+            ...(tool.team ? [tool.team] : []),
             ...(tool.agent_send ? [tool.agent_send] : []),
             ...(tool.agent_inbox ? [tool.agent_inbox] : []),
             ...(tool.blackboard ? [tool.blackboard] : []),
@@ -471,6 +476,8 @@ export const node = LayerNode.make({
     Skill.node,
     Session.node,
     SessionStatus.node,
+    SessionRunState.node,
+    Permission.node,
     Blackboard.node,
     Mailbox.node,
     BackgroundJob.node,

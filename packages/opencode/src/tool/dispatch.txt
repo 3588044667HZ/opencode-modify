@@ -11,7 +11,7 @@ Usage notes:
 1. Give every member a self-contained prompt. Members start with a fresh context and do not see this conversation.
 2. Prefer named teams configured in `team` when the user maintains a roster; pass `tasks` to override or run an ad-hoc team.
 3. `mode` defaults to `join`, which waits for every member and returns aggregated results including each member's `sessionID`.
-4. `mode: "background"` returns immediately; you will be notified as members finish. Then work on non-overlapping tasks.
+4. `mode: "background"` returns immediately. When each member finishes (completed or error), a compact `<=2KB` `<team_update>` summary is injected into this session; the full result stays in the member's session and can be read later via its `task_id`. Then work on non-overlapping tasks.
 5. `concurrency` caps how many members run at once (default 4). Keep it conservative; members consume tokens concurrently.
 6. To continue a member's session later, pass its `sessionID` as `task_id` to the Task tool, or pass `task_id` on a member here to resume that session. Resuming a member that is still running appends the next prompt after its current turn.
 7. A member is a subagent and cannot itself dispatch unless explicitly permitted.

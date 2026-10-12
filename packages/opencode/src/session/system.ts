@@ -69,6 +69,7 @@ export function teamDelegationGuidance(input: { agent: Agent.Info; enabled: bool
     "Use it when the work splits into independent streams that benefit from running concurrently; use the task tool (or work directly) for a single subagent, serial dependencies, or small edits.",
     "Keep teams small: the default concurrency is 4, respect any `budget_tokens`, and give every member a self-contained prompt that states exactly what to return.",
     ...(coordination.length === 0 ? [] : [`Coordination: ${coordination.join("; ")}.`]),
+    "Use the `team` tool to inspect or stop dispatched members when they stall or wait on a permission.",
     "Members cannot dispatch further by default, and their results are only trustworthy after you verify them.",
     "</team_delegation>",
   ].join("\n")

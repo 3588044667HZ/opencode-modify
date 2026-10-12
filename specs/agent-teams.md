@@ -129,7 +129,7 @@
 1. 深度检查：与 `task.ts:104-117` 相同（沿 `parentID` 上行计数，`>= cfg.subagent_depth ?? 1` 拒绝；报错文案指向 `subagent_depth`）。
 2. 逐条 `sessions.create({ parentID: ctx.sessionID, title: \`${description} (@${agent} subagent)\`, agent, permission: ... })`——**标题必须沿用 `(@${agent} subagent)` 后缀约定**：desktop 会剥离该后缀显示子会话标题（`app/.../message-timeline.tsx:317-331`），并据此把子会话挂回父会话的 task/dispatch 工具卡（`session-ui/.../message-part.tsx:591-605` `taskSession()` 按 `title.startsWith(description)` + `@agent` 匹配）。team 名等信息放 metadata，破坏该约定的标题会导致 desktop 上点不开成员会话。权限派生直接复用 `task.ts:139-172` 的逻辑，建议抽取共享函数 `createSubagentSession()` 到 `tool/subagent.ts`，`task.ts` 与 `dispatch.ts` 都改调它（小重构，行为不变）。
 3. 执行：`concurrency`（`params.concurrency ?? teamConfig.max_parallel`，钳制 1..16）用 `Semaphore.makeUnsafe(concurrency)` 真正限制同时运行的成员数（`runMember` 外层 `withPermits`），而不是仅限制 settle 等待并发。每个成员优先 `BackgroundJob.extend`：若该会话已有运行中的 job（用 `task_id` 追一个仍在运行的成员）则把新 prompt 追加到当前轮之后；否则 `BackgroundJob.start({ id: childSession.id, type: "dispatch", run: runMember() })`。
-4. 等待：`mode=join` 用 `Effect.forEach(concurrency)` 并发等待全部 `background.wait`；`mode=background` 立即返回，成员结束只更新 metadata 与发 `Team.MemberEnded` 事件，**不会主动注入/唤醒父会话**（要结果需 `task_id` 追问，或看面板/inbox）。
+4. 等待：`mode=join` 用 `Effect.forEach(concurrency)` 并发等待全部 `background.wait`；`mode=background` 立即返回，成员结束更新 metadata 并发 `Team.MemberEnded` 事件，同时向父会话**注入一条 ≤2KB 的合成 `<team_update>` 摘要并唤醒 lead**（completed/error 各自一次，按 `${sessionID}:${completed_at}` 去重；完整结果留在成员会话，用 `task_id` 取）。background 模式还会启动成员看门狗：等权限超 5 分钟或无活动超 10 分钟时向父会话注入 `<team_watchdog>` 通知（同一 ask/同一停滞区间只告警一次）。详见 `specs/agent-teams-management.md`（`team` 工具的完整参数、看门狗阈值 flags 与上下文上限）。
 5. 取消：工具被中断时对全部成员会话 `cancel + background.cancel`（`task.ts:328-358` 的 acquireUseRelease 模式批量版）。
 6. 元数据：`ctx.metadata({ title, metadata: { team, members: [{ sessionID, agent, name, state, variant?, tokens?, elapsedMs? }] } })`，每成员状态变化更新一次（供 UI 状态展示）；`variant` 是成员实际命中的 variant（从成员会话首条 prompt 回读，回退到 dispatch 转发值），`tokens` 取成员会话累计 token（≤0 省略），`elapsedMs` 取后台 job 的 `completed_at - started_at`。
 
@@ -380,7 +380,7 @@ interface Interface {
 | `packages/core/src/database/migration/` | 两个迁移文件（命名随生成器） |
 | `packages/core/src/session/mailbox.ts`、`blackboard.ts`、`tree.ts` | 新 Service + root 解析 helper |
 | `packages/core/src/v1/config/config.ts` | `team`/`agent_message`/`blackboard` 配置块 |
-| `packages/opencode/src/tool/{dispatch,agent-send,agent-inbox,blackboard}.ts` + `.txt` | 新工具 |
+| `packages/opencode/src/tool/{dispatch,agent-send,agent-inbox,blackboard,team}.ts` + `.txt` | 新工具（`team` 见 `specs/agent-teams-management.md`） |
 | `packages/opencode/src/tool/registry.ts` | 注册 + flag 门控 + `describeTask` 的团队描述扩展（可选） |
 | `packages/opencode/src/effect/runtime-flags.ts` | `experimentalAgentTeams` |
 | `packages/opencode/src/agent/agent.ts` | 默认权限表加入三个新 key |

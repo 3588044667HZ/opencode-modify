@@ -1,5 +1,6 @@
 import { afterEach, describe, expect } from "bun:test"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
+import { SessionEvent } from "@opencode-ai/schema/session-event"
 import { Database } from "@opencode-ai/core/database/database"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
@@ -15,6 +16,7 @@ import type { SessionPrompt } from "../../src/session/prompt"
 import { MessageID, PartID } from "../../src/session/schema"
 import { SessionRunState } from "@/session/run-state"
 import { SessionStatus } from "@/session/status"
+import { Permission } from "@/permission"
 import { Provider } from "@/provider/provider"
 
 import { DispatchTool } from "../../src/tool/dispatch"
@@ -27,6 +29,7 @@ import { pollWithTimeout, testEffect } from "../lib/effect"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { FSUtil } from "@opencode-ai/core/fs-util"
+import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import os from "os"
 import path from "path"
 
@@ -83,6 +86,7 @@ const layer = (flags: Partial<RuntimeFlags.Info> = {}) =>
       SessionProjector.node,
       SessionRunState.node,
       SessionStatus.node,
+      Permission.node,
       Truncate.node,
       ToolRegistry.node,
       Database.node,
@@ -94,6 +98,15 @@ const layer = (flags: Partial<RuntimeFlags.Info> = {}) =>
   )
 
 const it = testEffect(layer({ experimentalAgentTeams: true }))
+
+const watchdogIt = testEffect(
+  layer({
+    experimentalAgentTeams: true,
+    teamWatchdogIntervalMs: 100,
+    teamWatchdogPermissionMs: 50,
+    teamWatchdogInactiveMs: 50,
+  }),
+)
 
 const seed = Effect.fn("DispatchToolTest.seed")(function* (title = "Lead") {
   const session = yield* Session.Service
@@ -178,6 +191,14 @@ const tasks = [
   { agent: "general", description: "second task", prompt: "do second" },
   { agent: "general", description: "third task", prompt: "do third" },
 ]
+
+function watchdogInjections(calls: SessionPrompt.PromptInput[], state: "waiting_permission" | "stalled") {
+  return calls.filter((call) =>
+    call.parts.some(
+      (part) => part.type === "text" && part.text.includes("<team_watchdog") && part.text.includes(`state="${state}"`),
+    ),
+  )
+}
 
 describe("tool.dispatch", () => {
   it.instance("join runs members in parallel and aggregates their session IDs", () =>
@@ -729,6 +750,424 @@ describe("tool.dispatch", () => {
 
       const waited = yield* jobs.wait({ id: existing.id, timeout: 2_000 })
       expect(waited.info?.status).toBe("completed")
+    }),
+  )
+
+  it.instance("injects a team_update into the parent when a background member completes", () =>
+    Effect.gen(function* () {
+      const { chat, assistant } = yield* seed()
+      const tool = yield* DispatchTool
+      const def = yield* tool.init()
+      const calls: SessionPrompt.PromptInput[] = []
+      const promptOps: TaskPromptOps = {
+        cancel: () => Effect.void,
+        resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+        prompt: (input) =>
+          Effect.sync(() => {
+            calls.push(input)
+            return reply(input, `done ${input.sessionID}`)
+          }),
+      }
+
+      yield* def.execute(
+        { tasks: [{ agent: "general", description: "only", prompt: "do it" }], mode: "background" },
+        context({ chat, assistant, promptOps }),
+      )
+
+      const injection = yield* pollWithTimeout(
+        Effect.sync(() => calls.find((call) => call.sessionID === chat.id)),
+        "background completion did not inject a parent notification",
+      )
+      const part = injection.parts.find((item) => item.type === "text" && item.synthetic === true)
+      const text = part?.type === "text" ? part.text : ""
+      expect(injection.sessionID).toBe(chat.id)
+      expect(part?.type).toBe("text")
+      expect(text).toContain("<team_update")
+      expect(text).toContain('state="completed"')
+      expect(text).toContain("done")
+    }),
+  )
+
+  it.instance("caps the injected team_update body at 2KB", () =>
+    Effect.gen(function* () {
+      const { chat, assistant } = yield* seed()
+      const tool = yield* DispatchTool
+      const def = yield* tool.init()
+      const long = "x".repeat(8000)
+      const calls: SessionPrompt.PromptInput[] = []
+      const promptOps: TaskPromptOps = {
+        cancel: () => Effect.void,
+        resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+        prompt: (input) =>
+          Effect.sync(() => {
+            calls.push(input)
+            return reply(input, input.sessionID === chat.id ? "ack" : long)
+          }),
+      }
+
+      yield* def.execute(
+        { tasks: [{ agent: "general", description: "long", prompt: "go long" }], mode: "background" },
+        context({ chat, assistant, promptOps }),
+      )
+
+      const injection = yield* pollWithTimeout(
+        Effect.sync(() => calls.find((call) => call.sessionID === chat.id)),
+        "background completion did not inject a parent notification",
+      )
+      const part = injection.parts.find((item) => item.type === "text" && item.synthetic === true)
+      const text = part?.type === "text" ? part.text : ""
+      expect(text).toContain("<team_update")
+      expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(2048)
+      expect(text.endsWith("</team_update>")).toBe(true)
+    }),
+  )
+
+  it.instance("does not inject a team_update in join mode", () =>
+    Effect.gen(function* () {
+      const { chat, assistant } = yield* seed()
+      const tool = yield* DispatchTool
+      const def = yield* tool.init()
+      const calls: SessionPrompt.PromptInput[] = []
+      const promptOps: TaskPromptOps = {
+        cancel: () => Effect.void,
+        resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+        prompt: (input) =>
+          Effect.sync(() => {
+            calls.push(input)
+            return reply(input, "done")
+          }),
+      }
+
+      yield* def.execute(
+        { tasks: [{ agent: "general", description: "only", prompt: "do it" }] },
+        context({ chat, assistant, promptOps }),
+      )
+
+      expect(calls.some((call) => call.sessionID === chat.id)).toBe(false)
+    }),
+  )
+
+  it.instance("does not inject twice when a second dispatch resumes a running member", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const events = yield* EventV2Bridge.Service
+      const { chat, assistant } = yield* seed()
+      const existing = yield* sessions.create({ parentID: chat.id, title: "existing" })
+      const tool = yield* DispatchTool
+      const def = yield* tool.init()
+      const gate = yield* Deferred.make<void>()
+      const started = yield* Ref.make(0)
+      const injections: string[] = []
+      const ended: string[] = []
+      const promptOps: TaskPromptOps = {
+        cancel: () => Effect.void,
+        resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+        prompt: (input) =>
+          Effect.gen(function* () {
+            const text = input.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("")
+            if (input.sessionID === chat.id) {
+              injections.push(text)
+              return reply(input, "ack")
+            }
+            yield* Ref.update(started, (value) => value + 1)
+            if (text.includes("first run")) yield* Deferred.await(gate)
+            return reply(input, "done")
+          }),
+      }
+      const off = yield* events.listen((event) => {
+        if (event.type === SessionEvent.Team.Ended.type) ended.push(event.type)
+        return Effect.void
+      })
+
+      yield* def.execute(
+        {
+          tasks: [{ agent: "general", description: "first", prompt: "first run", task_id: existing.id }],
+          mode: "background",
+        },
+        context({ chat, assistant, promptOps }),
+      )
+      yield* pollWithTimeout(
+        Ref.get(started).pipe(Effect.map((value) => (value >= 1 ? true : undefined))),
+        "first member run did not start",
+      )
+
+      yield* def.execute(
+        {
+          tasks: [{ agent: "general", description: "resume", prompt: "follow up", task_id: existing.id }],
+          mode: "background",
+        },
+        context({ chat, assistant, promptOps }),
+      )
+
+      yield* Deferred.succeed(gate, undefined)
+      yield* pollWithTimeout(
+        Effect.sync(() => (ended.length >= 2 && injections.length >= 1 ? true : undefined)),
+        "member completion did not settle through both dispatches",
+      )
+      yield* off
+
+      expect(injections).toHaveLength(1)
+      expect(injections[0]).toContain("<team_update")
+    }),
+  )
+
+  watchdogIt.instance("injects one watchdog notice while a member waits on permission", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const permissions = yield* Permission.Service
+      const jobs = yield* BackgroundJob.Service
+      const { chat, assistant } = yield* seed()
+      const tool = yield* DispatchTool
+      const def = yield* tool.init()
+      const gate = yield* Deferred.make<void>()
+      const calls: SessionPrompt.PromptInput[] = []
+      const promptOps: TaskPromptOps = {
+        cancel: () => Effect.void,
+        resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+        prompt: (input) =>
+          Effect.gen(function* () {
+            calls.push(input)
+            if (input.sessionID !== chat.id) yield* Deferred.await(gate)
+            return reply(input, "done")
+          }),
+      }
+
+      yield* def.execute(
+        { tasks: [{ agent: "general", description: "waiting", prompt: "wait" }], mode: "background" },
+        context({ chat, assistant, promptOps }),
+      )
+
+      const member = yield* pollWithTimeout(
+        sessions.children(chat.id).pipe(Effect.map((kids) => kids[0])),
+        "member session was not created",
+      )
+      const askID = PermissionV1.ID.ascending("per_watchdog_wait")
+      yield* permissions
+        .ask({
+          id: askID,
+          sessionID: member.id,
+          permission: "external_directory",
+          patterns: ["/tmp/*"],
+          metadata: {},
+          always: ["*"],
+          ruleset: [],
+        })
+        .pipe(Effect.ignore, Effect.forkChild)
+
+      const injection = yield* pollWithTimeout(
+        Effect.sync(() => watchdogInjections(calls, "waiting_permission")[0]),
+        "watchdog did not report the pending permission",
+      )
+      const part = injection.parts.find((item) => item.type === "text" && item.synthetic === true)
+      const text = part?.type === "text" ? part.text : ""
+      expect(injection.sessionID).toBe(chat.id)
+      expect(text).toContain("<team_watchdog")
+      expect(text).toContain('state="waiting_permission"')
+      expect(text).toContain(`ask="${askID}"`)
+      expect(text).toContain("Approve or reject the pending permission")
+      expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(512)
+
+      yield* Effect.sleep("300 millis")
+      expect(watchdogInjections(calls, "waiting_permission")).toHaveLength(1)
+
+      yield* permissions.reply({ requestID: askID, reply: "reject" })
+      yield* Deferred.succeed(gate, undefined)
+      yield* jobs.wait({ id: member.id, timeout: 2_000 })
+    }),
+  )
+
+  watchdogIt.instance("injects one stalled notice while a member stays quiet", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const jobs = yield* BackgroundJob.Service
+      const { chat, assistant } = yield* seed()
+      const tool = yield* DispatchTool
+      const def = yield* tool.init()
+      const gate = yield* Deferred.make<void>()
+      const calls: SessionPrompt.PromptInput[] = []
+      const promptOps: TaskPromptOps = {
+        cancel: () => Effect.void,
+        resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+        prompt: (input) =>
+          Effect.gen(function* () {
+            calls.push(input)
+            if (input.sessionID !== chat.id) yield* Deferred.await(gate)
+            return reply(input, "done")
+          }),
+      }
+
+      yield* def.execute(
+        { tasks: [{ agent: "general", description: "quiet", prompt: "be quiet" }], mode: "background" },
+        context({ chat, assistant, promptOps }),
+      )
+      const member = yield* pollWithTimeout(
+        sessions.children(chat.id).pipe(Effect.map((kids) => kids[0])),
+        "member session was not created",
+      )
+
+      const injection = yield* pollWithTimeout(
+        Effect.sync(() => watchdogInjections(calls, "stalled")[0]),
+        "watchdog did not report the quiet member",
+      )
+      const part = injection.parts.find((item) => item.type === "text" && item.synthetic === true)
+      const text = part?.type === "text" ? part.text : ""
+      expect(injection.sessionID).toBe(chat.id)
+      expect(text).toContain("<team_watchdog")
+      expect(text).toContain('state="stalled"')
+      expect(text).toMatch(/quiet="\d+[a-z]+"/)
+      expect(text).toContain("last_activity=")
+      expect(text.endsWith("</team_watchdog>")).toBe(true)
+      expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(512)
+
+      yield* Effect.sleep("300 millis")
+      expect(watchdogInjections(calls, "stalled")).toHaveLength(1)
+
+      yield* Deferred.succeed(gate, undefined)
+      yield* jobs.wait({ id: member.id, timeout: 2_000 })
+    }),
+  )
+
+  watchdogIt.instance("re-arms the stalled check after the member produces new activity", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const jobs = yield* BackgroundJob.Service
+      const { chat, assistant } = yield* seed()
+      const tool = yield* DispatchTool
+      const def = yield* tool.init()
+      const gate = yield* Deferred.make<void>()
+      const calls: SessionPrompt.PromptInput[] = []
+      const promptOps: TaskPromptOps = {
+        cancel: () => Effect.void,
+        resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+        prompt: (input) =>
+          Effect.gen(function* () {
+            calls.push(input)
+            if (input.sessionID !== chat.id) yield* Deferred.await(gate)
+            return reply(input, "done")
+          }),
+      }
+
+      yield* def.execute(
+        { tasks: [{ agent: "general", description: "quiet", prompt: "be quiet" }], mode: "background" },
+        context({ chat, assistant, promptOps }),
+      )
+      const member = yield* pollWithTimeout(
+        sessions.children(chat.id).pipe(Effect.map((kids) => kids[0])),
+        "member session was not created",
+      )
+      yield* pollWithTimeout(
+        Effect.sync(() => watchdogInjections(calls, "stalled")[0]),
+        "watchdog did not report the quiet member",
+      )
+
+      const messageID = MessageID.ascending()
+      yield* sessions.updateMessage({
+        id: messageID,
+        role: "user",
+        sessionID: member.id,
+        agent: "general",
+        model: ref,
+        time: { created: Date.now() },
+      })
+      yield* sessions.updatePart({
+        id: PartID.ascending(),
+        sessionID: member.id,
+        messageID,
+        type: "text",
+        text: "productive again",
+        time: { start: Date.now(), end: Date.now() },
+      })
+
+      yield* pollWithTimeout(
+        Effect.sync(() => (watchdogInjections(calls, "stalled").length >= 2 ? true : undefined)),
+        "watchdog did not re-arm after new activity",
+      )
+      yield* Effect.sleep("300 millis")
+      expect(watchdogInjections(calls, "stalled")).toHaveLength(2)
+
+      yield* Deferred.succeed(gate, undefined)
+      yield* jobs.wait({ id: member.id, timeout: 2_000 })
+    }),
+  )
+
+  watchdogIt.instance("does not start the watchdog in join mode", () =>
+    Effect.gen(function* () {
+      const { chat, assistant } = yield* seed()
+      const tool = yield* DispatchTool
+      const def = yield* tool.init()
+      const gate = yield* Deferred.make<void>()
+      const calls: SessionPrompt.PromptInput[] = []
+      const promptOps: TaskPromptOps = {
+        cancel: () => Effect.void,
+        resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+        prompt: (input) =>
+          Effect.gen(function* () {
+            calls.push(input)
+            yield* Deferred.await(gate)
+            return reply(input, "done")
+          }),
+      }
+
+      const fiber = yield* def
+        .execute(
+          { tasks: [{ agent: "general", description: "joined", prompt: "join" }] },
+          context({ chat, assistant, promptOps }),
+        )
+        .pipe(Effect.forkChild)
+
+      yield* pollWithTimeout(
+        Effect.sync(() => (calls.length >= 1 ? true : undefined)),
+        "member did not start",
+      )
+      yield* Effect.sleep("300 millis")
+      expect(calls.some((call) => call.sessionID === chat.id)).toBe(false)
+
+      yield* Deferred.succeed(gate, undefined)
+      yield* Fiber.join(fiber)
+      expect(calls.some((call) => call.sessionID === chat.id)).toBe(false)
+    }),
+  )
+
+  watchdogIt.instance("stops watching once every member job is no longer running", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const jobs = yield* BackgroundJob.Service
+      const { chat, assistant } = yield* seed()
+      const tool = yield* DispatchTool
+      const def = yield* tool.init()
+      const gate = yield* Deferred.make<void>()
+      const calls: SessionPrompt.PromptInput[] = []
+      const promptOps: TaskPromptOps = {
+        cancel: () => Effect.void,
+        resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+        prompt: (input) =>
+          Effect.gen(function* () {
+            calls.push(input)
+            if (input.sessionID !== chat.id) yield* Deferred.await(gate)
+            return reply(input, "done")
+          }),
+      }
+
+      yield* def.execute(
+        { tasks: [{ agent: "general", description: "quiet", prompt: "be quiet" }], mode: "background" },
+        context({ chat, assistant, promptOps }),
+      )
+      const member = yield* pollWithTimeout(
+        sessions.children(chat.id).pipe(Effect.map((kids) => kids[0])),
+        "member session was not created",
+      )
+      yield* pollWithTimeout(
+        Effect.sync(() => watchdogInjections(calls, "stalled")[0]),
+        "watchdog did not report the quiet member",
+      )
+
+      yield* Deferred.succeed(gate, undefined)
+      const waited = yield* jobs.wait({ id: member.id, timeout: 2_000 })
+      expect(waited.info?.status).toBe("completed")
+
+      const count = watchdogInjections(calls, "stalled").length
+      yield* Effect.sleep("300 millis")
+      expect(watchdogInjections(calls, "stalled")).toHaveLength(count)
     }),
   )
 })

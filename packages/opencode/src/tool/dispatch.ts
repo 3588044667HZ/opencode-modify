@@ -10,17 +10,35 @@ import { deriveSubagentSessionPermission } from "../agent/subagent-permissions"
 import { Provider } from "../provider/provider"
 import type { TaskPromptOps } from "./task"
 import { Config } from "@/config/config"
+import { Permission } from "@/permission"
+import { RuntimeFlags } from "@/effect/runtime-flags"
 import { DateTime, Effect, Exit, Option, Ref, Schema, Scope, Semaphore } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Database } from "@opencode-ai/core/database/database"
 import { SessionEvent } from "@opencode-ai/schema/session-event"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
+import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 
 const id = "dispatch"
 const MAX_MEMBERS = 16
 const DEFAULT_CONCURRENCY = 4
 const MAX_TEAM_OUTPUT_BYTES = 64 * 1024
+const NOTIFICATION_RESULT_CHARS = 1400
+const NOTIFICATION_MAX_BYTES = 2 * 1024
+const WATCHDOG_MAX_BYTES = 512
+
+// Keyed `${sessionID}:${completed_at}` so a member completion is injected into the
+// parent at most once, even when multiple dispatches settle the same running job.
+const notifiedCompletions = new Set<string>()
+
+// PermissionV1.Request carries no creation timestamp, so the watchdog records when
+// it first saw each pending ask and drops entries once the ask disappears.
+const watchdogFirstSeen = new Map<string, number>()
+const watchdogNotifiedAsks = new Set<string>()
+// Keyed by member session; the value is the activity timestamp of the stall episode
+// already notified. Newer activity re-arms the check.
+const watchdogNotifiedStalls = new Map<string, number>()
 
 const Member = Schema.Struct({
   agent: Schema.String.annotate({ description: "The type of specialized agent to use for this task" }),
@@ -121,6 +139,8 @@ export const DispatchTool = Tool.define(
     const database = yield* Database.Service
     const events = yield* EventV2Bridge.Service
     const provider = yield* Provider.Service
+    const permissions = yield* Permission.Service
+    const flags = yield* RuntimeFlags.Service
 
     const run = Effect.fn("DispatchTool.execute")(function* (
       params: Schema.Schema.Type<typeof Parameters>,
@@ -344,6 +364,139 @@ export const DispatchTool = Tool.define(
         })
       }
 
+      const injectParent = Effect.fn("DispatchTool.injectParent")(function* (text: string) {
+        const currentParent = yield* sessions
+          .get(ctx.sessionID)
+          .pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+        if (!currentParent) return
+        yield* ops
+          .prompt({
+            sessionID: ctx.sessionID,
+            agent: currentParent.agent ?? ctx.agent,
+            variant: parentVariant,
+            parts: [{ type: "text", synthetic: true, text }],
+          })
+          .pipe(Effect.ignore, Effect.forkIn(scope, { startImmediately: true }))
+      })
+
+      const notifyCompletion = Effect.fn("DispatchTool.notifyCompletion")(function* (input: {
+        index: number
+        state: "completed" | "error"
+        completedAt: number | undefined
+        text: string
+        tokens?: number
+        elapsedMs?: number
+      }) {
+        if (input.completedAt === undefined) return
+        const entry = members[input.index]!
+        const key = `${entry.session.id}:${input.completedAt}`
+        const fresh = yield* Effect.sync(() => {
+          if (notifiedCompletions.has(key)) return false
+          notifiedCompletions.add(key)
+          return true
+        })
+        if (!fresh) return
+        yield* injectParent(
+          renderTeamUpdate({
+            team: teamLabel,
+            member: entry.session.id,
+            agent: entry.info.name,
+            name: entry.input.name,
+            state: input.state,
+            ...(input.tokens === undefined ? {} : { tokens: input.tokens }),
+            ...(input.elapsedMs === undefined ? {} : { elapsed: formatElapsed(input.elapsedMs) }),
+            text: input.text,
+          }),
+        )
+      })
+
+      const runWatchdog = Effect.fn("DispatchTool.watchdog")(function* () {
+        type WatchMember = { member: (typeof members)[number]; job: BackgroundJob.Info }
+
+        const checkMember = Effect.fn("DispatchTool.watchdogMember")(function* (
+          entry: WatchMember,
+          pending: readonly PermissionV1.Request[],
+          now: number,
+        ) {
+          const sessionID = entry.member.session.id
+          // list() preserves ask insertion order, so the first match is the oldest ask.
+          const waiting = pending.find((request) => request.sessionID === sessionID)
+          if (waiting) {
+            // While a member is blocked on a permission ask, report that state only;
+            // a stalled notice would duplicate the same signal.
+            if (!watchdogFirstSeen.has(waiting.id)) watchdogFirstSeen.set(waiting.id, now)
+            const firstSeen = watchdogFirstSeen.get(waiting.id) ?? now
+            if (now - firstSeen <= flags.teamWatchdogPermissionMs) return
+            if (watchdogNotifiedAsks.has(waiting.id)) return
+            watchdogNotifiedAsks.add(waiting.id)
+            yield* injectParent(
+              renderWatchdog({
+                member: sessionID,
+                agent: entry.member.info.name,
+                state: "waiting_permission",
+                detail: `ask="${waiting.id}" permission="${waiting.permission}" patterns="${waiting.patterns.join(",")}" waiting="${formatElapsed(now - firstSeen)}"`,
+                advice:
+                  'Approve or reject the pending permission, or stop the member with the team tool (op: "stop").',
+              }),
+            )
+            return
+          }
+
+          const messages = yield* sessions
+            .messages({ sessionID, limit: 1 })
+            .pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+          if (!messages) return
+          const message = messages.at(-1)
+          const part = message?.parts.at(-1)
+          const at = Math.max(
+            part ? (partTime(part) ?? 0) : 0,
+            message ? (messageTime(message) ?? 0) : 0,
+            // A member that has not written any part yet is quiet since its job started.
+            entry.job.started_at,
+          )
+          const notifiedAt = watchdogNotifiedStalls.get(sessionID)
+          if (notifiedAt !== undefined && at <= notifiedAt) return
+          if (now - at <= flags.teamWatchdogInactiveMs) return
+          watchdogNotifiedStalls.set(sessionID, at)
+          yield* injectParent(
+            renderWatchdog({
+              member: sessionID,
+              agent: entry.member.info.name,
+              state: "stalled",
+              detail: `quiet="${formatElapsed(now - at)}" last_activity="${part ? describePart(part) : "-"}"`,
+              advice:
+                'Member has produced no activity for a while. Check with team status, then stop it (op: "stop") or send guidance via agent_send.',
+            }),
+          )
+        })
+
+        while (true) {
+          const running = (
+            yield* Effect.forEach(members, (member) =>
+              background
+                .get(member.session.id)
+                .pipe(
+                  Effect.catchCause(() => Effect.succeed(undefined)),
+                  Effect.map((job): WatchMember | undefined =>
+                    job?.status === "running" ? { member, job } : undefined,
+                  ),
+                ),
+            )
+          ).filter((entry): entry is WatchMember => entry !== undefined)
+          if (running.length === 0) return
+          const pending = yield* permissions.list().pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+          const now = DateTime.toEpochMillis(yield* DateTime.now)
+          // Prune only on a successful listing; a failed query must not forget
+          // first-seen times for asks that are still waiting.
+          if (pending) {
+            const active = new Set<string>(pending.map((request) => request.id))
+            for (const ask of watchdogFirstSeen.keys()) if (!active.has(ask)) watchdogFirstSeen.delete(ask)
+          }
+          yield* Effect.forEach(running, (entry) => checkMember(entry, pending ?? [], now), { discard: true })
+          yield* Effect.sleep(`${flags.teamWatchdogIntervalMs} millis`)
+        }
+      })
+
       const settle = Effect.fn("DispatchTool.settleMember")(function* (index: number) {
         const entry = members[index]!
         const info = (yield* background.wait({ id: entry.session.id })).info
@@ -374,6 +527,16 @@ export const DispatchTool = Tool.define(
           yield* recordMember(index, "cancelled", "", "Member cancelled", stats)
         } else {
           yield* recordMember(index, "completed", info?.output ?? "", undefined, stats)
+        }
+        if (mode === "background" && info && (info.status === "completed" || info.status === "error")) {
+          yield* notifyCompletion({
+            index,
+            state: info.status,
+            completedAt: info.completed_at,
+            text: info.status === "error" ? (info.error ?? "Member failed") : (info.output ?? ""),
+            ...(stats.tokens === undefined ? {} : { tokens: stats.tokens }),
+            ...(elapsedMs === undefined ? {} : { elapsedMs }),
+          })
         }
         if (tokens <= 0) return
         const total = yield* Ref.updateAndGet(spent, (value) => value + tokens)
@@ -424,6 +587,7 @@ export const DispatchTool = Tool.define(
       }
 
       if (mode === "background") {
+        yield* runWatchdog().pipe(Effect.ignore, Effect.forkIn(scope, { startImmediately: true }))
         yield* Effect.forEach(members.map((_, index) => index), (index) => settle(index), { concurrency }).pipe(
           Effect.andThen(Ref.get(runtime).pipe(Effect.flatMap((states) => publishEnded(states)))),
           Effect.ignore,
@@ -524,4 +688,91 @@ function tokenTotal(tokens: Session.Info["tokens"]) {
     finite(tokens.cache?.read) +
     finite(tokens.cache?.write)
   )
+}
+
+function formatElapsed(ms: number) {
+  if (ms < 1000) return `${Math.max(0, Math.round(ms))}ms`
+  const seconds = Math.round(ms / 1000)
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return `${minutes}m`
+  return `${Math.round(minutes / 60)}h`
+}
+
+function clampTail(text: string, maxChars: number, maxBytes: number) {
+  const tail = text.length > maxChars ? text.slice(text.length - maxChars) : text
+  if (Buffer.byteLength(tail, "utf8") <= maxBytes) return tail
+  let slice = tail
+  while (slice.length > 0 && Buffer.byteLength(slice, "utf8") > maxBytes) slice = slice.slice(1)
+  return slice
+}
+
+function renderTeamUpdate(input: {
+  team: string
+  member: string
+  agent: string
+  name: string
+  state: "completed" | "error"
+  tokens?: number
+  elapsed?: string
+  text: string
+}) {
+  const tag = input.state === "error" ? "error" : "result"
+  const attrs = [
+    `team="${input.team}"`,
+    `member="${input.member}"`,
+    `agent="${input.agent}"`,
+    `name="${input.name}"`,
+    `state="${input.state}"`,
+    ...(input.tokens === undefined ? [] : [`tokens="${input.tokens}"`]),
+    ...(input.elapsed === undefined ? [] : [`elapsed="${input.elapsed}"`]),
+  ].join(" ")
+  const open = `<team_update ${attrs}>`
+  const close = `</team_update>`
+  const wrapper = `${open}\n<${tag}></${tag}>\n${close}`
+  const budget = Math.max(0, NOTIFICATION_MAX_BYTES - Buffer.byteLength(wrapper, "utf8"))
+  const body = clampTail(input.text, NOTIFICATION_RESULT_CHARS, budget)
+  return `${open}\n<${tag}>${body}</${tag}>\n${close}`
+}
+
+function renderWatchdog(input: {
+  member: string
+  agent: string
+  state: "waiting_permission" | "stalled"
+  detail: string
+  advice: string
+}) {
+  const text = [
+    `<team_watchdog member="${input.member}" agent="${input.agent}" state="${input.state}" ${input.detail}>`,
+    input.advice,
+    "</team_watchdog>",
+  ].join("\n")
+  if (Buffer.byteLength(text, "utf8") <= WATCHDOG_MAX_BYTES) return text
+  let slice = text
+  while (slice.length > 0 && Buffer.byteLength(slice, "utf8") > WATCHDOG_MAX_BYTES) slice = slice.slice(0, -1)
+  return slice
+}
+
+function describePart(part: SessionV1.Part): string {
+  if (part.type === "tool") return `tool:${part.tool}`
+  if (part.type === "text") return "text"
+  if (part.type === "reasoning") return "reasoning"
+  return part.type
+}
+
+function partTime(part: SessionV1.Part): number | undefined {
+  if (part.type === "text" || part.type === "reasoning") return part.time?.end ?? part.time?.start
+  if (part.type === "tool") {
+    if (part.state.status === "running") return part.state.time.start
+    if (part.state.status === "completed" || part.state.status === "error") return part.state.time.end
+    return undefined
+  }
+  if (part.type === "retry") return part.time.created
+  return undefined
+}
+
+function messageTime(message: SessionV1.WithParts): number | undefined {
+  const info = message.info
+  if (info.role === "assistant") return info.time.completed ?? info.time.created
+  return info.time.created
 }
