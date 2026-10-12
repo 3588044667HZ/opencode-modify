@@ -1,129 +1,194 @@
-<p align="center">
-  <a href="https://opencode.ai">
-    <picture>
-      <source srcset="packages/console/app/src/asset/logo-ornate-dark.svg" media="(prefers-color-scheme: dark)">
-      <source srcset="packages/console/app/src/asset/logo-ornate-light.svg" media="(prefers-color-scheme: light)">
-      <img src="packages/console/app/src/asset/logo-ornate-light.svg" alt="OpenCode logo">
-    </picture>
-  </a>
-</p>
-<p align="center">The open source AI coding agent.</p>
-<p align="center">
-  <a href="https://opencode.ai/discord"><img alt="Discord" src="https://img.shields.io/discord/1391832426048651334?style=flat-square&label=discord" /></a>
-  <a href="https://www.npmjs.com/package/opencode-ai"><img alt="npm" src="https://img.shields.io/npm/v/opencode-ai?style=flat-square" /></a>
-  <a href="https://github.com/anomalyco/opencode/actions/workflows/publish.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/anomalyco/opencode/publish.yml?style=flat-square&branch=dev" /></a>
-</p>
+# opencode-modify — Agent Teams 多智能体编排分支
 
-<p align="center">
-  <a href="README.md">English</a> |
-  <a href="README.zh.md">简体中文</a> |
-  <a href="README.zht.md">繁體中文</a> |
-  <a href="README.ko.md">한국어</a> |
-  <a href="README.de.md">Deutsch</a> |
-  <a href="README.es.md">Español</a> |
-  <a href="README.fr.md">Français</a> |
-  <a href="README.it.md">Italiano</a> |
-  <a href="README.da.md">Dansk</a> |
-  <a href="README.ja.md">日本語</a> |
-  <a href="README.pl.md">Polski</a> |
-  <a href="README.ru.md">Русский</a> |
-  <a href="README.bs.md">Bosanski</a> |
-  <a href="README.ar.md">العربية</a> |
-  <a href="README.no.md">Norsk</a> |
-  <a href="README.br.md">Português (Brasil)</a> |
-  <a href="README.th.md">ไทย</a> |
-  <a href="README.tr.md">Türkçe</a> |
-  <a href="README.uk.md">Українська</a> |
-  <a href="README.bn.md">বাংলা</a> |
-  <a href="README.gr.md">Ελληνικά</a> |
-  <a href="README.vi.md">Tiếng Việt</a>
-</p>
+> 基于 [opencode](https://github.com/anomalyco/opencode) 的私有实验分支：把「一个主 Agent 调度多个并行子 Agent」做成一等公民——派发、通信、共享状态、可观测、可干预，全部内建。
 
-[![OpenCode Terminal UI](packages/web/src/assets/lander/screenshot.png)](https://opencode.ai)
+这不是又一个 opencode 皮肤或发行版。本分支的定位是**多智能体编排（agent-teams）的试验场**：在保留 opencode 全部原有能力（TUI/桌面端、LSP、MCP、插件、会话管理……）的前提下，围绕"团队"补上一整套原版没有的运行时、工具与 UI。
+
+原版 README 及其翻译（`README.zh.md` 等）为上游文档，未同步本分支改动；本 README 取代原版作为入口。
 
 ---
 
-### Installation
+## 特性总览
 
-```bash
-# YOLO
-curl -fsSL https://opencode.ai/install | bash
+| 能力 | 工具 | 说明 |
+| --- | --- | --- |
+| 团队派发 | `dispatch` | 花名册/ad-hoc 并行子代理，join/background，并发上限、预算、续聊 |
+| 团队管理 | `team` | 成员状态快照与按需停止（单个/全队） |
+| 成员通信 | `agent_send` / `agent_inbox` | 会话树内消息投递与审计收件箱 |
+| 共享状态 | `blackboard` | 树内 KV，版本化 + CAS + append |
+| 生命周期通知 | 自动 | background 完成唤醒、等权限/停滞看门狗 |
+| 桌面 UI | 内建 | Agent Teams 独立窗口：Team / Blackboard / Inbox 面板 |
 
-# Package managers
-npm i -g opencode-ai@latest        # or bun/pnpm/yarn
-scoop install opencode             # Windows
-choco install opencode             # Windows
-brew install anomalyco/tap/opencode # macOS and Linux (recommended, always up to date)
-brew install opencode              # macOS and Linux (official brew formula, updated less)
-sudo pacman -S opencode            # Arch Linux (Stable)
-paru -S opencode-bin               # Arch Linux (Latest from AUR)
-mise use -g opencode               # Any OS
-nix run nixpkgs#opencode           # or github:anomalyco/opencode for latest dev branch
-```
-
-> [!TIP]
-> Remove versions older than 0.1.x before installing.
-
-### Desktop App (BETA)
-
-OpenCode is also available as a desktop application. Download directly from the [releases page](https://github.com/anomalyco/opencode/releases) or [opencode.ai/download](https://opencode.ai/download).
-
-| Platform              | Download                           |
-| --------------------- | ---------------------------------- |
-| macOS (Apple Silicon) | `opencode-desktop-mac-arm64.dmg`   |
-| macOS (Intel)         | `opencode-desktop-mac-x64.dmg`     |
-| Windows               | `opencode-desktop-windows-x64.exe` |
-| Linux                 | `.deb`, `.rpm`, or `.AppImage`     |
-
-```bash
-# macOS (Homebrew)
-brew install --cask opencode-desktop
-# Windows (Scoop)
-scoop bucket add extras; scoop install extras/opencode-desktop
-```
-
-#### Installation Directory
-
-The install script respects the following priority order for the installation path:
-
-1. `$OPENCODE_INSTALL_DIR` - Custom installation directory
-2. `$XDG_BIN_DIR` - XDG Base Directory Specification compliant path
-3. `$HOME/bin` - Standard user binary directory (if it exists or can be created)
-4. `$HOME/.opencode/bin` - Default fallback
-
-```bash
-# Examples
-OPENCODE_INSTALL_DIR=/usr/local/bin curl -fsSL https://opencode.ai/install | bash
-XDG_BIN_DIR=$HOME/.local/bin curl -fsSL https://opencode.ai/install | bash
-```
-
-### Agents
-
-OpenCode includes two built-in agents you can switch between with the `Tab` key.
-
-- **build** - Default, full-access agent for development work
-- **plan** - Read-only agent for analysis and code exploration
-  - Denies file edits by default
-  - Asks permission before running bash commands
-  - Ideal for exploring unfamiliar codebases or planning changes
-
-Also included is a **general** subagent for complex searches and multistep tasks.
-This is used internally and can be invoked using `@general` in messages.
-
-Learn more about [agents](https://opencode.ai/docs/agents).
-
-### Documentation
-
-For more info on how to configure OpenCode, [**head over to our docs**](https://opencode.ai/docs).
-
-### Contributing
-
-If you're interested in contributing to OpenCode, please read our [contributing docs](./CONTRIBUTING.md) before submitting a pull request.
-
-### Building on OpenCode
-
-If you are working on a project that's related to OpenCode and is using "opencode" as part of its name, for example "opencode-dashboard" or "opencode-mobile", please add a note to your README to clarify that it is not built by the OpenCode team and is not affiliated with us in any way.
+除此之外还有一批针对多代理场景的稳定性修复（见下文「稳定性修复」）。
 
 ---
 
-**Join our community** [Discord](https://discord.gg/opencode) | [X.com](https://x.com/opencode)
+## 架构
+
+```text
+                     ┌────────────────────────────────────────────┐
+                     │ Lead session（build / plan / 任意 primary） │
+                     │  dispatch · team · agent_send · blackboard │
+                     └───────────────┬────────────────────────────┘
+                                     │ dispatch(team|tasks, mode, concurrency, …)
+              ┌──────────────────────┼──────────────────────┐
+              ▼                      ▼                      ▼
+       ┌────────────┐         ┌────────────┐         ┌────────────┐
+       │ member  A  │         │ member  B  │   ...   │ member  N  │   子会话（独立上下文）
+       └─────┬──────┘         └─────┬──────┘         └─────┬──────┘
+             │  每成员一个 BackgroundJob（id = 子会话 ID，进程内、可取消）
+             └──────────────────────┬──────────────────────┘
+                                    ▼
+        agent_send / agent_inbox   会话树内消息（hop/体积/速率限制、可审计）
+        blackboard                 会话树内共享 KV（CAS、限额、durable 事件）
+        team status/stop           按需盘点与干预
+        completion wake · watchdog 主动通知（≤2KB 注入父会话）
+```
+
+---
+
+## 新功能详解
+
+### 1. `dispatch` — 团队派发
+
+- **花名册或即席组队**：`team` 参数读取 `opencode.json` 的 `team` 配置；`tasks` 直接传成员数组（1..16），两者同时给出时 `tasks` 覆盖。
+- **两种模式**：`mode: "join"`（默认）等待全部成员并聚合返回；`mode: "background"` 立即返回，成员完成时通知。
+- **真正的并发上限**：`concurrency`（默认 4，钳制 1..16，可被花名册 `max_parallel` 兜底）用信号量限制**同时运行**的成员数，而不是只限制等待。
+- **成员级控制**：
+  - `variant`：思考强度（如 `low`/`high`/`max`），在派发前按成员实际模型校验；
+  - `autonomy`：为该成员授权额外的外部目录，高风险路径直接拒绝并交人工确认；
+  - `budget_tokens`：团队累计 token 预算，超出后停止后续成员。
+- **续聊与追加**：`task_id` 传入成员子会话 ID 即可继续该成员；若它仍在运行，新指令会追加到当前轮之后，而不是被丢弃。
+- **聚合结果**：join 返回 `<team>` XML，每个 `<member>` 带 `id`（子会话 ID）、`agent`、`name`、`state`、结果或错误，以及实际命中的 `variant`、`tokens`、`elapsedMs`；`aggregate: "none"` 可只保留状态骨架。
+
+### 2. `team` — 团队管理（新增）
+
+- `op: "status"`：按需盘点当前会话的直接子成员（最多 32 条），每行含 `state`、当前 `activity`、静默时长 `quiet`、`waiting_permission` 计数、tokens、elapsed；传 `session_id` 可看单个成员的详情块（最后一段文本、待处理权限询问、最后一次工具调用）。输出整体 ≤2KB，可截断。
+- `op: "stop"`：停止单个成员或全部后代（`SessionRunState.cancel` 级联取消其后台 job 与待处理权限询问）。目标必须位于调用者会话树内；该操作会按 `team` 权限 key 请求授权。
+
+### 3. 生命周期通知（新增）
+
+- **完成唤醒**：background 模式下成员完成/失败时，父会话会收到一条 ≤2KB 的合成 `<team_update>`（状态、摘要、结果尾部、tokens/elapsed），完整结果留在成员会话，可用其 `session_id`（`task_id`）回读。同一 job 只通知一次。
+- **看门狗**：background 模式下，成员**等待权限**超过阈值或**长时间无活动**时，父会话会收到 ≤512B 的 `<team_watchdog>` 提醒（附带操作建议：批准/拒绝、`team op=stop`、`agent_send` 干预）。同一权限询问、同一停滞区间只提醒一次。阈值可通过环境变量调整：
+
+  | 环境变量 | 默认 |
+  | --- | --- |
+  | `OPENCODE_EXPERIMENTAL_TEAM_WATCHDOG_INTERVAL_MS` | `60000` |
+  | `OPENCODE_EXPERIMENTAL_TEAM_WATCHDOG_PERMISSION_MS` | `300000` |
+  | `OPENCODE_EXPERIMENTAL_TEAM_WATCHDOG_INACTIVE_MS` | `600000` |
+
+### 4. `agent_send` / `agent_inbox` — 成员通信
+
+- 目标限同一会话树：子会话 ID、`"parent"` 或 `"root"`；自投递与跨树投递被拒绝。
+- **异步投递**：消息先写入 mailbox 审计，再由独立 fiber 投递——发送者永远不会被阻塞（修复了子代理与主代理互等导致的死锁）。
+- 运行中的目标在下一个安全边界把消息作为 steer 消费；空闲目标默认唤醒（`agent_message.wake_idle: false` 可改为排队，待其下次运行注入）。
+- 限制可配：`max_hop`（默认 8）、`max_body_bytes`（默认 8192）、`max_per_minute`（默认 20）。
+- `agent_inbox` 读取本会话的 mailbox 审计记录。
+
+### 5. `blackboard` — 共享黑板
+
+- 会话树作用域的单工具 KV：`put`（`set`/`append`）、`get`、`list`、`delete`，`if_version` 实现乐观并发（CAS）。
+- 限额：单值默认 64KB、单树默认 256 键；变更发布 durable 事件，UI/其他成员可订阅。
+- 成员任务提示中会自动附带黑板可用说明；key 约定由 lead 在任务中给出。
+
+### 6. 权限与提示词
+
+- 新增 `dispatch`、`team` 等权限 key；子代理默认拒绝 `dispatch`，可按 agent 显式放开（用于"子专家团"）。
+- 成员权限从父会话派生；`autonomy` 授权会校验高风险路径。
+- 提示词按需注入：`<team_delegation>` 只发给能派发的主代理；`dispatch` 工具描述动态列出已配置花名册——不会给子代理增加无关上下文。
+
+### 7. 桌面端 UI
+
+- **Agent Teams 独立窗口**（桌面端默认开启）：Team 面板（成员列表、状态圆点、当前 activity、tokens/elapsed/variant、点击打开成员会话）、Blackboard 面板、Inbox 面板。
+- 采用事件刷新 + 轮询双通道与 reconcile-by-key 渲染，避免列表闪烁。
+- 子会话窗口顶部有运行详情条（当前模型、状态、耗时）。
+
+### 8. 稳定性修复
+
+- `agent_send` 不再阻塞发送者（根因：`Runner.ensureRunning` 在目标忙碌时等待其当前轮次）。
+- `dispatch` 并发上限真正生效；对运行中成员 `task_id` 续聊不再丢 prompt。
+- shell 工具超时/中止时，终止失败（进程刚好退出、taskkill 报错等）不再把整个工具调用变成错误并丢弃已捕获输出；终止等待有上限。
+
+---
+
+## 配置
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  // 允许成员再派发一层（默认 1：子代理不能再派发）
+  "subagent_depth": 2,
+  "team": {
+    "alpha": {
+      "description": "示例花名册",
+      "max_parallel": 4,
+      "aggregate": "concat",
+      "members": [
+        { "agent": "general", "role": "implementer", "variant": "high" },
+        { "agent": "explore", "prompt": "只做侦查并回报结论" }
+      ]
+    }
+  },
+  "agent_message": { "max_hop": 8, "max_body_bytes": 8192, "max_per_minute": 20, "wake_idle": true },
+  "blackboard": { "max_value_bytes": 65536, "max_keys": 256 }
+}
+```
+
+开关（CLI 默认关闭，桌面端默认开启）：
+
+| 环境变量 | 作用 |
+| --- | --- |
+| `OPENCODE_EXPERIMENTAL_AGENT_TEAMS` | 注册 `dispatch`/`team`/`agent_send`/`agent_inbox`/`blackboard` 与团队提示词 |
+| `OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS` | 打开 `task` 工具的后台模式 |
+| `OPENCODE_EXPERIMENTAL` | 一次开启全部实验特性（含以上） |
+
+---
+
+## 快速开始（源码运行）
+
+本仓库为私有分支，不通过 npm 分发：
+
+```bash
+bun install
+bun dev            # CLI（TUI）
+bun dev:desktop    # 桌面端（agent-teams UI 默认开启）
+bun dev:web        # Web 版
+```
+
+测试（必须在包目录内运行，禁止从仓库根运行）：
+
+```bash
+cd packages/opencode
+bun typecheck
+bun test --timeout 30000 test/tool/dispatch.test.ts
+bun test --timeout 30000 test/tool/team.test.ts
+bun test --timeout 30000 test/tool/agent-send.test.ts test/session/collaboration.test.ts
+```
+
+---
+
+## 仓库结构
+
+| 路径 | 内容 |
+| --- | --- |
+| `packages/opencode` | 核心运行时、会话、工具（`dispatch`/`team`/`agent_send`/`agent_inbox`/`blackboard`…） |
+| `packages/core` | 服务层：`BackgroundJob`、mailbox、blackboard 存储、配置 schema |
+| `packages/app`、`packages/desktop` | Web/桌面 UI（Agent Teams 窗口与面板） |
+| `packages/schema`、`packages/session-ui` | 事件协议与共享会话 UI |
+| `specs/` | 中文设计文档（见下） |
+
+## 设计文档
+
+- `specs/agent-teams.md` — 团队派发/消息/黑板的总体设计
+- `specs/agent-teams-management.md` — `team` 工具、完成唤醒、看门狗与上下文预算
+- `specs/agent-teams-permissions.md` — 团队场景的权限模型
+- `specs/agent-teams-prompt-awareness.md` — 提示词注入策略
+- `specs/agent-teams-backlog.md` — 后续计划（任务板、广播、成员超时等）
+
+---
+
+## 与上游的关系
+
+- 上游项目：[opencode](https://github.com/anomalyco/opencode)（官网 [opencode.ai](https://opencode.ai)）。本分支为个人私有实验分支，默认工作在 `dev`。
+- 上游全部语言版 README（`README.zh.md`、`README.ja.md`…）保持原样，仅作参考；本 README 为本分支的权威说明。
+- 许可：沿用上游 [MIT License](LICENSE)。
