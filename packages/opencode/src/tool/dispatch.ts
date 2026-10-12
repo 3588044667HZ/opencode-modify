@@ -10,7 +10,7 @@ import { deriveSubagentSessionPermission } from "../agent/subagent-permissions"
 import { Provider } from "../provider/provider"
 import type { TaskPromptOps } from "./task"
 import { Config } from "@/config/config"
-import { DateTime, Effect, Exit, Option, Ref, Schema, Scope } from "effect"
+import { DateTime, Effect, Exit, Option, Ref, Schema, Scope, Semaphore } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Database } from "@opencode-ai/core/database/database"
@@ -232,6 +232,9 @@ export const DispatchTool = Tool.define(
       const aggregate = params.aggregate ?? teamConfig?.aggregate ?? "concat"
       const mode = params.mode ?? "join"
       const concurrency = clamp(params.concurrency ?? teamConfig?.max_parallel ?? DEFAULT_CONCURRENCY, 1, MAX_MEMBERS)
+      // Actually cap how many members run at once; without this every member
+      // starts immediately and `concurrency` would only bound settle waiting.
+      const permits = Semaphore.makeUnsafe(concurrency)
 
       const writeMetadata = Effect.fn("DispatchTool.writeMetadata")(function* () {
         const states = yield* Ref.get(runtime)
@@ -325,12 +328,19 @@ export const DispatchTool = Tool.define(
         })
 
       for (const [index, entry] of members.entries()) {
+        const run = permits
+          .withPermits(1)(runMember(index))
+          .pipe(Effect.onInterrupt(() => ops.cancel(entry.session.id)))
+        // A resumed member (`task_id`) may still be running; append the new
+        // prompt after its current turn instead of dropping it (plain
+        // `background.start` returns the running job without running the work).
+        if (yield* background.extend({ id: entry.session.id, run })) continue
         yield* background.start({
           id: entry.session.id,
           type: id,
           title: entry.input.description,
           metadata: { parentSessionId: ctx.sessionID, sessionId: entry.session.id },
-          run: runMember(index).pipe(Effect.onInterrupt(() => ops.cancel(entry.session.id))),
+          run,
         })
       }
 

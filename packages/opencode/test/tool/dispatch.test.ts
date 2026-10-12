@@ -3,7 +3,7 @@ import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Database } from "@opencode-ai/core/database/database"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
-import { Cause, Effect, Exit, Layer } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Ref } from "effect"
 import { Agent } from "../../src/agent/agent"
 import { BackgroundJob } from "@/background/job"
 import { EventV2Bridge } from "@/event-v2-bridge"
@@ -23,7 +23,7 @@ import { Truncate } from "@/tool/truncate"
 import { ToolRegistry } from "@/tool/registry"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { disposeAllInstances } from "../fixture/fixture"
-import { testEffect } from "../lib/effect"
+import { pollWithTimeout, testEffect } from "../lib/effect"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { FSUtil } from "@opencode-ai/core/fs-util"
@@ -631,6 +631,104 @@ describe("tool.dispatch", () => {
 
       expect(seen).toHaveLength(1)
       expect(seen[0]?.variant).toBeUndefined()
+    }),
+  )
+
+  it.instance("caps concurrently running members at concurrency", () =>
+    Effect.gen(function* () {
+      const { chat, assistant } = yield* seed()
+      const tool = yield* DispatchTool
+      const def = yield* tool.init()
+      const state = yield* Ref.make({ active: 0, started: 0, max: 0 })
+      const release = yield* Deferred.make<void>()
+      const promptOps: TaskPromptOps = {
+        cancel: () => Effect.void,
+        resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+        prompt: (input) =>
+          Effect.gen(function* () {
+            yield* Ref.update(state, (s) => ({
+              active: s.active + 1,
+              started: s.started + 1,
+              max: Math.max(s.max, s.active + 1),
+            }))
+            yield* Deferred.await(release)
+            yield* Ref.update(state, (s) => ({ ...s, active: s.active - 1 }))
+            return reply(input, "done")
+          }),
+      }
+
+      const fiber = yield* def
+        .execute({ tasks, concurrency: 2 }, context({ chat, assistant, promptOps }))
+        .pipe(Effect.forkChild)
+
+      const blocked = yield* pollWithTimeout(
+        Effect.gen(function* () {
+          const snapshot = yield* Ref.get(state)
+          return snapshot.active === 2 ? snapshot : undefined
+        }),
+        "members did not reach the concurrency cap",
+      )
+      expect(blocked.started).toBe(2)
+
+      yield* Deferred.succeed(release, undefined)
+      const result = yield* Fiber.join(fiber)
+      const final = yield* Ref.get(state)
+      expect(final.started).toBe(3)
+      expect(final.max).toBe(2)
+      expect(result.output).toContain(`state="completed"`)
+    }),
+  )
+
+  it.instance("delivers a resume prompt into a running member job", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const jobs = yield* BackgroundJob.Service
+      const { chat, assistant } = yield* seed()
+      const existing = yield* sessions.create({ parentID: chat.id, title: "existing" })
+      const tool = yield* DispatchTool
+      const def = yield* tool.init()
+      const gate = yield* Deferred.make<void>()
+      const prompts: string[] = []
+      const promptOps: TaskPromptOps = {
+        cancel: () => Effect.void,
+        resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+        prompt: (input) =>
+          Effect.gen(function* () {
+            const text = input.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("")
+            prompts.push(text)
+            if (text.includes("first run")) yield* Deferred.await(gate)
+            return reply(input, "done")
+          }),
+      }
+
+      yield* def.execute(
+        {
+          tasks: [{ agent: "general", description: "first", prompt: "first run", task_id: existing.id }],
+          mode: "background",
+        },
+        context({ chat, assistant, promptOps }),
+      )
+      yield* pollWithTimeout(
+        Effect.sync(() => (prompts.length >= 1 ? true : undefined)),
+        "first member run did not start",
+      )
+
+      yield* def.execute(
+        {
+          tasks: [{ agent: "general", description: "resume", prompt: "follow up", task_id: existing.id }],
+          mode: "background",
+        },
+        context({ chat, assistant, promptOps }),
+      )
+
+      yield* Deferred.succeed(gate, undefined)
+      yield* pollWithTimeout(
+        Effect.sync(() => (prompts.some((text) => text.includes("follow up")) ? true : undefined)),
+        "resume prompt was not delivered",
+      )
+
+      const waited = yield* jobs.wait({ id: existing.id, timeout: 2_000 })
+      expect(waited.info?.status).toBe("completed")
     }),
   )
 })

@@ -128,8 +128,8 @@
 
 1. 深度检查：与 `task.ts:104-117` 相同（沿 `parentID` 上行计数，`>= cfg.subagent_depth ?? 1` 拒绝；报错文案指向 `subagent_depth`）。
 2. 逐条 `sessions.create({ parentID: ctx.sessionID, title: \`${description} (@${agent} subagent)\`, agent, permission: ... })`——**标题必须沿用 `(@${agent} subagent)` 后缀约定**：desktop 会剥离该后缀显示子会话标题（`app/.../message-timeline.tsx:317-331`），并据此把子会话挂回父会话的 task/dispatch 工具卡（`session-ui/.../message-part.tsx:591-605` `taskSession()` 按 `title.startsWith(description)` + `@agent` 匹配）。team 名等信息放 metadata，破坏该约定的标题会导致 desktop 上点不开成员会话。权限派生直接复用 `task.ts:139-172` 的逻辑，建议抽取共享函数 `createSubagentSession()` 到 `tool/subagent.ts`，`task.ts` 与 `dispatch.ts` 都改调它（小重构，行为不变）。
-3. 执行：对每个成员 `BackgroundJob.start({ id: childSession.id, type: "dispatch", run: runMember() })`；`runMember` 与 `task.ts:200-225` 的 `runTask` 相同（`ops.prompt` → 终答文本提取 → 错误面）。
-4. 等待：`mode=join` 用 `Effect.forEach(concurrency)` 并发等待全部 `background.wait`；`mode=background` 立即返回，每个成员结束时走 `injectBackgroundResult` 同款 notify 注入回父会话（结果流式回父）。
+3. 执行：`concurrency`（`params.concurrency ?? teamConfig.max_parallel`，钳制 1..16）用 `Semaphore.makeUnsafe(concurrency)` 真正限制同时运行的成员数（`runMember` 外层 `withPermits`），而不是仅限制 settle 等待并发。每个成员优先 `BackgroundJob.extend`：若该会话已有运行中的 job（用 `task_id` 追一个仍在运行的成员）则把新 prompt 追加到当前轮之后；否则 `BackgroundJob.start({ id: childSession.id, type: "dispatch", run: runMember() })`。
+4. 等待：`mode=join` 用 `Effect.forEach(concurrency)` 并发等待全部 `background.wait`；`mode=background` 立即返回，成员结束只更新 metadata 与发 `Team.MemberEnded` 事件，**不会主动注入/唤醒父会话**（要结果需 `task_id` 追问，或看面板/inbox）。
 5. 取消：工具被中断时对全部成员会话 `cancel + background.cancel`（`task.ts:328-358` 的 acquireUseRelease 模式批量版）。
 6. 元数据：`ctx.metadata({ title, metadata: { team, members: [{ sessionID, agent, name, state, variant?, tokens?, elapsedMs? }] } })`，每成员状态变化更新一次（供 UI 状态展示）；`variant` 是成员实际命中的 variant（从成员会话首条 prompt 回读，回退到 dispatch 转发值），`tokens` 取成员会话累计 token（≤0 省略），`elapsedMs` 取后台 job 的 `completed_at - started_at`。
 
