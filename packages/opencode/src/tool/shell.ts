@@ -446,6 +446,7 @@ export const ShellTool = Tool.define(
       let cut = false
       let expired = false
       let aborted = false
+      let killFailed = false
 
       const closeSink = Effect.fnUntraced(function* () {
         const stream = sink
@@ -545,13 +546,25 @@ export const ShellTool = Tool.define(
             timeout.pipe(Effect.map(() => ({ kind: "timeout" as const, code: null }))),
           ])
 
+          // 终止失败（进程刚好退出、taskkill 报错等）不能让整个工具调用报错并丢掉已采集的输出；
+          // 终止等待也必须有上限，避免 kill 本身挂住工具调用。
+          const terminate = Effect.gen(function* () {
+            const running = yield* handle.isRunning
+            if (!running) return true
+            return yield* handle.kill({ forceKillAfter: "3 seconds" }).pipe(
+              Effect.as(true),
+              Effect.timeoutOrElse({ duration: "10 seconds", orElse: () => Effect.succeed(false) }),
+              Effect.catchCause(() => Effect.succeed(false)),
+            )
+          })
+
           if (exit.kind === "abort") {
             aborted = true
-            yield* handle.kill({ forceKillAfter: "3 seconds" }).pipe(Effect.orDie)
+            if (!(yield* terminate)) killFailed = true
           }
           if (exit.kind === "timeout") {
             expired = true
-            yield* handle.kill({ forceKillAfter: "3 seconds" }).pipe(Effect.orDie)
+            if (!(yield* terminate)) killFailed = true
           }
 
           return exit.kind === "exit" ? exit.code : null
@@ -565,6 +578,7 @@ export const ShellTool = Tool.define(
         )
       }
       if (aborted) meta.push("User aborted the command")
+      if (killFailed) meta.push("Failed to terminate the command process tree; it may still be running.")
       const raw = list.map((item) => item.text).join("")
       const end = tail(raw, limits.maxLines, limits.maxBytes)
       if (end.cut) cut = true
