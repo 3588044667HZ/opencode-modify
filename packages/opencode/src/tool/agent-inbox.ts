@@ -6,7 +6,9 @@ import { Effect, Schema } from "effect"
 const id = "agent_inbox"
 
 export const Parameters = Schema.Struct({
-  unread_only: Schema.optional(Schema.Boolean).annotate({ description: "Only return messages not yet read (reserved)" }),
+  unread_only: Schema.optional(Schema.Boolean).annotate({
+    description: "Only return messages not yet admitted into this session (status queued)",
+  }),
   limit: Schema.optional(Schema.Number).annotate({ description: "Maximum number of messages to return (default 50)" }),
 })
 
@@ -19,7 +21,11 @@ export const AgentInboxTool = Tool.define(
       params: Schema.Schema.Type<typeof Parameters>,
       ctx: Tool.Context,
     ) {
-      const messages = yield* mailbox.list({ sessionID: ctx.sessionID, limit: params.limit })
+      const messages = yield* mailbox.list({
+        sessionID: ctx.sessionID,
+        unreadOnly: params.unread_only,
+        limit: params.limit,
+      })
       return {
         title: "agent inbox",
         metadata: { count: messages.length },

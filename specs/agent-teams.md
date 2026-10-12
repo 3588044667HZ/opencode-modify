@@ -178,7 +178,7 @@
 复用现有 synthetic 注入（`task.ts:227-254` 同款）：`agent_send` 工具拿到 `ctx.extra.promptOps`，向目标会话执行：
 
 ```ts
-ops.prompt({
+ops.enqueue({
   sessionID: targetSessionID,
   agent: targetAgentName,                 // 从目标 session 读取 agent 字段
   variant: 目标会话当前 variant,           // 与 task.ts:179 同样的读取方式
@@ -186,10 +186,10 @@ ops.prompt({
 })
 ```
 
-- **运行中的目标**：`SessionRunState`/`SessionRunCoordinator` 的 wake 合并语义保证在下一安全边界被消费（等价 steer）。
-- **空闲的目标**：`prompt` 唤醒一次 run（等价 queue+wake）；若评审倾向“不默认唤醒”，加参数 `wake: false`（仅当目标 active 时投递，否则拒回 `TLB_ACCEPT_QUEUE_LATER` 类错误——P2 用 inbox 表承接）。
+- **队列入队（Phase D）**：消息一律先落 mailbox（`status: "queued"`），随后 `ops.enqueue` 异步入队；`SessionPrompt.enqueue` = `admit` + `Runner.requestRun`——目标空闲立即起 run，目标忙碌则挂入 runner 的 pending 槽，当前 run 收尾后自动排水，不依赖用户下一条消息。投递成功（消息进入目标会话）后把 mailbox 行标 `delivered`；失败保持 `queued`，由 `SessionPeers.apply` 在目标下次运行时注入（`pullQueued` 会将其标 `delivered`）。
+- **`wake_idle` 语义**：仅对空闲目标生效；忙碌目标始终按 steer 等价接收，不受该配置影响。
 - **禁止自投递**：目标是发送方自身时直接拒绝（自指必然死锁）。
-- **投递不等待目标轮次**：`ops.prompt` 在工具 scope 内 `forkIn` 后台执行，工具写入 mailbox 审计行后立即返回。若同步等待目标 run（`Runner.ensureRunning` 在目标 Running 时只 await 当前 run），会形成永久死锁：典型是 lead 在 `task`/`dispatch` join 中等待子 agent，子 agent 发消息给 lead 时双方互等。运行中的目标会在下一安全边界把消息当 steer 消费，空闲目标由后台 fiber 启动新 run。
+- **投递不等待目标轮次**：`ops.enqueue` 在工具 scope 内 `forkIn` 后台执行，工具写入 mailbox 审计行后立即返回。若同步等待目标 run（`Runner.ensureRunning` 在目标 Running 时只 await 当前 run），会形成永久死锁：典型是 lead 在 `task`/`dispatch` join 中等待子 agent，子 agent 发消息给 lead 时双方互等。`requestRun` 的 pending 槽保证消息在目标当前轮次结束后一定被处理。
 - 消息信封（纯文本，模型可读、用户可见）：
 
 ```

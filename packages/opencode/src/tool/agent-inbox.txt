@@ -5,4 +5,4 @@ Use this to review what other agents in the session tree have sent you, for exam
 Usage notes:
 1. Results are ordered newest first and include the sender session, kind, and hop count.
 2. `limit` caps the returned messages (default 50).
-3. `unread_only` is reserved for future read-tracking and currently returns recent messages.
+3. `unread_only` returns only messages recorded but not yet admitted into this session (status `queued`). Once a message is admitted it counts as read.

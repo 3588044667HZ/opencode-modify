@@ -46,6 +46,8 @@ export interface Interface {
   readonly lastHop: (sessionID: SessionID) => Effect.Effect<number, Error>
   /** Atomically pulls queued messages for a session and marks them delivered. */
   readonly pullQueued: (sessionID: SessionID) => Effect.Effect<Message[], Error>
+  /** Updates the status of one message. */
+  readonly mark: (id: string, status: string) => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionMailbox") {}
@@ -173,7 +175,16 @@ const layer = Layer.effect(
       return row?.hop ?? 0
     })
 
-    return Service.of({ record, list, lastHop, pullQueued })
+    const mark: Interface["mark"] = Effect.fn("Mailbox.mark")(function* (id, status) {
+      yield* db
+        .update(AgentMessageTable)
+        .set({ status })
+        .where(eq(AgentMessageTable.id, id))
+        .run()
+        .pipe(Effect.orDie, Effect.asVoid)
+    })
+
+    return Service.of({ record, list, lastHop, pullQueued, mark })
   }),
 )
 

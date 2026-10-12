@@ -129,7 +129,9 @@ ses_c failed reason="not a descendant of this session"
 error 时用 `<error>...</error>` 替代 `<result>`（错误信息尾部同样截断）。
 
 - 去重：模块级 `Set<string>`，键 `${sessionID}:${completed_at}`；`background.wait` 返回的 `info.completed_at` 缺失时不注入（避免竞态重复）。
-- 更新 `dispatch.txt` 第 4 条：明确 background 完成会向父会话注入 ≤2 KB 摘要；完整结果仍可用 `task_id` 取。
+- **双通道（Phase D）**：通知先落 mailbox（`fromSessionID` = 成员会话，`kind: "note"`，`body` = 注入文本，`status: "queued"`），再 `ops.enqueue` 入队父会话；入队成功标 `delivered`，失败保持 `queued` 待父会话下次运行由 `SessionPeers.apply` 注入。`agent_inbox` 可见，`unread_only` 只列未注入的行。
+- **中断解耦（Phase D）**：join/background 的工具中断或 `ctx.abort` 只停止等待与聚合，不再取消成员；成员继续运行，完成时照常落库+注入。显式停止只来自 `team op=stop` 或 `budget_tokens` 命中。
+- 更新 `dispatch.txt` 第 4 条：明确 background 完成会向父会话注入 ≤2 KB 摘要并写父会话 inbox；完整结果仍可用 `task_id` 取。
 
 ### 4.3 成员看门狗
 

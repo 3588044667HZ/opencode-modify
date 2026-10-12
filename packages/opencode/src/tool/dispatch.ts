@@ -1,6 +1,7 @@
 import * as Tool from "./tool"
 import DESCRIPTION from "./dispatch.txt"
 import { BackgroundJob } from "@/background/job"
+import { Mailbox } from "@/session/mailbox"
 import { Session } from "@/session/session"
 import { SessionID, MessageID } from "../session/schema"
 import { MessageV2 } from "../session/message-v2"
@@ -12,8 +13,7 @@ import type { TaskPromptOps } from "./task"
 import { Config } from "@/config/config"
 import { Permission } from "@/permission"
 import { RuntimeFlags } from "@/effect/runtime-flags"
-import { DateTime, Effect, Exit, Option, Ref, Schema, Scope, Semaphore } from "effect"
-import { EffectBridge } from "@/effect/bridge"
+import { DateTime, Deferred, Effect, Fiber, Option, Ref, Schema, Scope, Semaphore } from "effect"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Database } from "@opencode-ai/core/database/database"
 import { SessionEvent } from "@opencode-ai/schema/session-event"
@@ -136,6 +136,7 @@ export const DispatchTool = Tool.define(
     const config = yield* Config.Service
     const sessions = yield* Session.Service
     const scope = yield* Scope.Scope
+    const mailbox = yield* Mailbox.Service
     const database = yield* Database.Service
     const events = yield* EventV2Bridge.Service
     const provider = yield* Provider.Service
@@ -336,7 +337,9 @@ export const DispatchTool = Tool.define(
                 : item,
             ),
           )
-          yield* writeMetadata()
+          // The tool call may already be over (detached members settle later), so
+          // streaming metadata updates can fail; the event below must still ship.
+          yield* writeMetadata().pipe(Effect.catchCause(() => Effect.void))
           yield* events.publish(SessionEvent.Team.MemberEnded, {
             timestamp: yield* DateTime.now,
             sessionID: members[index]!.session.id,
@@ -364,19 +367,43 @@ export const DispatchTool = Tool.define(
         })
       }
 
-      const injectParent = Effect.fn("DispatchTool.injectParent")(function* (text: string) {
-        const currentParent = yield* sessions
-          .get(ctx.sessionID)
-          .pipe(Effect.catchCause(() => Effect.succeed(undefined)))
-        if (!currentParent) return
-        yield* ops
-          .prompt({
+      // Completion and watchdog signals use two channels: a durable mailbox row
+      // (status queued until the resume prompt is admitted) and an async enqueue
+      // into the parent session. The fork lives in the tool scope so it survives
+      // the dispatch tool call ending; a failed enqueue leaves the row queued for
+      // the next drain.
+      const notifyParent = Effect.fn("DispatchTool.notifyParent")(function* (
+        text: string,
+        member: { sessionID: SessionID; agent: string },
+      ) {
+        const messageID = MessageID.ascending()
+        yield* mailbox.record({
+          id: messageID,
+          fromSessionID: member.sessionID,
+          fromAgent: member.agent,
+          toSessionID: ctx.sessionID,
+          kind: "note",
+          body: text,
+          hop: 0,
+          status: "queued",
+        })
+        yield* Effect.gen(function* () {
+          const currentParent = yield* sessions.get(ctx.sessionID)
+          yield* ops.enqueue({
             sessionID: ctx.sessionID,
             agent: currentParent.agent ?? ctx.agent,
             variant: parentVariant,
             parts: [{ type: "text", synthetic: true, text }],
           })
-          .pipe(Effect.ignore, Effect.forkIn(scope, { startImmediately: true }))
+          yield* mailbox.mark(messageID, "delivered")
+        }).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("dispatch: failed to enqueue parent notification; mailbox row left queued", {
+              error: String(cause),
+            }),
+          ),
+          Effect.forkIn(scope, { startImmediately: true }),
+        )
       })
 
       const notifyCompletion = Effect.fn("DispatchTool.notifyCompletion")(function* (input: {
@@ -396,7 +423,7 @@ export const DispatchTool = Tool.define(
           return true
         })
         if (!fresh) return
-        yield* injectParent(
+        yield* notifyParent(
           renderTeamUpdate({
             team: teamLabel,
             member: entry.session.id,
@@ -407,6 +434,7 @@ export const DispatchTool = Tool.define(
             ...(input.elapsedMs === undefined ? {} : { elapsed: formatElapsed(input.elapsedMs) }),
             text: input.text,
           }),
+          { sessionID: entry.session.id, agent: entry.info.name },
         )
       })
 
@@ -429,7 +457,7 @@ export const DispatchTool = Tool.define(
             if (now - firstSeen <= flags.teamWatchdogPermissionMs) return
             if (watchdogNotifiedAsks.has(waiting.id)) return
             watchdogNotifiedAsks.add(waiting.id)
-            yield* injectParent(
+            yield* notifyParent(
               renderWatchdog({
                 member: sessionID,
                 agent: entry.member.info.name,
@@ -438,6 +466,7 @@ export const DispatchTool = Tool.define(
                 advice:
                   'Approve or reject the pending permission, or stop the member with the team tool (op: "stop").',
               }),
+              { sessionID, agent: entry.member.info.name },
             )
             return
           }
@@ -458,7 +487,7 @@ export const DispatchTool = Tool.define(
           if (notifiedAt !== undefined && at <= notifiedAt) return
           if (now - at <= flags.teamWatchdogInactiveMs) return
           watchdogNotifiedStalls.set(sessionID, at)
-          yield* injectParent(
+          yield* notifyParent(
             renderWatchdog({
               member: sessionID,
               agent: entry.member.info.name,
@@ -467,6 +496,7 @@ export const DispatchTool = Tool.define(
               advice:
                 'Member has produced no activity for a while. Check with team status, then stop it (op: "stop") or send guidance via agent_send.',
             }),
+            { sessionID, agent: entry.member.info.name },
           )
         })
 
@@ -495,55 +525,6 @@ export const DispatchTool = Tool.define(
           yield* Effect.forEach(running, (entry) => checkMember(entry, pending ?? [], now), { discard: true })
           yield* Effect.sleep(`${flags.teamWatchdogIntervalMs} millis`)
         }
-      })
-
-      const settle = Effect.fn("DispatchTool.settleMember")(function* (index: number) {
-        const entry = members[index]!
-        const info = (yield* background.wait({ id: entry.session.id })).info
-        const session = yield* sessions
-          .get(entry.session.id)
-          .pipe(Effect.catchCause(() => Effect.succeed(undefined)))
-        const tokens = tokenTotal(session?.tokens)
-        const elapsedMs =
-          info && info.completed_at !== undefined ? Math.max(0, info.completed_at - info.started_at) : undefined
-        // Report the variant the member actually ran with, read back from its
-        // first persisted prompt, falling back to what dispatch forwarded.
-        const applied = yield* sessions
-          .findMessage(entry.session.id, (m) => m.info.role === "user" && !!m.info.model)
-          .pipe(Effect.catchCause(() => Effect.succeed(Option.none<SessionV1.WithParts>())))
-        const declaredVariant = entry.input.variant === "default" ? undefined : entry.input.variant
-        const variant =
-          (Option.isSome(applied) && applied.value.info.role === "user" ? applied.value.info.model.variant : undefined) ??
-          declaredVariant ??
-          (entry.info.model ? undefined : parentVariant)
-        const stats = {
-          ...(tokens > 0 ? { tokens } : {}),
-          ...(elapsedMs === undefined ? {} : { elapsedMs }),
-          ...(variant === undefined ? {} : { variant }),
-        }
-        if (info?.status === "error") {
-          yield* recordMember(index, "error", "", info.error ?? "Member failed", stats)
-        } else if (info?.status === "cancelled") {
-          yield* recordMember(index, "cancelled", "", "Member cancelled", stats)
-        } else {
-          yield* recordMember(index, "completed", info?.output ?? "", undefined, stats)
-        }
-        if (mode === "background" && info && (info.status === "completed" || info.status === "error")) {
-          yield* notifyCompletion({
-            index,
-            state: info.status,
-            completedAt: info.completed_at,
-            text: info.status === "error" ? (info.error ?? "Member failed") : (info.output ?? ""),
-            ...(stats.tokens === undefined ? {} : { tokens: stats.tokens }),
-            ...(elapsedMs === undefined ? {} : { elapsedMs }),
-          })
-        }
-        if (tokens <= 0) return
-        const total = yield* Ref.updateAndGet(spent, (value) => value + tokens)
-        if (budget === undefined || total <= budget) return
-        if (yield* Ref.get(budgetHit)) return
-        yield* Ref.set(budgetHit, true)
-        yield* cancelAll
       })
 
       const cancelAll = Effect.all(
@@ -586,53 +567,135 @@ export const DispatchTool = Tool.define(
         return text.length > MAX_TEAM_OUTPUT_BYTES ? text.slice(0, MAX_TEAM_OUTPUT_BYTES) + "\n<!-- truncated -->" : text
       }
 
+      // Detached means the dispatch call stopped waiting (tool interruption or
+      // ctx.abort). Members keep running; their late completions still notify the
+      // parent because the watchers below read this flag.
+      const detached = yield* Ref.make(false)
+      const waiters = yield* Effect.forEach(members, () => Deferred.make<void>())
+
+      const settleMember = Effect.fn("DispatchTool.settleMember")(function* (index: number) {
+        const entry = members[index]!
+        const info = (yield* background.wait({ id: entry.session.id })).info
+        const session = yield* sessions
+          .get(entry.session.id)
+          .pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+        const tokens = tokenTotal(session?.tokens)
+        const elapsedMs =
+          info && info.completed_at !== undefined ? Math.max(0, info.completed_at - info.started_at) : undefined
+        // Report the variant the member actually ran with, read back from its
+        // first persisted prompt, falling back to what dispatch forwarded.
+        const applied = yield* sessions
+          .findMessage(entry.session.id, (m) => m.info.role === "user" && !!m.info.model)
+          .pipe(Effect.catchCause(() => Effect.succeed(Option.none<SessionV1.WithParts>())))
+        const declaredVariant = entry.input.variant === "default" ? undefined : entry.input.variant
+        const variant =
+          (Option.isSome(applied) && applied.value.info.role === "user" ? applied.value.info.model.variant : undefined) ??
+          declaredVariant ??
+          (entry.info.model ? undefined : parentVariant)
+        const stats = {
+          ...(tokens > 0 ? { tokens } : {}),
+          ...(elapsedMs === undefined ? {} : { elapsedMs }),
+          ...(variant === undefined ? {} : { variant }),
+        }
+        if (info?.status === "error") {
+          yield* recordMember(index, "error", "", info.error ?? "Member failed", stats)
+        } else if (info?.status === "cancelled") {
+          yield* recordMember(index, "cancelled", "", "Member cancelled", stats)
+        } else {
+          yield* recordMember(index, "completed", info?.output ?? "", undefined, stats)
+        }
+        if (info && (info.status === "completed" || info.status === "error")) {
+          if (mode === "background" || (yield* Ref.get(detached))) {
+            yield* notifyCompletion({
+              index,
+              state: info.status,
+              completedAt: info.completed_at,
+              text: info.status === "error" ? (info.error ?? "Member failed") : (info.output ?? ""),
+              ...(stats.tokens === undefined ? {} : { tokens: stats.tokens }),
+              ...(elapsedMs === undefined ? {} : { elapsedMs }),
+            })
+          }
+        }
+        if (tokens <= 0) return
+        const total = yield* Ref.updateAndGet(spent, (value) => value + tokens)
+        if (budget === undefined || total <= budget) return
+        if (yield* Ref.get(budgetHit)) return
+        yield* Ref.set(budgetHit, true)
+        yield* cancelAll
+      })
+
+      // One settle watcher per member regardless of mode, forked into the tool
+      // scope so it survives the dispatch call. Join waits on the deferreds via
+      // the coordinator; background returns immediately and lets them run.
+      yield* Effect.forEach(
+        members.map((_, index) => index),
+        (index) =>
+          settleMember(index).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("dispatch: member watcher failed", { error: String(cause) }),
+            ),
+            Effect.ensuring(Deferred.succeed(waiters[index]!, undefined)),
+            Effect.forkIn(scope, { startImmediately: true }),
+          ),
+        { discard: true },
+      )
+
+      // Publish Team.Ended exactly once per dispatch, after every member watcher
+      // settles. Detached runs publish when their members finally stop.
+      const ended = yield* Effect.gen(function* () {
+        yield* Effect.forEach(waiters, (waiter) => Deferred.await(waiter), { discard: true })
+        const states = yield* Ref.get(runtime)
+        return yield* publishEnded(states)
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("dispatch: team coordinator failed", { error: String(cause) }).pipe(
+            Effect.map(() => "partial" as const),
+          ),
+        ),
+        Effect.forkIn(scope, { startImmediately: true }),
+      )
+
       if (mode === "background") {
         yield* runWatchdog().pipe(Effect.ignore, Effect.forkIn(scope, { startImmediately: true }))
-        yield* Effect.forEach(members.map((_, index) => index), (index) => settle(index), { concurrency }).pipe(
-          Effect.andThen(Ref.get(runtime).pipe(Effect.flatMap((states) => publishEnded(states)))),
-          Effect.ignore,
-          Effect.forkIn(scope, { startImmediately: true }),
-        )
         const states = yield* Ref.get(runtime)
         return {
           title: `${teamLabel} (${members.length} members)`,
-          metadata: { team: teamName, parentSessionId: ctx.sessionID, members: states },
+          metadata: { team: teamName, parentSessionId: ctx.sessionID, members: states, tokens: 0 },
           output: renderTeam(states, "running", 0),
         }
       }
 
-      const runCancel = yield* EffectBridge.make()
+      // Interrupting the tool or aborting it stops waiting only; members keep
+      // running detached. `cancelAll` is reserved for the token budget and for
+      // the team tool's explicit stop.
+      const waitForDetach = Effect.callback<void>((resume) => {
+        if (ctx.abort.aborted) {
+          resume(Effect.void)
+          return
+        }
+        const onAbort = () => resume(Effect.void)
+        ctx.abort.addEventListener("abort", onAbort)
+        return Effect.sync(() => ctx.abort.removeEventListener("abort", onAbort))
+      })
 
-      const onAbort = () => runCancel.fork(cancelAll)
+      const outcome = yield* Effect.raceFirst(
+        Fiber.join(ended).pipe(Effect.map((state) => ({ settled: true as const, state }))),
+        waitForDetach.pipe(Effect.map(() => ({ settled: false as const }))),
+      ).pipe(Effect.onInterrupt(() => Ref.set(detached, true)))
 
-      return yield* Effect.acquireUseRelease(
-        Effect.sync(() => ctx.abort.addEventListener("abort", onAbort)),
-        () =>
-          Effect.gen(function* () {
-            yield* Effect.forEach(members.map((_, index) => index), (index) => settle(index), {
-              concurrency,
-              discard: true,
-            })
-            const states = yield* Ref.get(runtime)
-            const tokens = yield* Ref.get(spent)
-            const state = yield* publishEnded(states)
-            return {
-              title: `${teamLabel} (${members.length} members)`,
-              metadata: { team: teamName, parentSessionId: ctx.sessionID, members: states, tokens },
-              output: renderTeam(states, state, tokens),
-            }
-          }),
-        (_, exit) =>
-          Effect.gen(function* () {
-            if (Exit.hasInterrupts(exit)) yield* cancelAll
-          }).pipe(
-            Effect.ensuring(
-              Effect.sync(() => {
-                ctx.abort.removeEventListener("abort", onAbort)
-              }),
-            ),
-          ),
-      )
+      if (!outcome.settled) yield* Ref.set(detached, true)
+      const states = yield* Ref.get(runtime)
+      const tokens = yield* Ref.get(spent)
+      const state = outcome.settled
+        ? outcome.state
+        : states.every((member) => member.state === "completed")
+          ? "completed"
+          : "partial"
+      return {
+        title: `${teamLabel} (${members.length} members)`,
+        metadata: { team: teamName, parentSessionId: ctx.sessionID, members: states, tokens },
+        output: renderTeam(states, state, tokens),
+      }
     })
 
     return {

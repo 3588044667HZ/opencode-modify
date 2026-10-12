@@ -142,6 +142,7 @@ function stubOps(opts?: {
   return {
     cancel: () => Effect.void,
     resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+    enqueue: () => Effect.void,
     prompt: (input) =>
       Effect.sync(() => {
         opts?.onPrompt?.(input)
@@ -468,6 +469,7 @@ describe("tool.task", () => {
             cancelled.resolve(sessionID)
           }),
         resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+        enqueue: () => Effect.void,
         prompt: (input) =>
           Effect.promise(() => {
             ready.resolve(input)
@@ -916,6 +918,7 @@ describe("tool.task", () => {
       const promptOps: TaskPromptOps = {
         cancel: () => Effect.void,
         resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+        enqueue: () => Effect.void,
         prompt: (input) => {
           if (input.sessionID === chat.id) {
             return Deferred.succeed(injected, input).pipe(Effect.as(reply(input, "injected")))

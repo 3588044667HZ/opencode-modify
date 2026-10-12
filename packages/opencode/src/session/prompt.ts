@@ -104,6 +104,7 @@ function isOrphanedInterruptedTool(part: SessionV1.ToolPart) {
 export interface Interface {
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
   readonly prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error>
+  readonly enqueue: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error>
   readonly loop: (input: LoopInput) => Effect.Effect<SessionV1.WithParts>
   readonly shell: (input: ShellInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError>
   readonly command: (input: CommandInput) => Effect.Effect<SessionV1.WithParts, Image.Error>
@@ -149,6 +150,7 @@ const layer = Layer.effect(
         cancel: (sessionID: SessionID) => cancel(sessionID),
         resolvePromptParts: (template: string) => resolvePromptParts(template),
         prompt: (input: PromptInput) => prompt(input).pipe(Effect.catch(Effect.die)),
+        enqueue: (input: PromptInput) => enqueue(input).pipe(Effect.asVoid, Effect.catch(Effect.die)),
       } satisfies TaskPromptOps
     })
 
@@ -1055,24 +1057,29 @@ const layer = Layer.effect(
       return { info, parts }
     }, Effect.scoped)
 
-    const prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error> = Effect.fn(
-      "SessionPrompt.prompt",
-    )(function* (input: PromptInput) {
+    const admit = Effect.fn("SessionPrompt.admit")(function* (input: PromptInput) {
       const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
       yield* revert.cleanup(session)
       const message = yield* createUserMessage(input)
       yield* sessions.touch(input.sessionID)
+      return { session, message }
+    })
+
+    const prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error> = Effect.fn(
+      "SessionPrompt.prompt",
+    )(function* (input: PromptInput) {
+      const admitted = yield* admit(input)
 
       const permissions: PermissionV1.Rule[] = []
       for (const [t, enabled] of Object.entries(input.tools ?? {})) {
         permissions.push({ permission: t, action: enabled ? "allow" : "deny", pattern: "*" })
       }
       if (permissions.length > 0) {
-        session.permission = permissions
-        yield* sessions.setPermission({ sessionID: session.id, permission: permissions })
+        admitted.session.permission = permissions
+        yield* sessions.setPermission({ sessionID: admitted.session.id, permission: permissions })
       }
 
-      if (input.noReply === true) return message
+      if (input.noReply === true) return admitted.message
       return yield* loop({ sessionID: input.sessionID })
     })
 
@@ -1358,6 +1365,15 @@ const layer = Layer.effect(
       return yield* state.ensureRunning(input.sessionID, lastAssistant(input.sessionID), runLoop(input.sessionID))
     })
 
+    // 异步入队：不等待 run 完成；忙碌时将 runLoop 挂入 runner 的 pending 槽，当前 run 收尾后自动排水
+    const enqueue: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error> = Effect.fn(
+      "SessionPrompt.enqueue",
+    )(function* (input: PromptInput) {
+      const admitted = yield* admit(input)
+      yield* state.requestRun(input.sessionID, lastAssistant(input.sessionID), runLoop(input.sessionID))
+      return admitted.message
+    })
+
     const shell: (input: ShellInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError> = Effect.fn(
       "SessionPrompt.shell",
     )(function* (input: ShellInput) {
@@ -1495,6 +1511,7 @@ const layer = Layer.effect(
     return Service.of({
       cancel,
       prompt,
+      enqueue,
       loop,
       shell,
       command,

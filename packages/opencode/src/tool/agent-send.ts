@@ -81,7 +81,9 @@ export const AgentSendTool = Tool.define(
         )
 
       const targetStatus = yield* status.get(target.session.id)
-      const queue = !wakeIdle && targetStatus.type === "idle"
+      // wake_idle only governs idle targets: a busy target always receives the
+      // message as a steer-equivalent even when waking is disabled.
+      const shouldWake = wakeIdle || targetStatus.type !== "idle"
 
       const now = Date.now()
       const recent = (sent.get(ctx.sessionID) ?? []).filter((timestamp) => now - timestamp < RATE_WINDOW_MS)
@@ -92,18 +94,19 @@ export const AgentSendTool = Tool.define(
       const envelopeID = MessageID.ascending()
       const kind = params.kind ?? "note"
 
-      if (queue) {
-        yield* mailbox.record({
-          id: envelopeID,
-          fromSessionID: ctx.sessionID,
-          fromAgent: ctx.agent,
-          toSessionID: target.session.id,
-          kind,
-          body: params.message,
-          hop,
-          status: "queued",
-          ...(params.reply_to === undefined ? {} : { replyTo: params.reply_to }),
-        })
+      yield* mailbox.record({
+        id: envelopeID,
+        fromSessionID: ctx.sessionID,
+        fromAgent: ctx.agent,
+        toSessionID: target.session.id,
+        kind,
+        body: params.message,
+        hop,
+        status: "queued",
+        ...(params.reply_to === undefined ? {} : { replyTo: params.reply_to }),
+      })
+
+      if (!shouldWake) {
         return {
           title: `peer message queued for ${target.session.id}`,
           metadata: { to: target.session.id, kind, hop, queued: true },
@@ -124,25 +127,15 @@ export const AgentSendTool = Tool.define(
         body: params.message,
       })
 
-      yield* mailbox.record({
-        id: envelopeID,
-        fromSessionID: ctx.sessionID,
-        fromAgent: ctx.agent,
-        toSessionID: target.session.id,
-        kind,
-        body: params.message,
-        hop,
-        status: "delivered",
-        ...(params.reply_to === undefined ? {} : { replyTo: params.reply_to }),
-      })
-
       // Deliver without waiting for the target turn. Waiting on the target's
       // run would deadlock whenever that run is blocked on this session (for
       // example a lead waiting inside task/dispatch join): the message is
-      // already admitted for a running target, which picks it up as a steer,
-      // while an idle target starts a fresh run in the forked fiber.
+      // admitted for a running target, which picks it up as a steer, while an
+      // idle target starts a fresh run in the forked fiber. The row is marked
+      // delivered only once admission succeeds; if the fork fails the row stays
+      // queued and SessionPeers.apply flushes it on the target's next run.
       yield* ops
-        .prompt({
+        .enqueue({
           messageID: MessageID.ascending(),
           sessionID: target.session.id,
           agent: target.session.agent ?? ctx.agent,
@@ -157,6 +150,7 @@ export const AgentSendTool = Tool.define(
           ],
         })
         .pipe(
+          Effect.flatMap(() => mailbox.mark(envelopeID, "delivered")),
           Effect.catchCause((cause) =>
             Effect.logWarning("peer message delivery failed", { to: target.session.id, cause: Cause.pretty(cause) }),
           ),
@@ -165,7 +159,7 @@ export const AgentSendTool = Tool.define(
 
       return {
         title: `peer message to ${target.session.id}`,
-        metadata: { to: target.session.id, kind, hop },
+        metadata: { to: target.session.id, kind, hop, queued: false },
         output: `Delivered peer message ${envelopeID} to ${target.session.id} (hop ${hop}).`,
       }
     })

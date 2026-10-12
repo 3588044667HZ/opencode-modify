@@ -12,6 +12,7 @@ import { Config } from "@/config/config"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { Ripgrep } from "@opencode-ai/core/ripgrep"
 import { Session } from "@/session/session"
+import { Mailbox } from "@/session/mailbox"
 import type { SessionPrompt } from "../../src/session/prompt"
 import { MessageID, PartID } from "../../src/session/schema"
 import { SessionRunState } from "@/session/run-state"
@@ -30,6 +31,8 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
+import { SessionTable } from "@opencode-ai/core/session/sql"
+import { eq } from "drizzle-orm"
 import os from "os"
 import path from "path"
 
@@ -86,6 +89,7 @@ const layer = (flags: Partial<RuntimeFlags.Info> = {}) =>
       SessionProjector.node,
       SessionRunState.node,
       SessionStatus.node,
+      Mailbox.node,
       Permission.node,
       Truncate.node,
       ToolRegistry.node,
@@ -164,6 +168,7 @@ function stubOps(opts?: { text?: (input: SessionPrompt.PromptInput) => string })
   return {
     cancel: () => Effect.void,
     resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+    enqueue: () => Effect.void,
     prompt: (input) => Effect.succeed(reply(input, opts?.text?.(input) ?? "done")),
   }
 }
@@ -248,6 +253,7 @@ describe("tool.dispatch", () => {
       const promptOps: TaskPromptOps = {
         cancel: () => Effect.void,
         resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+        enqueue: () => Effect.void,
         prompt: (input) => {
           seen++
           if (seen === 1) return Effect.die(new Error("boom"))
@@ -447,6 +453,7 @@ describe("tool.dispatch", () => {
         const promptOps: TaskPromptOps = {
           cancel: () => Effect.void,
           resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+          enqueue: () => Effect.void,
           prompt: (input) =>
             Effect.sync(() => {
               seen.push(input)
@@ -478,6 +485,7 @@ describe("tool.dispatch", () => {
         const promptOps: TaskPromptOps = {
           cancel: () => Effect.void,
           resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+          enqueue: () => Effect.void,
           prompt: (input) =>
             Effect.sync(() => {
               seen.push(input)
@@ -532,6 +540,7 @@ describe("tool.dispatch", () => {
         const promptOps: TaskPromptOps = {
           cancel: () => Effect.void,
           resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+          enqueue: () => Effect.void,
           prompt: (input) =>
             Effect.sync(() => {
               seen.push(input)
@@ -638,6 +647,7 @@ describe("tool.dispatch", () => {
       const promptOps: TaskPromptOps = {
         cancel: () => Effect.void,
         resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+        enqueue: () => Effect.void,
         prompt: (input) =>
           Effect.sync(() => {
             seen.push(input)
@@ -665,6 +675,7 @@ describe("tool.dispatch", () => {
       const promptOps: TaskPromptOps = {
         cancel: () => Effect.void,
         resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+        enqueue: () => Effect.void,
         prompt: (input) =>
           Effect.gen(function* () {
             yield* Ref.update(state, (s) => ({
@@ -713,6 +724,7 @@ describe("tool.dispatch", () => {
       const promptOps: TaskPromptOps = {
         cancel: () => Effect.void,
         resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+        enqueue: () => Effect.void,
         prompt: (input) =>
           Effect.gen(function* () {
             const text = input.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("")
@@ -762,6 +774,10 @@ describe("tool.dispatch", () => {
       const promptOps: TaskPromptOps = {
         cancel: () => Effect.void,
         resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+        enqueue: (input) =>
+          Effect.sync(() => {
+            calls.push(input)
+          }),
         prompt: (input) =>
           Effect.sync(() => {
             calls.push(input)
@@ -798,6 +814,10 @@ describe("tool.dispatch", () => {
       const promptOps: TaskPromptOps = {
         cancel: () => Effect.void,
         resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+        enqueue: (input) =>
+          Effect.sync(() => {
+            calls.push(input)
+          }),
         prompt: (input) =>
           Effect.sync(() => {
             calls.push(input)
@@ -831,6 +851,10 @@ describe("tool.dispatch", () => {
       const promptOps: TaskPromptOps = {
         cancel: () => Effect.void,
         resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+        enqueue: (input) =>
+          Effect.sync(() => {
+            calls.push(input)
+          }),
         prompt: (input) =>
           Effect.sync(() => {
             calls.push(input)
@@ -862,6 +886,11 @@ describe("tool.dispatch", () => {
       const promptOps: TaskPromptOps = {
         cancel: () => Effect.void,
         resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+        enqueue: (input) =>
+          Effect.gen(function* () {
+            const text = input.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("")
+            if (input.sessionID === chat.id) injections.push(text)
+          }),
         prompt: (input) =>
           Effect.gen(function* () {
             const text = input.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("")
@@ -911,6 +940,213 @@ describe("tool.dispatch", () => {
     }),
   )
 
+  it.instance("records a background completion in the parent mailbox", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const mailbox = yield* Mailbox.Service
+      const { chat, assistant } = yield* seed()
+      const tool = yield* DispatchTool
+      const def = yield* tool.init()
+
+      yield* def.execute(
+        { tasks: [{ agent: "general", description: "only", prompt: "do it" }], mode: "background" },
+        context({ chat, assistant, promptOps: stubOps() }),
+      )
+      const member = (yield* sessions.children(chat.id))[0]!
+
+      const row = yield* pollWithTimeout(
+        mailbox.list({ sessionID: chat.id }).pipe(
+          Effect.map((messages) =>
+            messages.find((message) => message.status === "delivered" && message.body.includes("<team_update")),
+          ),
+        ),
+        "background completion did not reach the parent mailbox",
+      )
+      expect(row.kind).toBe("note")
+      expect(row.fromSessionID).toBe(member.id)
+      expect(row.fromAgent).toBe("general")
+      expect(row.toSessionID).toBe(chat.id)
+      expect(row.body).toContain('state="completed"')
+    }),
+  )
+
+  it.instance("keeps members running when the join dispatch is interrupted", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const jobs = yield* BackgroundJob.Service
+      const mailbox = yield* Mailbox.Service
+      const { chat, assistant } = yield* seed()
+      const tool = yield* DispatchTool
+      const def = yield* tool.init()
+      const gates = [yield* Deferred.make<void>(), yield* Deferred.make<void>()]
+      const started = yield* Ref.make(0)
+      const cancelled: Session.Info["id"][] = []
+      const enqueued: SessionPrompt.PromptInput[] = []
+      const promptOps: TaskPromptOps = {
+        cancel: (sessionID) => Effect.sync(() => void cancelled.push(sessionID)),
+        resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+        enqueue: (input) => Effect.sync(() => void enqueued.push(input)),
+        prompt: (input) =>
+          Effect.gen(function* () {
+            const index = yield* Ref.updateAndGet(started, (value) => value + 1)
+            yield* Deferred.await(gates[index - 1]!)
+            return reply(input, `done ${input.sessionID}`)
+          }),
+      }
+
+      const fiber = yield* def
+        .execute({ tasks: tasks.slice(0, 2) }, context({ chat, assistant, promptOps }))
+        .pipe(Effect.forkChild)
+      yield* pollWithTimeout(
+        Ref.get(started).pipe(Effect.map((value) => (value >= 2 ? true : undefined))),
+        "members did not start",
+      )
+      const kids = yield* sessions.children(chat.id)
+      expect(kids).toHaveLength(2)
+
+      yield* Fiber.interrupt(fiber)
+
+      for (const kid of kids) expect((yield* jobs.get(kid.id))?.status).toBe("running")
+      expect(cancelled).toHaveLength(0)
+
+      yield* Effect.forEach(gates, (gate) => Deferred.succeed(gate, undefined), { discard: true })
+      for (const kid of kids) yield* jobs.wait({ id: kid.id, timeout: 2_000 })
+
+      const rows = yield* pollWithTimeout(
+        mailbox.list({ sessionID: chat.id }).pipe(
+          Effect.map((messages) =>
+            messages.length >= 2 && messages.every((message) => message.status === "delivered")
+              ? messages
+              : undefined,
+          ),
+        ),
+        "detached member completions did not reach the parent mailbox",
+      )
+      expect(rows.every((row) => row.kind === "note")).toBe(true)
+      expect(rows.every((row) => row.body.includes("<team_update"))).toBe(true)
+
+      yield* pollWithTimeout(
+        Effect.sync(() =>
+          enqueued.filter((input) => input.sessionID === chat.id).length >= 2 ? true : undefined,
+        ),
+        "detached member completions were not injected into the parent",
+      )
+      for (const input of enqueued.filter((entry) => entry.sessionID === chat.id)) {
+        const part = input.parts.find((item) => item.type === "text" && item.synthetic === true)
+        expect(part?.type === "text" ? part.text : "").toContain("<team_update")
+      }
+    }),
+  )
+
+  it.instance("returns a partial result on ctx.abort without cancelling members", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const jobs = yield* BackgroundJob.Service
+      const mailbox = yield* Mailbox.Service
+      const { chat, assistant } = yield* seed()
+      const controller = new AbortController()
+      const tool = yield* DispatchTool
+      const def = yield* tool.init()
+      const gates = [yield* Deferred.make<void>(), yield* Deferred.make<void>()]
+      const started = yield* Ref.make(0)
+      const cancelled: Session.Info["id"][] = []
+      const promptOps: TaskPromptOps = {
+        cancel: (sessionID) => Effect.sync(() => void cancelled.push(sessionID)),
+        resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+        enqueue: () => Effect.void,
+        prompt: (input) =>
+          Effect.gen(function* () {
+            const index = yield* Ref.updateAndGet(started, (value) => value + 1)
+            yield* Deferred.await(gates[index - 1]!)
+            return reply(input, `done ${input.sessionID}`)
+          }),
+      }
+
+      const fiber = yield* def
+        .execute(
+          { tasks: tasks.slice(0, 2) },
+          context({ chat, assistant, promptOps, abort: controller.signal }),
+        )
+        .pipe(Effect.forkChild)
+      yield* pollWithTimeout(
+        Ref.get(started).pipe(Effect.map((value) => (value >= 2 ? true : undefined))),
+        "members did not start",
+      )
+      const kids = yield* sessions.children(chat.id)
+
+      controller.abort()
+      const result = yield* Fiber.join(fiber)
+      expect(result.output).toContain('state="partial"')
+      for (const kid of kids) expect((yield* jobs.get(kid.id))?.status).toBe("running")
+      expect(cancelled).toHaveLength(0)
+
+      yield* Effect.forEach(gates, (gate) => Deferred.succeed(gate, undefined), { discard: true })
+      for (const kid of kids) yield* jobs.wait({ id: kid.id, timeout: 2_000 })
+
+      const rows = yield* pollWithTimeout(
+        mailbox.list({ sessionID: chat.id }).pipe(
+          Effect.map((messages) =>
+            messages.length >= 2 && messages.every((message) => message.status === "delivered")
+              ? messages
+              : undefined,
+          ),
+        ),
+        "aborted member completions did not reach the parent mailbox",
+      )
+      expect(rows.every((row) => row.body.includes("<team_update"))).toBe(true)
+    }),
+  )
+
+  it.instance("cancels remaining members when the token budget is exceeded", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const { db } = yield* Database.Service
+      const { chat, assistant } = yield* seed()
+      const tool = yield* DispatchTool
+      const def = yield* tool.init()
+      const gate = yield* Deferred.make<void>()
+      const cancelled: Session.Info["id"][] = []
+      const promptOps: TaskPromptOps = {
+        cancel: (sessionID) => Effect.sync(() => void cancelled.push(sessionID)),
+        resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+        enqueue: () => Effect.void,
+        prompt: (input) =>
+          Effect.gen(function* () {
+            const text = input.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("")
+            if (text.includes("expensive run")) {
+              yield* db
+                .update(SessionTable)
+                .set({ tokens_input: 5_000 })
+                .where(eq(SessionTable.id, input.sessionID))
+                .run()
+                .pipe(Effect.orDie)
+              return reply(input, "costly")
+            }
+            yield* Deferred.await(gate)
+            return reply(input, "blocked")
+          }),
+      }
+
+      const result = yield* def.execute(
+        {
+          tasks: [
+            { agent: "general", description: "expensive", prompt: "expensive run" },
+            { agent: "general", description: "blocked", prompt: "blocked run" },
+          ],
+          budget_tokens: 100,
+        },
+        context({ chat, assistant, promptOps }),
+      )
+
+      expect(result.output).toContain('state="partial"')
+      expect(result.output).toContain('tokens="5000"')
+      const stopped = result.metadata.members.find((member) => member.state === "cancelled")
+      expect(stopped).toBeDefined()
+      expect(cancelled).toContain(stopped!.sessionID)
+      expect((yield* jobs.get(stopped!.sessionID))?.status).toBe("cancelled")
+    }),
+  )
+
   watchdogIt.instance("injects one watchdog notice while a member waits on permission", () =>
     Effect.gen(function* () {
       const sessions = yield* Session.Service
@@ -924,6 +1160,10 @@ describe("tool.dispatch", () => {
       const promptOps: TaskPromptOps = {
         cancel: () => Effect.void,
         resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+        enqueue: (input) =>
+          Effect.sync(() => {
+            calls.push(input)
+          }),
         prompt: (input) =>
           Effect.gen(function* () {
             calls.push(input)
@@ -988,6 +1228,10 @@ describe("tool.dispatch", () => {
       const promptOps: TaskPromptOps = {
         cancel: () => Effect.void,
         resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+        enqueue: (input) =>
+          Effect.sync(() => {
+            calls.push(input)
+          }),
         prompt: (input) =>
           Effect.gen(function* () {
             calls.push(input)
@@ -1039,6 +1283,10 @@ describe("tool.dispatch", () => {
       const promptOps: TaskPromptOps = {
         cancel: () => Effect.void,
         resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+        enqueue: (input) =>
+          Effect.sync(() => {
+            calls.push(input)
+          }),
         prompt: (input) =>
           Effect.gen(function* () {
             calls.push(input)
@@ -1100,6 +1348,10 @@ describe("tool.dispatch", () => {
       const promptOps: TaskPromptOps = {
         cancel: () => Effect.void,
         resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+        enqueue: (input) =>
+          Effect.sync(() => {
+            calls.push(input)
+          }),
         prompt: (input) =>
           Effect.gen(function* () {
             calls.push(input)
@@ -1140,6 +1392,10 @@ describe("tool.dispatch", () => {
       const promptOps: TaskPromptOps = {
         cancel: () => Effect.void,
         resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+        enqueue: (input) =>
+          Effect.sync(() => {
+            calls.push(input)
+          }),
         prompt: (input) =>
           Effect.gen(function* () {
             calls.push(input)

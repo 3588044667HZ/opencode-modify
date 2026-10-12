@@ -2,7 +2,7 @@ import { afterEach, describe, expect } from "bun:test"
 import { Database } from "@opencode-ai/core/database/database"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
-import { Effect, Exit, Layer } from "effect"
+import { Effect, Exit, Layer, Ref } from "effect"
 import { BackgroundJob } from "@/background/job"
 import { Config } from "@/config/config"
 import { EventV2Bridge } from "@/event-v2-bridge"
@@ -12,6 +12,7 @@ import { SessionRunState } from "@/session/run-state"
 import { SessionStatus } from "@/session/status"
 import { MessageID } from "@/session/schema"
 import { Agent } from "../../src/agent/agent"
+import { AgentInboxTool } from "../../src/tool/agent-inbox"
 import { AgentSendTool } from "../../src/tool/agent-send"
 import { Truncate } from "@/tool/truncate"
 import type { TaskPromptOps } from "../../src/tool/task"
@@ -44,18 +45,15 @@ const layer = (flags: Partial<RuntimeFlags.Info> = {}) =>
 
 const it = testEffect(layer({ experimentalAgentTeams: true }))
 
-function stubOps(onPrompt?: (input: any) => void): TaskPromptOps {
+function stubOps(onEnqueue?: (input: any) => void): TaskPromptOps {
   return {
     cancel: () => Effect.void,
     resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
-    prompt: (input) =>
+    enqueue: (input) =>
       Effect.sync(() => {
-        onPrompt?.(input)
-        return {
-          info: { role: "assistant" as const },
-          parts: [],
-        } as any
+        onEnqueue?.(input)
       }),
+    prompt: () => Effect.die(new Error("agent_send must not call prompt")),
   }
 }
 
@@ -118,6 +116,7 @@ describe("tool.agent_send", () => {
       const promptOps: TaskPromptOps = {
         cancel: () => Effect.void,
         resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+        enqueue: () => Effect.never,
         prompt: () => Effect.never,
       }
 
@@ -253,5 +252,138 @@ describe("tool.agent_send", () => {
         expect(queued[0]?.body).toBe("later")
       }),
     { config: { agent_message: { wake_idle: false } } },
+  )
+
+  it.instance("marks the row delivered once enqueue admits the message", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const mailbox = yield* Mailbox.Service
+      const tool = yield* AgentSendTool
+      const def = yield* tool.init()
+      const root = yield* sessions.create({ title: "root" })
+      const child = yield* sessions.create({ parentID: root.id, title: "child" })
+      const seen: any[] = []
+
+      const result = yield* def.execute(
+        { to: "parent", message: "hello" },
+        context(child.id, stubOps((input) => seen.push(input))),
+      )
+
+      expect(result.metadata.queued).toBe(false)
+      expect(result.output).toContain("Delivered")
+
+      const rows = yield* pollWithTimeout(
+        Effect.gen(function* () {
+          const rows = yield* mailbox.list({ sessionID: root.id })
+          return rows[0]?.status === "delivered" ? rows : undefined
+        }),
+        "mailbox row was not marked delivered",
+      )
+
+      expect(rows).toHaveLength(1)
+      expect(rows[0]?.body).toBe("hello")
+      expect(seen).toHaveLength(1)
+      expect(seen[0].sessionID).toBe(root.id)
+      expect(seen[0].parts[0].synthetic).toBe(true)
+      expect(seen[0].parts[0].metadata.peer.hop).toBe(1)
+      expect(seen[0].parts[0].text).toContain("hello")
+    }),
+  )
+
+  it.instance("stays successful and leaves the row queued when enqueue fails", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const mailbox = yield* Mailbox.Service
+      const tool = yield* AgentSendTool
+      const def = yield* tool.init()
+      const root = yield* sessions.create({ title: "root" })
+      const child = yield* sessions.create({ parentID: root.id, title: "child" })
+      const attempts = yield* Ref.make(0)
+      const promptOps: TaskPromptOps = {
+        cancel: () => Effect.void,
+        resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+        enqueue: () =>
+          Ref.update(attempts, (count) => count + 1).pipe(Effect.flatMap(() => Effect.die(new Error("boom")))),
+        prompt: () => Effect.never,
+      }
+
+      const result = yield* def.execute({ to: "parent", message: "lost" }, context(child.id, promptOps))
+      expect(result.output).toContain("Delivered")
+
+      yield* pollWithTimeout(
+        Effect.gen(function* () {
+          const count = yield* Ref.get(attempts)
+          return count >= 1 ? count : undefined
+        }),
+        "enqueue was not attempted",
+      )
+
+      const rows = yield* mailbox.list({ sessionID: root.id })
+      expect(rows).toHaveLength(1)
+      expect(rows[0]?.status).toBe("queued")
+    }),
+  )
+
+  it.instance(
+    "steers a busy target even when wake_idle is disabled",
+    () =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const status = yield* SessionStatus.Service
+        const tool = yield* AgentSendTool
+        const def = yield* tool.init()
+        const root = yield* sessions.create({ title: "root" })
+        const child = yield* sessions.create({ parentID: root.id, title: "child" })
+        yield* status.set(root.id, { type: "busy" })
+        const seen: any[] = []
+
+        const result = yield* def.execute(
+          { to: "parent", message: "steer" },
+          context(child.id, stubOps((input) => seen.push(input))),
+        )
+
+        expect(result.metadata.queued).toBe(false)
+        yield* delivered(seen, 1)
+        expect(seen[0].sessionID).toBe(root.id)
+        expect(seen[0].parts[0].text).toContain("steer")
+      }),
+    { config: { agent_message: { wake_idle: false } } },
+  )
+
+  it.instance("agent_inbox unread_only returns only queued rows", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const mailbox = yield* Mailbox.Service
+      const tool = yield* AgentInboxTool
+      const def = yield* tool.init()
+      const root = yield* sessions.create({ title: "root" })
+      const child = yield* sessions.create({ parentID: root.id, title: "child" })
+      yield* mailbox.record({
+        id: "msg_queued",
+        fromSessionID: child.id,
+        toSessionID: root.id,
+        kind: "note",
+        body: "pending",
+        hop: 1,
+        status: "queued",
+      })
+      yield* mailbox.record({
+        id: "msg_delivered",
+        fromSessionID: child.id,
+        toSessionID: root.id,
+        kind: "note",
+        body: "already",
+        hop: 1,
+        status: "delivered",
+      })
+
+      const all = JSON.parse((yield* def.execute({}, context(root.id, stubOps()))).output)
+      expect(all.map((message: any) => message.body).sort()).toEqual(["already", "pending"])
+
+      const unread = JSON.parse((yield* def.execute({ unread_only: true }, context(root.id, stubOps()))).output)
+      expect(unread).toHaveLength(1)
+      expect(unread[0].body).toBe("pending")
+      expect(unread[0].status).toBe("queued")
+    }),
   )
 })

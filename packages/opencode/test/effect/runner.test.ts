@@ -113,6 +113,179 @@ describe("Runner", () => {
     }),
   )
 
+  // --- requestRun (pending slot) ---
+
+  it.live(
+    "requestRun starts work immediately when idle",
+    Effect.gen(function* () {
+      const s = yield* Scope.Scope
+      const runner = Runner.make<string>(s)
+      const done = yield* Deferred.make<string>()
+
+      expect(yield* runner.requestRun(Deferred.succeed(done, "ran").pipe(Effect.as("ran")))).toBe("started")
+      expect(yield* Deferred.await(done)).toBe("ran")
+      yield* waitForState(runner, "Idle")
+    }),
+  )
+
+  it.live(
+    "requestRun queues while running and drains without idling in between",
+    Effect.gen(function* () {
+      const s = yield* Scope.Scope
+      const idleCount = yield* Ref.make(0)
+      const runner = Runner.make<string>(s, { onIdle: Ref.update(idleCount, (n) => n + 1) })
+      const firstStarted = yield* Deferred.make<void>()
+      const firstGate = yield* Deferred.make<void>()
+      const secondStarted = yield* Deferred.make<void>()
+      const secondGate = yield* Deferred.make<void>()
+
+      expect(
+        yield* runner.requestRun(
+          Effect.gen(function* () {
+            yield* Deferred.succeed(firstStarted, undefined)
+            yield* Deferred.await(firstGate)
+            return "first"
+          }),
+        ),
+      ).toBe("started")
+      yield* Deferred.await(firstStarted).pipe(Effect.timeout("1 second"))
+
+      expect(
+        yield* runner.requestRun(
+          Effect.gen(function* () {
+            yield* Deferred.succeed(secondStarted, undefined)
+            yield* Deferred.await(secondGate)
+            return "second"
+          }),
+        ),
+      ).toBe("queued")
+      expect(runner.state._tag).toBe("Running")
+
+      yield* Deferred.succeed(firstGate, undefined)
+      yield* Deferred.await(secondStarted).pipe(Effect.timeout("1 second"))
+      // 第一个 run 结束后 pending 立即接续，期间不触发 onIdle
+      expect(runner.state._tag).toBe("Running")
+      expect(yield* Ref.get(idleCount)).toBe(0)
+
+      yield* Deferred.succeed(secondGate, undefined)
+      yield* waitForState(runner, "Idle")
+      expect(yield* Ref.get(idleCount)).toBe(1)
+    }),
+  )
+
+  it.live(
+    "requestRun reuses a single pending slot while running",
+    Effect.gen(function* () {
+      const s = yield* Scope.Scope
+      const runner = Runner.make<string>(s)
+      const started = yield* Deferred.make<void>()
+      const gate = yield* Deferred.make<void>()
+      const drains = yield* Ref.make(0)
+
+      yield* runner.requestRun(
+        Effect.gen(function* () {
+          yield* Deferred.succeed(started, undefined)
+          yield* Deferred.await(gate)
+          return "first"
+        }),
+      )
+      yield* Deferred.await(started).pipe(Effect.timeout("1 second"))
+
+      const pending = Effect.gen(function* () {
+        yield* Ref.update(drains, (n) => n + 1)
+        return "second"
+      })
+      expect(yield* runner.requestRun(pending)).toBe("queued")
+      expect(yield* runner.requestRun(pending)).toBe("queued")
+
+      yield* Deferred.succeed(gate, undefined)
+      yield* waitForState(runner, "Idle")
+      expect(yield* Ref.get(drains)).toBe(1)
+    }),
+  )
+
+  it.live(
+    "requestRun queues behind a shell and reuses the slot",
+    Effect.gen(function* () {
+      const s = yield* Scope.Scope
+      const runner = Runner.make<string>(s)
+      const gate = yield* Deferred.make<void>()
+      const ran = yield* Deferred.make<string>()
+
+      const sh = yield* runner.startShell(Deferred.await(gate).pipe(Effect.as("shell"))).pipe(Effect.forkChild)
+      yield* waitForState(runner, "Shell")
+
+      expect(yield* runner.requestRun(Deferred.succeed(ran, "run").pipe(Effect.as("run")))).toBe("queued")
+      expect(runner.state._tag).toBe("ShellThenRun")
+      expect(yield* runner.requestRun(Effect.succeed("ignored"))).toBe("queued")
+      expect(runner.state._tag).toBe("ShellThenRun")
+
+      yield* Deferred.succeed(gate, undefined)
+      yield* Fiber.await(sh)
+      expect(yield* Deferred.await(ran).pipe(Effect.timeout("1 second"))).toBe("run")
+      yield* waitForState(runner, "Idle")
+    }),
+  )
+
+  it.live(
+    "cancel fails pending work with Cancelled",
+    Effect.gen(function* () {
+      const s = yield* Scope.Scope
+      const runner = Runner.make<string>(s)
+      const started = yield* Deferred.make<void>()
+      const ran = yield* Ref.make(0)
+
+      yield* runner.requestRun(
+        Effect.gen(function* () {
+          yield* Deferred.succeed(started, undefined)
+          return yield* Effect.never.pipe(Effect.as("first"))
+        }),
+      )
+      yield* Deferred.await(started).pipe(Effect.timeout("1 second"))
+      expect(yield* runner.requestRun(Ref.update(ran, (n) => n + 1).pipe(Effect.as("second")))).toBe("queued")
+
+      const st = runner.state
+      if (st._tag !== "Running" || !st.pending) throw new Error("expected a pending run")
+      const pending = st.pending
+
+      yield* runner.cancel
+
+      const exit = yield* Deferred.await(pending.done).pipe(Effect.exit)
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) expect(Cause.squash(exit.cause)).toBeInstanceOf(Runner.Cancelled)
+      expect(runner.state._tag).toBe("Idle")
+      expect(yield* Ref.get(ran)).toBe(0)
+    }),
+  )
+
+  it.live(
+    "ensureRunning still awaits only the current run while requestRun is pending",
+    Effect.gen(function* () {
+      const s = yield* Scope.Scope
+      const runner = Runner.make<string>(s)
+      const started = yield* Deferred.make<void>()
+      const gate = yield* Deferred.make<void>()
+
+      yield* runner.requestRun(
+        Effect.gen(function* () {
+          yield* Deferred.succeed(started, undefined)
+          yield* Deferred.await(gate)
+          return "first"
+        }),
+      )
+      yield* Deferred.await(started).pipe(Effect.timeout("1 second"))
+      yield* runner.requestRun(Effect.succeed("second"))
+
+      const waiter = yield* runner.ensureRunning(Effect.succeed("rejected")).pipe(Effect.forkChild)
+      yield* Effect.yieldNow
+
+      yield* Deferred.succeed(gate, undefined)
+      const exit = yield* Fiber.await(waiter).pipe(Effect.timeout("1 second"))
+      expect(Exit.isSuccess(exit)).toBe(true)
+      if (Exit.isSuccess(exit)) expect(exit.value).toBe("first")
+    }),
+  )
+
   // --- cancel semantics ---
 
   it.live(

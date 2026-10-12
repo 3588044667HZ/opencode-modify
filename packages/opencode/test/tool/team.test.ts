@@ -11,6 +11,7 @@ import { Config } from "@/config/config"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { Ripgrep } from "@opencode-ai/core/ripgrep"
 import { Session } from "@/session/session"
+import { Mailbox } from "@/session/mailbox"
 import type { SessionPrompt } from "../../src/session/prompt"
 import { MessageID, PartID } from "../../src/session/schema"
 import { SessionRunState } from "@/session/run-state"
@@ -50,6 +51,7 @@ const layer = (flags: Partial<RuntimeFlags.Info> = {}) =>
       SessionProjector.node,
       SessionRunState.node,
       SessionStatus.node,
+      Mailbox.node,
       Permission.node,
       Truncate.node,
       ToolRegistry.node,
@@ -118,6 +120,7 @@ function stubOps(): TaskPromptOps {
   return {
     cancel: () => Effect.void,
     resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+    enqueue: () => Effect.void,
     prompt: (input) => Effect.succeed(reply(input, "done")),
   }
 }
@@ -341,6 +344,7 @@ describe("tool.team", () => {
       const gatedOps: TaskPromptOps = {
         cancel: () => Effect.void,
         resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+        enqueue: () => Effect.void,
         prompt: () => Effect.never,
       }
 
@@ -383,6 +387,7 @@ describe("tool.team", () => {
       const gatedOps: TaskPromptOps = {
         cancel: () => Effect.void,
         resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+        enqueue: () => Effect.void,
         prompt: () => Effect.never,
       }
 
