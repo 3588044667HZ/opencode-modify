@@ -1,4 +1,4 @@
-import { Component, For, Show, createEffect, createMemo, createResource, onCleanup } from "solid-js"
+import { Component, For, Show, createEffect, createResource, onCleanup } from "solid-js"
 import { createStore, reconcile } from "solid-js/store"
 import { useSDK } from "@/context/sdk"
 import { useLanguage } from "@/context/language"
@@ -333,7 +333,9 @@ export const TeamPanel: Component<{ sessionID: string; onOpen?: (sessionID: stri
   })
   onCleanup(stop)
 
-  const members = createMemo<TeamMemberRow[]>(() => {
+  // 资源读取必须发生在用户 effect 内：在 memo/渲染作用域里读取这些轮询资源再
+  // refetch 时，Solid 的 Suspense 边界会认为加载中并把整页内容切到 fallback。
+  const memberRows = () => {
     const dispatchStates = dispatched()
     const statusMap = statuses() ?? {}
     return (children() ?? []).map((child) => {
@@ -365,13 +367,13 @@ export const TeamPanel: Component<{ sessionID: string; onOpen?: (sessionID: stri
         ...(dispatchedMember?.variant === undefined ? {} : { variant: dispatchedMember.variant }),
       }
     })
-  })
+  }
 
   // Rows are rebuilt from polled resources; reconcile keyed by session keeps the
   // DOM of unchanged members stable instead of rebuilding the list every tick.
   const [team, setTeam] = createStore<{ rows: TeamMemberRow[] }>({ rows: [] })
   createEffect(() => {
-    setTeam("rows", reconcile(members(), { key: "sessionID" }))
+    setTeam("rows", reconcile(memberRows(), { key: "sessionID" }))
   })
 
   const activityText = (activity: MemberActivity) => {
