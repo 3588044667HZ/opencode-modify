@@ -359,6 +359,8 @@ export const dict = {
   "agentTeams.activity.responding": "Responding",
   "agentTeams.activity.tool": "Using {{tool}}",
   "agentTeams.activity.working": "Working",
+  "agentTeams.build": "build {{build}}",
+  "agentTeams.build.mismatch": "GUI build {{gui}} does not match server build {{server}}; run bun run build:local and rebuild before verifying",
 
   "dialog.lsp.empty": "LSPs auto-detected from file types",
   "dialog.plugins.empty": "Plugins configured in opencode.json",

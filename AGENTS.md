@@ -148,6 +148,11 @@ const table = sqliteTable("session", {
 
 - Always run `bun typecheck` from package directories (e.g., `packages/opencode`), never `tsc` directly.
 
+## Build Markers
+
+- After code changes, run `bun run build:local` (it appends or updates a `BUILD.md` row automatically) or manually append a `BUILD.md` row describing the change.
+- GUI and server build markers must come from the same build. If they mismatch, rebuild before verifying.
+
 ## V2 Session Core
 
 - Keep durable prompt admission separate from model execution. `SessionV2.prompt(...)` admits one durable `session_input` row before scheduling advisory `SessionExecution.wake(sessionID)` unless `resume: false` requests admit-only behavior. The serialized runner promotes admitted inputs into visible user messages at safe boundaries.

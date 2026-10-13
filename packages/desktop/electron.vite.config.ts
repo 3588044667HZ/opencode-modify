@@ -14,6 +14,8 @@ const channel = (() => {
 
 const nodePtyPkg = `@lydell/node-pty-${process.platform}-${process.arch}`
 
+const buildId = process.env.OPENCODE_BUILD_ID ?? "local"
+
 const sentry =
   process.env.SENTRY_AUTH_TOKEN && process.env.SENTRY_ORG && process.env.SENTRY_PROJECT
     ? sentryVitePlugin({
@@ -35,6 +37,7 @@ export default defineConfig({
   main: {
     define: {
       "import.meta.env.OPENCODE_CHANNEL": JSON.stringify(channel),
+      "import.meta.env.OPENCODE_BUILD_ID": JSON.stringify(buildId),
     },
     build: {
       rollupOptions: {
@@ -91,6 +94,9 @@ const require = __cjs_mod__.createRequire(import.meta.url);
     },
   },
   renderer: {
+    define: {
+      "import.meta.env.OPENCODE_BUILD_ID": JSON.stringify(buildId),
+    },
     plugins: [appPlugin, sentry],
     publicDir: "../../../app/public",
     root: "src/renderer",

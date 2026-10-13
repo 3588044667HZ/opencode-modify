@@ -4,8 +4,10 @@ import { For, Show, createEffect, createMemo, createResource, onCleanup } from "
 import { BlackboardPanel, PeerInboxPanel, TeamPanel } from "@/components/agent-teams-panels"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
+import { useServer } from "@/context/server"
 import { useServerSDK } from "@/context/server-sdk"
 import { SDKProvider } from "@/context/sdk"
+import { authTokenFromCredentials } from "@/utils/server"
 import {
   agentTeamsViews,
   isAgentTeamsView,
@@ -77,10 +79,40 @@ export function AgentTeamsPage() {
 function AgentTeamsView(props: { sessionID: string; title: () => string | undefined }) {
   const language = useLanguage()
   const platform = usePlatform()
+  const serverSDK = useServerSDK()
+  const server = useServer()
   const navigate = useNavigate()
   const params = useParams<{ serverKey: string }>()
   const [search, setSearch] = useSearchParams<{ view?: string }>()
   const view = () => (isAgentTeamsView(search.view) ? search.view : "blackboard")
+  const guiBuild = import.meta.env.OPENCODE_BUILD_ID ?? "local"
+  // 每次挂载只取一次服务端 Build ID：优先走类型化客户端，生成类型可能剥掉
+  // build 字段，失败时回退到带 Basic Auth 的原始请求。
+  const [serverBuild] = createResource(async (): Promise<string | undefined> => {
+    try {
+      const result = await serverSDK().client.global.health()
+      const data: unknown = result.data
+      if (typeof data === "object" && data !== null && "build" in data && typeof data.build === "string") return data.build
+    } catch {}
+    const http = server.current?.http
+    if (!http) return undefined
+    try {
+      const response = await (platform.fetch ?? globalThis.fetch)(`${http.url}/global/health`, {
+        headers: http.password
+          ? { Authorization: `Basic ${authTokenFromCredentials({ username: http.username, password: http.password })}` }
+          : undefined,
+      })
+      if (!response.ok) return undefined
+      const data: unknown = await response.json()
+      if (typeof data !== "object" || data === null || !("build" in data)) return undefined
+      return typeof data.build === "string" ? data.build : undefined
+    } catch {}
+    return undefined
+  })
+  const buildMismatch = createMemo(() => {
+    const build = serverBuild()
+    return build !== undefined && build !== guiBuild
+  })
   const stop = platform.onAppWindowView?.((next) => {
     if (isAgentTeamsView(next)) setSearch({ view: next })
   })
@@ -132,7 +164,15 @@ function AgentTeamsView(props: { sessionID: string; title: () => string | undefi
             )}
           </For>
         </div>
+        <span class="text-11-regular text-text-weaker shrink-0">
+          {language.t("agentTeams.build", { build: guiBuild })}
+        </span>
       </header>
+      <Show when={buildMismatch()}>
+        <div class="px-4 py-2 border-b border-v2-state-border-warning bg-v2-state-bg-warning text-12-regular text-v2-state-fg-warning">
+          {language.t("agentTeams.build.mismatch", { gui: guiBuild, server: serverBuild() ?? "" })}
+        </div>
+      </Show>
       <div class="flex-1 min-h-0 overflow-y-auto p-4">
         <div class="flex flex-col gap-1 pb-3">
           <span class="text-13-medium text-text-strong">{language.t(titleKeys[view()])}</span>

@@ -171,6 +171,21 @@ bun test --timeout 30000 test/tool/agent-send.test.ts test/session/collaboration
 
 ---
 
+## 构建标记纪律（防止误用老客户端）
+
+**每次代码修改后必须留下构建标记；GUI 与服务端必须来自同一次构建。**
+
+1. 修改完成后运行 `bun run build:local`：脚本会自动在仓库根 **`BUILD.md`** 追加/更新一行（时间、Build ID、提交、本次更改、服务端标记、GUI 标记）；若手工构建，也必须手动在 `BUILD.md` 追加一行说明本次更改。
+2. 运行时核对两端标记：
+   - 服务端：启动日志出现 `server listening build=<id>`，`GET /global/health` 返回 `build` 字段；
+   - GUI：Agent Teams 窗口页头显示 `build <id>`；
+   - 两者不一致时 GUI 会显示警示条——此时先重新构建（`bun run build:local`），再复验，禁止用旧客户端验证新改动。
+3. `BUILD.md` 是唯一权威记录：同一「提交 + dirty 状态」只保留一行；排查“改动不生效”时，先对照这里的标记与正在运行的版本是否一致。
+
+详见 `specs/build-markers.md`。
+
+---
+
 ## 仓库结构
 
 | 路径 | 内容 |
@@ -190,6 +205,7 @@ bun test --timeout 30000 test/tool/agent-send.test.ts test/session/collaboration
 - `specs/agent-teams-prompt-awareness.md` — 提示词注入策略
 - `specs/agent-teams-backlog.md` — 后续计划（任务板、广播、成员超时等）
 - `specs/independent-maintenance.md` — 独立维护：切断上游运行时/构建时联系
+- `specs/build-markers.md` — 构建标记：`BUILD.md` 记录、GUI/服务端双标记与不匹配告警
 
 ---
 

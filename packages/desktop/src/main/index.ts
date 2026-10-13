@@ -13,7 +13,7 @@ import contextMenu from "electron-context-menu"
 
 import type { ServerReadyData } from "../preload/types"
 import { checkAppExists, resolveAppPath } from "./apps"
-import { CHANNEL } from "./constants"
+import { BUILD_ID, CHANNEL } from "./constants"
 import { registerIpcHandlers, sendDeepLinks, sendMenuCommand } from "./ipc"
 import { forwardInitializationFailure } from "./initialization"
 import { exportDebugLogs, initCrashReporter, initLogging, startNetLog, write as writeLog } from "./logging"
@@ -187,6 +187,7 @@ const main = Effect.gen(function* () {
     packaged: app.isPackaged,
     onboardingTest: Boolean(onboardingTestRoot),
   })
+  logger.log(`gui build=${BUILD_ID}`)
 
   ensureLoopbackNoProxy()
   useEnvProxy()

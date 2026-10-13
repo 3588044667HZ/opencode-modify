@@ -6,6 +6,7 @@ import { ConfigProvider, Context, Effect, Exit, Layer, Scope } from "effect"
 import { HttpRouter, HttpServer } from "effect/unstable/http"
 import { OpenApi } from "effect/unstable/httpapi"
 import { createServer } from "node:http"
+import { InstallationBuild } from "@opencode-ai/core/installation/version"
 import { MDNS } from "./mdns"
 import { HttpApiApp } from "./routes/instance/httpapi/server"
 import { disposeMiddleware } from "./routes/instance/httpapi/lifecycle"
@@ -87,6 +88,7 @@ const listenEffect: (opts: ListenOptions) => Effect.Effect<EffectListener, unkno
     const listenerUrl = makeURL(opts.hostname, address.port)
     const unpublishMdns = yield* setupMdns(opts, address.port, state.scope)
     url = listenerUrl
+    yield* Effect.logInfo(`server listening build=${InstallationBuild}`)
 
     return {
       hostname: opts.hostname,
