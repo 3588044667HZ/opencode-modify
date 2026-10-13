@@ -154,7 +154,7 @@ bun dev            # CLI（TUI）
 bun dev:desktop    # 桌面端（agent-teams UI 默认开启）
 bun dev:web        # Web 版
 bun run build:local  # 一次性构建服务端 bundle + 桌面 GUI（带防陈旧校验）
-# 可选：--package 打包 Windows 安装包；--deploy <dir> 覆盖部署到运行目录
+# 可选：--package 仅打包 win-unpacked（本地部署用）；--installer 额外产出 NSIS 安装器；--deploy <dir> 覆盖部署到运行目录
 ```
 
 桌面端/服务端验证前请先执行 `bun run build:local`（或 `bun run build:local -- --package --deploy D:/opencode-desktop-dev`），避免陈旧产物让改动"不生效"。

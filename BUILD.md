@@ -5,4 +5,5 @@
 
 | 时间 | Build ID | 提交 | 本次更改 | 服务端标记 | GUI 标记 |
 | --- | --- | --- | --- | --- | --- |
-| 2026-10-13 13:47 | 261013-1336-9fed169-dirty | 9fed169 | chore: cut upstream opencode runtime/build ties | 261013-1336-9fed169-dirty | 261013-1336-9fed169-dirty |
+| 2026-10-13 13:53 | 261013-1336-9fed169-dirty | 9fed169 | chore: cut upstream opencode runtime/build ties | 261013-1336-9fed169-dirty | 261013-1336-9fed169-dirty |
+| 2026-10-13 18:53 | 261013-1853-a4e168d-dirty | a4e168d | feat(build): add build markers for server and GUI; fix(app): keep agent teams panel mounted across polls | 261013-1853-a4e168d-dirty | 261013-1853-a4e168d-dirty |

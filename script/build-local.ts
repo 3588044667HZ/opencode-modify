@@ -35,9 +35,10 @@ const value = (flag: string) => {
 
 const HELP = `用法: bun run build:local [选项]
 
-  --package        构建后执行 electron-builder --win 打包（可能需联网下载 electron/nsis 资源）
+  --package        构建后打包未打包目录 win-unpacked（electron-builder --win --dir，快，用于本地部署）
+  --installer      在打包基础上额外产出 NSIS 安装器（electron-builder --win，慢，用于分发给其他机器）
   --deploy <dir>   把 packages/desktop/dist/win-unpacked 覆盖到 <dir>（例如 D:/opencode-desktop-dev）
-                   需先 --package；请先完全退出目标目录里正在运行的 OpenCode
+                   需先 --package 或 --installer；请先完全退出目标目录里正在运行的 OpenCode
   --channel <c>    dev | beta | prod（默认 dev，决定 appId/productName/图标）
   -h, --help       显示帮助
 
@@ -103,16 +104,27 @@ step("更新 BUILD.md")
 await updateBuildLog({ buildId, sha, dirty, time })
 console.log(`  已记录 ${buildId}`)
 
-if (has("--package")) {
-  step(`打包（electron-builder --win，channel=${channel}）`)
+const packageRequested = has("--package") || has("--installer")
+const installer = has("--installer")
+
+if (packageRequested) {
+  step(
+    installer
+      ? `打包（electron-builder --win，含 NSIS 安装器，channel=${channel}）`
+      : `打包（electron-builder --win --dir，仅 win-unpacked，channel=${channel}）`,
+  )
   await $`bun ./scripts/copy-icons.ts ${channel}`.cwd(desktopDir)
   await $`bun ./scripts/copy-metainfo.ts ${channel}`.cwd(desktopDir)
-  await $`bun run package:win`.cwd(desktopDir)
+  if (installer) {
+    await $`bunx electron-builder --win --config electron-builder.config.ts`.cwd(desktopDir)
+  } else {
+    await $`bunx electron-builder --win --dir --config electron-builder.config.ts`.cwd(desktopDir)
+  }
 }
 
 const deployDir = value("--deploy")
 if (deployDir) {
-  if (!has("--package")) throw new Error("--deploy 需要与 --package 一起使用")
+  if (!packageRequested) throw new Error("--deploy 需要与 --package 或 --installer 一起使用")
   const from = path.join(desktopDir, "dist", "win-unpacked")
   const statFrom = await stat(from).catch(() => undefined)
   if (!statFrom?.isDirectory()) throw new Error(`未找到打包产物: ${from}`)
@@ -136,7 +148,10 @@ async function updateBuildLog(input: { buildId: string; sha: string; dirty: bool
     const lastId = cells(lines[lastIndex])[1] ?? ""
     const lastSha = lastId.replace(/^\d{6}-\d{4}-/, "").replace(/-dirty$/, "")
     if (lastSha === input.sha && lastId.endsWith("-dirty") === input.dirty) {
-      lines[lastIndex] = `| ${input.time} | ${cells(lines[lastIndex]).slice(1).join(" | ")} |`
+      // 同一代码状态重复构建：刷新时间与 Build ID（保留提交与本次更改列），
+      // 否则表格里的标记会与最新产物不一致。
+      const previous = cells(lines[lastIndex])
+      lines[lastIndex] = `| ${input.time} | ${input.buildId} | ${previous[2]} | ${previous[3]} | ${input.buildId} | ${input.buildId} |`
       await Bun.write(BUILD_FILE, lines.join("\n"))
       return
     }
