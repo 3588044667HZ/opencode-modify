@@ -1,10 +1,10 @@
 # opencode-modify — Agent Teams 多智能体编排分支
 
-> 基于 [opencode](https://github.com/anomalyco/opencode) 的私有实验分支：把「一个主 Agent 调度多个并行子 Agent」做成一等公民——派发、通信、共享状态、可观测、可干预，全部内建。
+> 独立维护的多智能体编排分支（源自 opencode 快照，不跟踪上游）：把「一个主 Agent 调度多个并行子 Agent」做成一等公民——派发、通信、共享状态、可观测、可干预，全部内建。
 
-这不是又一个 opencode 皮肤或发行版。本分支的定位是**多智能体编排（agent-teams）的试验场**：在保留 opencode 全部原有能力（TUI/桌面端、LSP、MCP、插件、会话管理……）的前提下，围绕"团队"补上一整套原版没有的运行时、工具与 UI。
+这不是又一个 opencode 皮肤或发行版。本分支的定位是**多智能体编排（agent-teams）的试验场**：在保留既有全部能力（TUI/桌面端、LSP、MCP、插件、会话管理……）的前提下，围绕"团队"补上一整套原版没有的运行时、工具与 UI。
 
-原版 README 及其翻译（`README.zh.md` 等）为上游文档，未同步本分支改动；本 README 取代原版作为入口。
+本仓库为**独立维护**：不下载官方 CLI、不检查官方更新、不执行官方升级，一切代码只来自本仓库构建。历史多语言 README（`README.zh.md` 等）为快照文件，未同步本分支改动。
 
 ---
 
@@ -153,7 +153,11 @@ bun install
 bun dev            # CLI（TUI）
 bun dev:desktop    # 桌面端（agent-teams UI 默认开启）
 bun dev:web        # Web 版
+bun run build:local  # 一次性构建服务端 bundle + 桌面 GUI（带防陈旧校验）
+# 可选：--package 打包 Windows 安装包；--deploy <dir> 覆盖部署到运行目录
 ```
+
+桌面端/服务端验证前请先执行 `bun run build:local`（或 `bun run build:local -- --package --deploy D:/opencode-desktop-dev`），避免陈旧产物让改动"不生效"。
 
 测试（必须在包目录内运行，禁止从仓库根运行）：
 
@@ -181,14 +185,16 @@ bun test --timeout 30000 test/tool/agent-send.test.ts test/session/collaboration
 
 - `specs/agent-teams.md` — 团队派发/消息/黑板的总体设计
 - `specs/agent-teams-management.md` — `team` 工具、完成唤醒、看门狗与上下文预算
+- `specs/agent-teams-delivery.md` — 投递可靠性：队列入队、可靠唤醒、取消解耦
 - `specs/agent-teams-permissions.md` — 团队场景的权限模型
 - `specs/agent-teams-prompt-awareness.md` — 提示词注入策略
 - `specs/agent-teams-backlog.md` — 后续计划（任务板、广播、成员超时等）
+- `specs/independent-maintenance.md` — 独立维护：切断上游运行时/构建时联系
 
 ---
 
-## 与上游的关系
+## 独立维护声明
 
-- 上游项目：[opencode](https://github.com/anomalyco/opencode)（官网 [opencode.ai](https://opencode.ai)）。本分支为个人私有实验分支，默认工作在 `dev`。
-- 上游全部语言版 README（`README.zh.md`、`README.ja.md`…）保持原样，仅作参考；本 README 为本分支的权威说明。
-- 许可：沿用上游 [MIT License](LICENSE)。
+- 本仓库独立维护：不跟踪上游、不下载官方 CLI、不检查官方更新、不执行官方升级；桌面端与 CLI 的代码一律来自本仓库构建（`bun run build:local`）。
+- 升级方式只有一种：`git pull` 本仓库后重新构建。`opencode upgrade` 在该分支会被明确拒绝。
+- 仅保留必要的开源许可与版权声明（见 [LICENSE](LICENSE)，MIT）；其余与上游发行渠道的关系均已移除。

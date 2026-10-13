@@ -334,6 +334,7 @@ export const githubInstall = Effect.fn("Cli.github.install")(function* () {
             ? ""
             : `\n        env:${providers[provider].env.map((e) => `\n          ${e}: \${{ secrets.${e} }}`).join("")}`
 
+        // 该 action 必须由本 fork 仓库自行发布；生成的工作流不再引用官方 anomalyco/opencode。
         await Filesystem.write(
           path.join(app.root, WORKFLOW_FILE),
           `name: opencode
@@ -364,7 +365,7 @@ jobs:
           persist-credentials: false
 
       - name: Run opencode
-        uses: anomalyco/opencode/github@latest${envStr}
+        uses: 3588044667HZ/opencode-modify/github@latest${envStr}
         with:
           model: ${provider}/${model}`,
         )
