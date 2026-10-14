@@ -81,6 +81,7 @@ public final class SemanticServerStarter extends ModernApplicationStarter {
 
     IndexMonitor monitor = new IndexMonitor();
     ReadViewService readViewService = new ReadViewService();
+    BlastRadiusService blastRadiusService = new BlastRadiusService();
 
     JsonRpcServer[] serverRef = new JsonRpcServer[1];
     JsonRpcServer.Handler handler =
@@ -104,6 +105,13 @@ public final class SemanticServerStarter extends ModernApplicationStarter {
                 throw new JsonRpcServer.RpcException(-32000, "indexing", monitor.errorData());
               }
               return readViewService.readView(project, projectPath.toString(), params);
+            }
+            case "blast_radius": {
+              Project project = monitor.getProject();
+              if (project == null || monitor.isIndexing() || DumbService.isDumb(project)) {
+                throw new JsonRpcServer.RpcException(-32000, "indexing", monitor.errorData());
+              }
+              return blastRadiusService.blastRadius(project, projectPath.toString(), params);
             }
             case "shutdown": {
               JsonRpcServer server = serverRef[0];

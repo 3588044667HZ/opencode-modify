@@ -546,7 +546,7 @@ final class ReadViewService {
 
   // ---- 工具 ----
 
-  private static Path resolvePath(String basePath, String file) {
+  static Path resolvePath(String basePath, String file) {
     Path path = Paths.get(file);
     if (!path.isAbsolute() && basePath != null) {
       path = Paths.get(basePath).resolve(file);
@@ -568,7 +568,7 @@ final class ReadViewService {
     }
   }
 
-  private static String displayPath(VirtualFile virtualFile, Project project) {
+  static String displayPath(VirtualFile virtualFile, Project project) {
     String path = virtualFile.getPath();
     VirtualFile baseDir = ProjectUtil.guessProjectDir(project);
     if (baseDir != null) {

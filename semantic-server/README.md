@@ -1,7 +1,8 @@
 # semantic-server —— IntelliJ 无头语义守护（MVP）
 
 按 `LLM-IDE-SPEC/`（main / intellij-headless / jsonrpc-channel / adapter-layer）实现的 IntelliJ
-无头语义守护：JSON-RPC 2.0 over AF_UNIX（NDJSON），提供 `ping` / `subscribe` / `read_view` / `shutdown`。
+无头语义守护：JSON-RPC 2.0 over AF_UNIX（NDJSON），提供 `ping` / `subscribe` / `read_view` /
+`blast_radius` / `shutdown`。
 Java 实现，无 Kotlin，可在无 Gradle、无网络的条件下用本地 IDEA 平台 jar 直接构建。
 
 ## 目录
@@ -14,13 +15,16 @@ semantic-server/
 │   ├── JsonRpcServer.java           # AF_UNIX JSON-RPC 服务（accept/读线程/推送/空闲超时/socket 清理）
 │   ├── IndexMonitor.java            # DumbService 轮询 → notifications/indexing（阶段近似进度）
 │   ├── ReadViewService.java         # read_view 聚合：PSI/VFS/引用 resolve/诊断
+│   ├── BlastRadiusService.java      # blast_radius 聚合：定义/引用分类/入口/测试/callees/风险 + 缓存
 │   └── Log.java
 ├── src/main/resources/META-INF/plugin.xml   # appStarter EP + 最小依赖
 ├── script/build-local.sh            # javac + jar 打包 + 安装到 .sandbox/plugins
 ├── script/gradle-build.sh           # Gradle 离线构建（依赖固化在 .gradle-home/）
 ├── script/run-local.sh              # 用本地 IDEA 平台 + JBR 启动守护（镜像 bin/idea.bat）
 ├── script/probe.ts                  # Bun 探针：ping/subscribe/read_view/shutdown
+├── script/blast-probe.ts            # Bun 探针：blast_radius（fixtures 生成/缓存/scope 证据）
 ├── script/protocol-conformance.ts   # 跨实现协议一致性测试（真实守护 ↔ OC 客户端）
+├── fixtures/blast_radius/           # 协议 fixtures：input.json + output.json（真实守护响应）
 ├── sample-project/                  # 跨文件调用样例（Main/Greeter + 故意报错的 Broken，含 .idea/iml）
 ├── build.gradle.kts / settings.gradle.kts   # org.jetbrains.intellij.platform 2.2.1 + local IDEA 平台
 ├── .gradle-home/                    # Gradle 依赖仓库（项目本地，gitignore）
@@ -141,6 +145,65 @@ bun run semantic-server/script/protocol-conformance.ts
 entry 的 size.lines/覆盖/诊断/锚点对齐（含与磁盘逐行比对）、error 级诊断（`Broken.java`）、
 -32001、definition 跨文件、shutdown 后 socket 关闭、原始帧 id 回显/顶层字段精确/严格解码。
 当前状态：**CONFORMANCE PASS 62/62**。
+
+## blast_radius（符号影响面）
+
+`blast_radius(params)`：`{"symbol": string, "scope"?: string}`。scope 只识别 `file:<项目相对路径>`
+（限定全部 ReferencesSearch；文件不存在 → `-32001 file not found`），其他前缀忽略（全项目搜索；
+scope 非字符串 → `-32603`）。
+
+响应字段（冻结协议）：
+
+- `definition: {file, line, kind}`（kind 小写：method/class/field/parameter/unknown；line 从 1 起）；
+- `callers: [{file, line, context, is_test}]`：全量按“生产优先 → file → line”排序；>20 截断为前 20，
+  此时 `summary.callers_count=20` 且出现 `summary.callers_total=全量数`（未截断时无该字段）。
+  context=引用点最近外层 PsiMethod 名，无则最近 PsiClass 名，再无则文件名；
+  is_test=小写路径含 test/spec/__tests__；
+- `callees: [{symbol, file, line}]`：定义体（PsiMethod）内可解析到项目源码（有 VirtualFile 且非
+  PsiCompiledElement）的 method/field/class；目标类与定义类不同时 symbol=`ClassName.name`；
+  去重 (symbol,file,line)、按 file,line 排序、上限 50；PsiClass 定义时 callees=[];
+- `affected_files: [string]`：定义文件 + 非测试 caller 文件，去重、字典序；
+- `entry_points: [{file, line, context, reason}]`：level1（caller 的 context 本身就是 main）或
+  level2（对每个非测试 context 方法做一次 ReferencesSearch，其使用点 context 为 main）；
+  reason 固定 `reached_from_main`；去重 (file,line)、上限 10；
+- `tests_affected: [{file, line, name}]`：从全量测试 caller 提取（不受 callers 截断影响），
+  name=context，按 file,line 去重排序；
+- `summary: {callers_count, callers_total?, callees_count, files_count, has_public_api_usage, risk}`：
+  risk = has_public_api_usage → high；否则生产 caller 数=0 → low；否则 medium。
+  has_public_api_usage = 任一 caller 的最近外层方法/类声明带 public。
+
+缓存与限时：静态 Map，键 `symbol|scope`，以 `PsiModificationTracker.getInstance(project).getModificationCount()`
+为失效基准（2026.2 中该 API 在 `com.intellij.psi.util`，已用 `javap` 核实），上限 100 条（LRU）；
+命中/未命中分别打日志。每次查询时间预算 1.5s：累计超时后停止 level2 入口追踪并吞掉剩余 callees。
+
+校验证据（真实守护 + sample-project）：
+
+- fixtures：`fixtures/blast_radius/input.json`（`{"symbol":"run"}`）+
+  `fixtures/blast_radius/output.json`（真实响应原样美化落盘）；
+  生成命令：`bash script/build-local.sh` →
+  `bash script/run-local.sh sample-project .tmp/blast.sock --idle-seconds 600` →
+  `bun script/blast-probe.ts .tmp/blast.sock --early --out fixtures/blast_radius/output.json`；
+- `{"symbol":"run"}` → definition `TaskEngine.java:4 method`；callers 全量 23（ManyCallers 21 +
+  TaskWorker 1 + TaskEngineTest 1）截断为 20，`callers_total=23`；callees `format @ TaskEngine.java:8`；
+  affected 3 files（ManyCallers/TaskEngine/TaskWorker）；entry `TaskRunner.java:5 main`；
+  tests `TaskEngineTest.java:5 runIsStable`；`has_public_api_usage=false`，risk medium；
+- `{"symbol":"greet"}` → caller `Main.java:8 main`（public）→ `has_public_api_usage=true`，risk high；
+- scope `file:src/main/java/demo/tasks/TaskEngineTest.java` → 仅测试 caller（runIsStable），risk low；
+- 错误码：索引期 `-32000`（`data.progress`，与 read_view 相同）；`{"symbol":"nosuch"}` → `-32002
+  symbol not found`；缺失 scope 文件 → `-32001`；非字符串 scope → `-32603`；
+- 缓存：连续 3 次同 modificationCount 查询日志为 `cache hit`（首次 `cache miss (computed)`，modCount
+  不变）；磁盘把 ManyCallers 的 `run` 调用从 21 处改为 22 处并刷新 VFS 后查询 → `cache miss` 且
+  `callers_total` 23→24；还原后回到 23（两种情况下 callers 列表均正确截断到 20）。
+
+偏差说明：
+
+- `callers` 按调用点去重（不按文件合并），以保留每个调用点的行号；
+- `is_public_api` 不作为 caller 字段输出，仅聚合进 `summary.has_public_api_usage`；
+- `callees` 不包含 JDK/库编译类（PsiCompiledElement），只保留可解析到项目源码的目标；
+- 实现注记：`blast_radius` 分支加在 `SemanticServerStarter` 的 handler switch（`JsonRpcServer`
+  只提供通用传输层与分发），就绪检查与 read_view 一致；
+- 冷启动竞态：向项目新增文件后首次打开时，短名索引更新可能略滞后于 ready 判定，此时查询可能
+  返回 `-32002`；稍候重试即可（索引预热后本机未复现）。
 
 ## 启动方式尝试记录
 

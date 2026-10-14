@@ -18,10 +18,13 @@ const FIXTURE_DIR = path.join(SERVER_DIR, "sample-project", "src", "main", "java
 const MAIN = path.join(FIXTURE_DIR, "Main.java")
 const BROKEN = path.join(FIXTURE_DIR, "Broken.java")
 const MISSING = path.join(FIXTURE_DIR, "Missing.java")
+const FIXTURE_INPUT = path.join(SERVER_DIR, "fixtures", "blast_radius", "input.json")
+const FIXTURE_OUTPUT = path.join(SERVER_DIR, "fixtures", "blast_radius", "output.json")
 
 const clientModule = await import(pathToFileURL(path.join(ROOT, "packages/opencode/src/semantic/client.ts")).href)
 const transportModule = await import(pathToFileURL(path.join(ROOT, "packages/opencode/src/semantic/transport.ts")).href)
 const protocol = await import(pathToFileURL(path.join(ROOT, "packages/opencode/src/semantic/protocol.ts")).href)
+const renderModule = await import(pathToFileURL(path.join(ROOT, "packages/opencode/src/semantic/render.ts")).href)
 // 与 protocol.ts 解析到同一个 effect 实例；用于对原始帧做严格解码（多余字段报错）
 const effect = await import(pathToFileURL(Bun.resolveSync("effect", path.join(ROOT, "packages/opencode/src/semantic"))).href)
 
@@ -60,6 +63,23 @@ type ReadViewResult = {
   coverage: { read: Array<[number, number]>; unread: Array<[number, number]> }
   diagnostics: Array<{ line: number; severity: string; message: string }>
 }
+type BlastRadiusResult = {
+  symbol: string
+  definition: { file: string; line: number; kind: string }
+  callers: Array<{ file: string; line: number; context: string; is_test: boolean }>
+  callees: Array<{ symbol: string; file: string; line: number }>
+  affected_files: string[]
+  entry_points: Array<{ file: string; line: number; context: string; reason: string }>
+  tests_affected: Array<{ file: string; line: number; name: string }>
+  summary: {
+    callers_count: number
+    callers_total?: number
+    callees_count: number
+    files_count: number
+    has_public_api_usage: boolean
+    risk: string
+  }
+}
 
 const checks: Array<{ name: string; ok: boolean; detail: string }> = []
 const snippets = new Map<string, string>()
@@ -73,6 +93,15 @@ function check(name: string, ok: boolean, detail: string, raw?: unknown): void {
   checks.push({ name, ok, detail })
   if (!ok && raw !== undefined) snippets.set(name, clip(JSON.stringify(raw)))
   console.log(`${ok ? "✓" : "✗"} ${name} — ${detail}`)
+}
+
+function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonical)
+  if (value !== null && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b))
+    return Object.fromEntries(entries.map(([key, item]) => [key, canonical(item)]))
+  }
+  return value
 }
 
 function sleep(ms: number): Promise<void> {
@@ -534,6 +563,86 @@ try {
     }
   } catch (error) {
     check("[8] read_view(definition, Greeter) 解码成功", false, `${(error as Error).name}: ${(error as Error).message}`)
+  }
+
+  // ---- 用例 11-15：blast_radius 契约（fixtures + 聚合语义 + 渲染） ----
+  const fixtureInput = (await Bun.file(FIXTURE_INPUT).json()) as { symbol: string; scope?: string }
+  const fixtureOutput = (await Bun.file(FIXTURE_OUTPUT).json()) as BlastRadiusResult
+  check(
+    "[11] 客户端严格解码 fixtures/blast_radius/output.json（无多余字段）",
+    strictDecode(protocol.BlastRadiusResult, fixtureOutput) !== undefined,
+    `symbol=${fixtureOutput.symbol} callers=${fixtureOutput.callers.length}`,
+  )
+  try {
+    const blastStarted = Date.now()
+    const actual = (await typed.blastRadius(fixtureInput)) as BlastRadiusResult
+    const blastElapsed = Date.now() - blastStarted
+    check(
+      "[11] blast_radius(fixture input) 与 output.json 深度一致",
+      JSON.stringify(canonical(actual)) === JSON.stringify(canonical(fixtureOutput)),
+      `callers=${actual.callers.length}/${fixtureOutput.callers.length} total=${actual.summary.callers_total}/${fixtureOutput.summary.callers_total}`,
+      { actual, expected: fixtureOutput },
+    )
+    check("[12] 小项目基准：查询耗时 < 2s", blastElapsed < 2_000, `${blastElapsed}ms（含首次 ReferencesSearch）`)
+    check(
+      "[12] 截断：callers.length=20、callers_count=20、callers_total=23",
+      actual.callers.length === 20 && actual.summary.callers_count === 20 && actual.summary.callers_total === 23,
+      `len=${actual.callers.length} count=${actual.summary.callers_count} total=${actual.summary.callers_total}`,
+    )
+    check(
+      "[12] tests_affected 从全量集提取 runIsStable（被截断的 caller 列表外）",
+      actual.tests_affected.some((test) => test.name === "runIsStable" && test.file.endsWith("TaskEngineTest.java")),
+      `tests=${clip(JSON.stringify(actual.tests_affected))}`,
+    )
+    const entry = actual.entry_points[0]
+    check(
+      "[12] 入口点两层可达 main（reached_from_main）",
+      entry !== undefined && entry.context === "main" && entry.reason === "reached_from_main" && entry.file.endsWith("TaskRunner.java"),
+      `entry=${clip(JSON.stringify(actual.entry_points))}`,
+    )
+    check(
+      "[12] callees 含 format @ TaskEngine.java",
+      actual.callees.some((callee) => callee.symbol === "format" && callee.file.endsWith("TaskEngine.java")),
+      `callees=${clip(JSON.stringify(actual.callees))}`,
+    )
+    const rendered = renderModule.renderBlastRadius(actual)
+    check(
+      "[13] 渲染层：头部/截断行/入口/风险",
+      rendered.startsWith("run() @ src/main/java/demo/tasks/TaskEngine.java:4 (method)\n") &&
+        rendered.includes("  callers: 20+ (total 23)") &&
+        rendered.includes("main ← reached_from_main") &&
+        rendered.includes("risk: medium"),
+      clip(rendered.replace(/\n/g, " ⏎ "), 260),
+    )
+  } catch (error) {
+    check("[11] blast_radius(fixture input) 与 output.json 深度一致", false, `${(error as Error).name}: ${(error as Error).message}`)
+  }
+
+  // 用例 14：未知符号 → -32002
+  let blastMissingCode: number | undefined
+  let blastMissingDetail = ""
+  try {
+    const resolved = (await typed.blastRadius({ symbol: "no_such_symbol_xyz" })) as BlastRadiusResult
+    blastMissingDetail = `未抛错，返回 symbol=${resolved.symbol}`
+  } catch (error) {
+    blastMissingCode = (error as { code?: number }).code
+    blastMissingDetail = `${(error as Error).name} code=${blastMissingCode} message=${(error as Error).message}`
+  }
+  check("[14] 未知符号 → RpcError -32002", blastMissingCode === -32002, blastMissingDetail)
+
+  // 用例 15：scope=file: 限定
+  try {
+    const scoped = (await typed.blastRadius({
+      symbol: "run",
+      scope: "file:src/main/java/demo/tasks/TaskEngineTest.java",
+    })) as BlastRadiusResult
+    check(
+      "[15] scope=file: 仅返回该文件引用（全为测试）",
+      scoped.callers.length >= 1 && scoped.callers.every((caller) => caller.is_test && caller.file.endsWith("TaskEngineTest.java")),
+      `callers=${clip(JSON.stringify(scoped.callers))} risk=${scoped.summary.risk}`,
+    )
+  } catch (error) {
+    check("[15] scope=file: 仅返回该文件引用（全为测试）", false, `${(error as Error).name}: ${(error as Error).message}`)
   }
 
   // ---- 用例 9：shutdown + 连接失败 ----

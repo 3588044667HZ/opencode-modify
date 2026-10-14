@@ -1,0 +1,165 @@
+{
+  "symbol": "run",
+  "definition": {
+    "file": "src/main/java/demo/tasks/TaskEngine.java",
+    "line": 4,
+    "kind": "method"
+  },
+  "callers": [
+    {
+      "file": "src/main/java/demo/tasks/ManyCallers.java",
+      "line": 6,
+      "context": "invokeAll",
+      "is_test": false
+    },
+    {
+      "file": "src/main/java/demo/tasks/ManyCallers.java",
+      "line": 7,
+      "context": "invokeAll",
+      "is_test": false
+    },
+    {
+      "file": "src/main/java/demo/tasks/ManyCallers.java",
+      "line": 8,
+      "context": "invokeAll",
+      "is_test": false
+    },
+    {
+      "file": "src/main/java/demo/tasks/ManyCallers.java",
+      "line": 9,
+      "context": "invokeAll",
+      "is_test": false
+    },
+    {
+      "file": "src/main/java/demo/tasks/ManyCallers.java",
+      "line": 10,
+      "context": "invokeAll",
+      "is_test": false
+    },
+    {
+      "file": "src/main/java/demo/tasks/ManyCallers.java",
+      "line": 11,
+      "context": "invokeAll",
+      "is_test": false
+    },
+    {
+      "file": "src/main/java/demo/tasks/ManyCallers.java",
+      "line": 12,
+      "context": "invokeAll",
+      "is_test": false
+    },
+    {
+      "file": "src/main/java/demo/tasks/ManyCallers.java",
+      "line": 13,
+      "context": "invokeAll",
+      "is_test": false
+    },
+    {
+      "file": "src/main/java/demo/tasks/ManyCallers.java",
+      "line": 14,
+      "context": "invokeAll",
+      "is_test": false
+    },
+    {
+      "file": "src/main/java/demo/tasks/ManyCallers.java",
+      "line": 15,
+      "context": "invokeAll",
+      "is_test": false
+    },
+    {
+      "file": "src/main/java/demo/tasks/ManyCallers.java",
+      "line": 16,
+      "context": "invokeAll",
+      "is_test": false
+    },
+    {
+      "file": "src/main/java/demo/tasks/ManyCallers.java",
+      "line": 17,
+      "context": "invokeAll",
+      "is_test": false
+    },
+    {
+      "file": "src/main/java/demo/tasks/ManyCallers.java",
+      "line": 18,
+      "context": "invokeAll",
+      "is_test": false
+    },
+    {
+      "file": "src/main/java/demo/tasks/ManyCallers.java",
+      "line": 19,
+      "context": "invokeAll",
+      "is_test": false
+    },
+    {
+      "file": "src/main/java/demo/tasks/ManyCallers.java",
+      "line": 20,
+      "context": "invokeAll",
+      "is_test": false
+    },
+    {
+      "file": "src/main/java/demo/tasks/ManyCallers.java",
+      "line": 21,
+      "context": "invokeAll",
+      "is_test": false
+    },
+    {
+      "file": "src/main/java/demo/tasks/ManyCallers.java",
+      "line": 22,
+      "context": "invokeAll",
+      "is_test": false
+    },
+    {
+      "file": "src/main/java/demo/tasks/ManyCallers.java",
+      "line": 23,
+      "context": "invokeAll",
+      "is_test": false
+    },
+    {
+      "file": "src/main/java/demo/tasks/ManyCallers.java",
+      "line": 24,
+      "context": "invokeAll",
+      "is_test": false
+    },
+    {
+      "file": "src/main/java/demo/tasks/ManyCallers.java",
+      "line": 25,
+      "context": "invokeAll",
+      "is_test": false
+    }
+  ],
+  "callees": [
+    {
+      "symbol": "format",
+      "file": "src/main/java/demo/tasks/TaskEngine.java",
+      "line": 8
+    }
+  ],
+  "affected_files": [
+    "src/main/java/demo/tasks/ManyCallers.java",
+    "src/main/java/demo/tasks/TaskEngine.java",
+    "src/main/java/demo/tasks/TaskWorker.java"
+  ],
+  "entry_points": [
+    {
+      "file": "src/main/java/demo/tasks/TaskRunner.java",
+      "line": 5,
+      "context": "main",
+      "reason": "reached_from_main"
+    }
+  ],
+  "tests_affected": [
+    {
+      "file": "src/main/java/demo/tasks/TaskEngineTest.java",
+      "line": 5,
+      "name": "runIsStable"
+    }
+  ],
+  "summary": {
+    "callers_count": 20,
+    "callers_total": 23,
+    "callees_count": 1,
+    "files_count": 3,
+    "has_public_api_usage": false,
+    "risk": "medium"
+  }
+}
