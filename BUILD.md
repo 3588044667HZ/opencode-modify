@@ -10,3 +10,4 @@
 | 2026-10-13 19:19 | 261013-1919-85124c3-dirty | 85124c3 | chore(build): default --package to dir packaging and add --installer | 261013-1919-85124c3-dirty | 261013-1919-85124c3-dirty |
 | 2026-10-14 14:33 | semantic-warmup-manual | 85124c3 | feat(app): 语义引擎预热进度条 + 预热期提问排队 + ready/failed 自动放行，失败 toast/响铃/通知 | 未构建 | 未构建 |
 | 2026-10-14 15:44 | 261014-1544-85124c3-dirty | 85124c3 | 未提交改动 | 261014-1544-85124c3-dirty | 261014-1544-85124c3-dirty |
+| 2026-10-14 16:47 | 261014-1647-ad0db83-dirty | ad0db83 | chore(build): record semantic engine build markers; feat(app): add semantic warmup progress and prompt queue; feat(semantic): add semantic engine client, token view renderer and read_view tool; feat(semantic): add headless IntelliJ semantic server; docs(spec): add LLM IDE semantic engine spec; chore: prune upstream leftovers | 261014-1647-ad0db83-dirty | 261014-1647-ad0db83-dirty |
