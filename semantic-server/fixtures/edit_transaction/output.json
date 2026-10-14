@@ -1,0 +1,60 @@
+{
+  "applied": true,
+  "files_changed": 2,
+  "changes_applied": 4,
+  "changes_total": 4,
+  "files": [
+    {
+      "file": "src/main/java/demo/txn/Alpha.java",
+      "old_version": "<version>",
+      "new_version": "<version>",
+      "changes_applied": 2,
+      "line_changes": [
+        {
+          "line": 5,
+          "action": "modified"
+        },
+        {
+          "line": 9,
+          "action": "modified"
+        }
+      ]
+    },
+    {
+      "file": "src/main/java/demo/txn/Beta.java",
+      "old_version": "<version>",
+      "new_version": "<version>",
+      "changes_applied": 2,
+      "line_changes": [
+        {
+          "line": 5,
+          "action": "modified"
+        },
+        {
+          "line": 9,
+          "action": "modified"
+        }
+      ]
+    }
+  ],
+  "diagnostics_delta": {
+    "src/main/java/demo/txn/Alpha.java": {
+      "errors": -1,
+      "warnings": 0
+    },
+    "src/main/java/demo/txn/Beta.java": {
+      "errors": 0,
+      "warnings": 0
+    }
+  },
+  "diagnostics_after": {
+    "src/main/java/demo/txn/Alpha.java": {
+      "errors": 0,
+      "warnings": 0
+    },
+    "src/main/java/demo/txn/Beta.java": {
+      "errors": 0,
+      "warnings": 3
+    }
+  }
+}

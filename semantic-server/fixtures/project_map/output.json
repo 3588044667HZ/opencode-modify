@@ -1,8 +1,8 @@
 {
   "project": {
     "root": "<root>",
-    "total_files": 15,
-    "total_modules": 7
+    "total_files": 17,
+    "total_modules": 8
   },
   "modules": [
     {
@@ -55,6 +55,16 @@
         "TaskWorker.java"
       ],
       "is_entry": true,
+      "hot": false
+    },
+    {
+      "name": "txn",
+      "path": "src/main/java/demo/txn",
+      "files": [
+        "Alpha.java",
+        "Beta.java"
+      ],
+      "is_entry": false,
       "hot": false
     },
     {

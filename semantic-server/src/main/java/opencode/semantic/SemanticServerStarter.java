@@ -79,10 +79,15 @@ public final class SemanticServerStarter extends ModernApplicationStarter {
     Log.info("starting semantic-server project=" + projectPath + " socket=" + socketPath
         + " idle=" + idleSeconds + "s");
 
+    // 启动恢复：先重放/清理 edit_transaction 的 journal，失败则置只读（-32018），守护照常启动。
+    // 必须在 RPC server 开始服务写请求之前完成。
+    EditTransactionService.recoverJournals(projectPath);
+
     IndexMonitor monitor = new IndexMonitor();
     ReadViewService readViewService = new ReadViewService();
     BlastRadiusService blastRadiusService = new BlastRadiusService();
     EditBatchService editBatchService = new EditBatchService();
+    EditTransactionService editTransactionService = new EditTransactionService();
     VerifyTestService verifyTestService = new VerifyTestService();
     ProjectMapService projectMapService = new ProjectMapService();
 
@@ -122,6 +127,13 @@ public final class SemanticServerStarter extends ModernApplicationStarter {
                 throw new JsonRpcServer.RpcException(-32000, "indexing", monitor.errorData());
               }
               return editBatchService.editBatch(project, projectPath.toString(), params);
+            }
+            case "edit_transaction": {
+              Project project = monitor.getProject();
+              if (project == null || monitor.isIndexing() || DumbService.isDumb(project)) {
+                throw new JsonRpcServer.RpcException(-32000, "indexing", monitor.errorData());
+              }
+              return editTransactionService.editTransaction(project, projectPath.toString(), params);
             }
             case "verify_test": {
               Project project = monitor.getProject();

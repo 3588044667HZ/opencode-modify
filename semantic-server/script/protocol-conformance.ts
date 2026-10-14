@@ -25,6 +25,9 @@ const EDIT_TARGET = path.join(FIXTURE_DIR, "tasks", "EditableSample.java")
 const EDIT_REL = "src/main/java/demo/tasks/EditableSample.java"
 const VERIFY_DIR = path.join(SERVER_DIR, "fixtures", "verify_test")
 const MAP_DIR = path.join(SERVER_DIR, "fixtures", "project_map")
+const TXN_DIR = path.join(SERVER_DIR, "fixtures", "edit_transaction")
+const TXN_TEMPLATES = path.join(TXN_DIR, "templates")
+const TXN_JOURNAL = path.join(SERVER_DIR, "sample-project", ".opencode", "txn-journal")
 
 const clientModule = await import(pathToFileURL(path.join(ROOT, "packages/opencode/src/semantic/client.ts")).href)
 const transportModule = await import(pathToFileURL(path.join(ROOT, "packages/opencode/src/semantic/transport.ts")).href)
@@ -127,6 +130,23 @@ type ProjectMapDependenciesResult = {
   cycles: string[][]
   building?: boolean
   progress?: number
+}
+
+type EditTransactionResult = {
+  applied: boolean
+  files_changed?: number
+  changes_applied?: number
+  changes_total?: number
+  files?: Array<{
+    file: string
+    old_version: string
+    new_version: string
+    changes_applied: number
+    line_changes: Array<{ line: number; action: string }>
+  }>
+  diagnostics_delta?: Record<string, { errors: number; warnings: number }>
+  diagnostics_after?: Record<string, { errors: number; warnings: number }>
+  error?: { code?: number; message?: string; detail?: Record<string, unknown>; hint?: string }
 }
 
 const checks: Array<{ name: string; ok: boolean; detail: string }> = []
@@ -1358,6 +1378,238 @@ try {
     check("[30] 同版本 10 路并发恰好 1 成功", false, `${(error as Error).name}: ${(error as Error).message}`)
   } finally {
     for (const file of concurrencyCleanup) fs.rmSync(file, { force: true })
+  }
+
+  // ---- 用例 36-40：edit_transaction 契约（fixtures + 回滚 + 版本门 + 校验 + 并发） ----
+  const txnInput = (await Bun.file(path.join(TXN_DIR, "input.json")).json()) as {
+    changes: Array<{ file: string; changes: Array<{ oldString: string; newString: string; description?: string }> }>
+  }
+  const txnGolden = (await Bun.file(path.join(TXN_DIR, "output.json")).json()) as EditTransactionResult
+  const txnCleanupTargets: Array<{ abs: string; template: string }> = []
+  const resetTxnFile = async (rel: string): Promise<string> => {
+    const abs = path.join(SERVER_DIR, "sample-project", rel)
+    const template = path.join(TXN_TEMPLATES, path.basename(rel))
+    fs.copyFileSync(template, abs)
+    txnCleanupTargets.push({ abs, template })
+    for (let i = 0; i < 40; i++) {
+      try {
+        const snapshot = (await typed.readView({ file: rel, view: "entry" })) as ReadViewResult
+        return snapshot.version
+      } catch (error) {
+        if ((error as { code?: number }).code === -32000) {
+          await sleep(500)
+          continue
+        }
+        throw error
+      }
+    }
+    throw new Error(`resetTxnFile 未就绪: ${rel}`)
+  }
+  const txnTemplateText = (rel: string) => fs.readFileSync(path.join(TXN_TEMPLATES, path.basename(rel)), "utf8")
+  const txnJournalEmpty = () => !fs.existsSync(TXN_JOURNAL) || fs.readdirSync(TXN_JOURNAL).length === 0
+  try {
+    check(
+      "[36] 客户端严格解码 fixtures/edit_transaction/output.json",
+      strictDecode(protocol.EditTransactionResult, txnGolden) !== undefined,
+      `files=${txnGolden.files?.length ?? "?"}`,
+    )
+    const fixtureVersions: string[] = []
+    for (const entry of txnInput.changes) fixtureVersions.push(await resetTxnFile(entry.file))
+    const fixtureRequest = {
+      changes: txnInput.changes.map((entry, index) => ({ ...entry, baseVersion: fixtureVersions[index] })),
+    }
+    const txnActual = (await typed.editTransaction(fixtureRequest)) as EditTransactionResult
+    check("[36] 跨文件事务 applied", txnActual.applied === true, `error=${clip(JSON.stringify(txnActual.error ?? null))}`)
+    const normalizedTxn = {
+      ...txnActual,
+      files: (txnActual.files ?? []).map((file) => ({ ...file, old_version: "<version>", new_version: "<version>" })),
+    }
+    check(
+      "[36] 与 output.json 深度一致（版本归一）",
+      JSON.stringify(canonical(normalizedTxn)) === JSON.stringify(canonical(txnGolden)),
+      `files=${txnActual.files?.length} changes=${txnActual.changes_applied}/${txnActual.changes_total}`,
+      { actual: txnActual, expected: txnGolden },
+    )
+    check(
+      "[36] 各文件版本已更新（old=注入值、new≠old）",
+      (txnActual.files ?? []).every(
+        (file, index) =>
+          file.old_version === fixtureVersions[index] &&
+          typeof file.new_version === "string" &&
+          file.new_version.length > 0 &&
+          file.new_version !== file.old_version,
+      ),
+      `versions=${clip(JSON.stringify((txnActual.files ?? []).map((file) => [file.old_version, file.new_version])))}`,
+    )
+    check(
+      "[36] 磁盘内容已更新（≠模板）",
+      txnInput.changes.every(
+        (entry) => fs.readFileSync(path.join(SERVER_DIR, "sample-project", entry.file), "utf8") !== txnTemplateText(entry.file),
+      ),
+      txnInput.changes.map((entry) => entry.file).join(", "),
+    )
+    check("[36] journal 无残留", txnJournalEmpty(), TXN_JOURNAL)
+    const txnRendered = renderModule.renderEditTransaction(txnActual)
+    check(
+      "[36] 成功渲染头部/文件行",
+      txnRendered.startsWith(
+        `edit_transaction applied ${txnActual.changes_applied}/${txnActual.changes_total} changes across ${txnActual.files_changed} files\n`,
+      ) && txnRendered.includes(`(${(txnActual.files ?? [])[0]?.changes_applied ?? 0} changes)`),
+      clip(txnRendered.replace(/\n/g, " ⏎ "), 240),
+    )
+  } catch (error) {
+    check("[36] 跨文件事务 applied", false, `${(error as Error).name}: ${(error as Error).message}`)
+  }
+
+  const txnSecondFile = txnInput.changes[1]?.file
+  try {
+    if (txnSecondFile === undefined) throw new Error("fixture 需 ≥2 个文件")
+    const firstRel = txnInput.changes[0].file
+    const firstVersion = await resetTxnFile(firstRel)
+    const secondVersion = await resetTxnFile(txnSecondFile)
+    const rollback = (await typed.editTransaction({
+      changes: [
+        { file: firstRel, baseVersion: firstVersion, changes: txnInput.changes[0].changes },
+        { file: txnSecondFile, baseVersion: secondVersion, changes: [{ oldString: "NO_SUCH_ANCHOR_TXN", newString: "x" }] },
+      ],
+    })) as EditTransactionResult
+    check(
+      "[37] 第二文件坏锚点 → -32010 整体拒绝",
+      rollback.applied === false && rollback.error?.code === -32010,
+      `error=${clip(JSON.stringify(rollback.error ?? null))}`,
+    )
+    check(
+      "[37] detail.file 指向第二文件",
+      String((rollback.error?.detail as { file?: unknown } | undefined)?.file ?? "").endsWith(path.basename(txnSecondFile)),
+      `detail=${clip(JSON.stringify(rollback.error?.detail))}`,
+    )
+    const firstAbs = path.join(SERVER_DIR, "sample-project", firstRel)
+    const secondAbs = path.join(SERVER_DIR, "sample-project", txnSecondFile)
+    check(
+      "[37] 两文件字节与版本均未变（整体回滚）",
+      fs.readFileSync(firstAbs, "utf8") === txnTemplateText(firstRel) &&
+        fs.readFileSync(secondAbs, "utf8") === txnTemplateText(txnSecondFile) &&
+        ((await typed.readView({ file: firstRel, view: "entry" })) as ReadViewResult).version === firstVersion &&
+        ((await typed.readView({ file: txnSecondFile, view: "entry" })) as ReadViewResult).version === secondVersion,
+      "byte+version unchanged",
+    )
+    check("[37] journal 无残留", txnJournalEmpty(), TXN_JOURNAL)
+  } catch (error) {
+    check("[37] 第二文件坏锚点 → -32010 整体拒绝", false, `${(error as Error).name}: ${(error as Error).message}`)
+  }
+
+  try {
+    if (txnSecondFile === undefined) throw new Error("fixture 需 ≥2 个文件")
+    const firstRel = txnInput.changes[0].file
+    const firstVersion = await resetTxnFile(firstRel)
+    await resetTxnFile(txnSecondFile)
+    const stale = (await typed.editTransaction({
+      changes: [
+        { file: firstRel, baseVersion: firstVersion, changes: txnInput.changes[0].changes },
+        { file: txnSecondFile, baseVersion: "stale00", changes: txnInput.changes[1].changes },
+      ],
+    })) as EditTransactionResult
+    const staleDetail = stale.error?.detail as { file?: unknown; current_version?: unknown; content?: unknown } | undefined
+    check(
+      "[38] 版本不匹配 → -32012（含 file/current_version/content）",
+      stale.applied === false &&
+        stale.error?.code === -32012 &&
+        String(staleDetail?.file ?? "").endsWith(path.basename(txnSecondFile)) &&
+        typeof staleDetail?.current_version === "string" &&
+        typeof staleDetail?.content === "string",
+      `error=${clip(JSON.stringify(stale.error ?? null))}`,
+    )
+    check(
+      "[38] 第一文件未被写入",
+      fs.readFileSync(path.join(SERVER_DIR, "sample-project", firstRel), "utf8") === txnTemplateText(firstRel),
+      firstRel,
+    )
+  } catch (error) {
+    check("[38] 版本不匹配 → -32012（含 file/current_version/content）", false, `${(error as Error).name}: ${(error as Error).message}`)
+  }
+
+  try {
+    const firstRel = txnInput.changes[0].file
+    const firstVersion = await resetTxnFile(firstRel)
+    const duplicate = (await typed.editTransaction({
+      changes: [
+        { file: firstRel, baseVersion: firstVersion, changes: txnInput.changes[0].changes },
+        { file: firstRel, baseVersion: firstVersion, changes: txnInput.changes[0].changes },
+      ],
+    })) as EditTransactionResult
+    check(
+      "[39] 同一文件重复 → -32019 DUPLICATE_FILE",
+      duplicate.applied === false && duplicate.error?.code === -32019,
+      `error=${clip(JSON.stringify(duplicate.error ?? null))}`,
+    )
+    let limitCode: number | undefined
+    try {
+      await typed.editTransaction({
+        changes: Array.from({ length: 11 }, (_, index) => ({
+          file: `src/main/java/demo/txn/Limit${index}.java`,
+          baseVersion: "x",
+          changes: [{ oldString: "a", newString: "b" }],
+        })),
+      })
+    } catch (error) {
+      limitCode = (error as { code?: number }).code
+    }
+    check("[39] 超过 10 个文件 → RPC -32603", limitCode === -32603, `code=${limitCode}`)
+    const protectedTxn = (await typed.editTransaction({
+      changes: [{ file: "node_modules/x.js", baseVersion: "x", changes: [{ oldString: "a", newString: "b" }] }],
+    })) as EditTransactionResult
+    check(
+      "[39] 保护路径 → -32013",
+      protectedTxn.applied === false && protectedTxn.error?.code === -32013,
+      `error=${clip(JSON.stringify(protectedTxn.error ?? null))}`,
+    )
+  } catch (error) {
+    check("[39] 同一文件重复 → -32019 DUPLICATE_FILE", false, `${(error as Error).name}: ${(error as Error).message}`)
+  }
+
+  try {
+    if (txnSecondFile === undefined) throw new Error("fixture 需 ≥2 个文件")
+    const firstRel = txnInput.changes[0].file
+    const firstVersion = await resetTxnFile(firstRel)
+    const secondVersion = await resetTxnFile(txnSecondFile)
+    const competitors = await Promise.all([openClient(), openClient()])
+    try {
+      const request = {
+        changes: [
+          { file: firstRel, baseVersion: firstVersion, changes: txnInput.changes[0].changes },
+          { file: txnSecondFile, baseVersion: secondVersion, changes: txnInput.changes[1].changes },
+        ],
+      }
+      const outcomes = await Promise.all(
+        competitors.map((client) =>
+          client
+            .editTransaction(request)
+            .then((result: EditTransactionResult) => ({ ok: true as const, result }))
+            .catch((error: { code?: number; message?: string }) => ({ ok: false as const, error })),
+        ),
+      )
+      const successes = outcomes.filter((item) => item.ok && item.result.applied === true)
+      const failures = outcomes.filter((item) => item.ok && item.result.applied === false)
+      const failureCodes = failures.map((item) => (item.ok ? item.result.error?.code : undefined))
+      check(
+        "[40] 两事务争用同组文件：恰好 1 成功、无死锁",
+        successes.length === 1 && failures.length === 1 && failureCodes.every((code) => code === -32012 || code === -32017),
+        `success=${successes.length} codes=${JSON.stringify(failureCodes)}`,
+      )
+      check("[40] journal 无残留", txnJournalEmpty(), TXN_JOURNAL)
+    } finally {
+      for (const client of competitors) client.close()
+    }
+  } catch (error) {
+    check("[40] 两事务争用同组文件：恰好 1 成功、无死锁", false, `${(error as Error).name}: ${(error as Error).message}`)
+  } finally {
+    for (const { abs, template } of txnCleanupTargets) {
+      try {
+        fs.copyFileSync(template, abs)
+      } catch {
+        // ignore restore failures
+      }
+    }
   }
 
   // ---- 用例 9：shutdown + 连接失败 ----

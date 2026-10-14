@@ -54,6 +54,7 @@ final class EditBatchService {
   private static final int WRITE_FAILED = -32015;
   private static final int CHANGE_CONFLICT = -32016;
   private static final int LOCK_TIMEOUT = -32017;
+  private static final int JOURNAL_RECOVERY_FAILED = -32018;
 
   /** options.lock_timeout_ms 缺省值（spec：edit_batch 通常 <100ms，30s 意味着异常）。 */
   private static final long DEFAULT_LOCK_TIMEOUT_MS = 30_000L;
@@ -61,8 +62,8 @@ final class EditBatchService {
   /** 锁等待超过该时长记 WARN，便于诊断写者卡住/系统负载异常。 */
   private static final long LOCK_WAIT_WARN_MS = 1_000L;
 
-  /** 文件锁表：key 为规范化绝对路径；锁保留在 map 中（避免频繁创建），进程退出即消失。 */
-  private static final ConcurrentHashMap<String, ReentrantLock> FILE_LOCKS = new ConcurrentHashMap<>();
+  /** 文件锁表：key 为规范化绝对路径；锁保留在 map 中（避免频繁创建），进程退出即消失。edit_batch 与 edit_transaction 共享。 */
+  static final ConcurrentHashMap<String, ReentrantLock> FILE_LOCKS = new ConcurrentHashMap<>();
 
   /**
    * 写路径执行门：无头环境下多个 manual highlight（ExternalToolPass 空等外部注解任务）与
@@ -70,7 +71,17 @@ final class EditBatchService {
    * 平台重段（读内容后的校验/写/refresh/诊断）在进程内串行执行。文件锁及其锁内校验语义
    * 不变（同文件仍按 FIFO 串行、权威版本校验仍在锁内）；此门只是规避平台并发缺陷。
    */
-  private static final ReentrantLock EXECUTION_GATE = new ReentrantLock(true);
+  static final ReentrantLock EXECUTION_GATE = new ReentrantLock(true);
+
+  /** 与 resolvePath 同口径的锁 key（绝对路径规范化）；两个写服务共享同一文件锁命名空间。 */
+  static String canonicalKey(Path path) {
+    return path.toAbsolutePath().normalize().toString();
+  }
+
+  /** 取（或创建）某文件的公平互斥锁。 */
+  static ReentrantLock fileLock(Path path) {
+    return FILE_LOCKS.computeIfAbsent(canonicalKey(path), key -> new ReentrantLock(true));
+  }
 
   /** spec 原文 hint（-32017 专属）。 */
   private static final String HINT_LOCK_TIMEOUT =
@@ -93,6 +104,11 @@ final class EditBatchService {
 
   JsonObject editBatch(Project project, String basePath, JsonObject params)
       throws JsonRpcServer.RpcException {
+    // ⓪ 只读门（journal 恢复失败后写路径全部拒绝，读路径不受影响）
+    if (WriteGate.isReadOnly()) {
+      throw new JsonRpcServer.RpcException(
+          JOURNAL_RECOVERY_FAILED, "journal recovery failed", WriteGate.errorData());
+    }
     // ① 参数校验（缺失/类型错/空 changes/空 oldString/非法 options 一律 RPC -32603）
     String file = requireString(params, "file");
     String baseVersion = requireString(params, "baseVersion");
@@ -117,8 +133,7 @@ final class EditBatchService {
 
     // ④ 文件级互斥锁：key 与 resolvePath 同口径规范化（./x、x、反斜杠归一），公平队列 FIFO。
     // 锁只保护写路径后半段；读路径（read_view 等）不加锁。
-    String lockKey = path.toAbsolutePath().normalize().toString();
-    ReentrantLock lock = FILE_LOCKS.computeIfAbsent(lockKey, key -> new ReentrantLock(true));
+    ReentrantLock lock = fileLock(path);
     if (lock.isLocked()) {
       Log.warn("edit_batch lock contended file=" + file + " waiting up to " + lockTimeoutMs + "ms");
     }
@@ -185,13 +200,13 @@ final class EditBatchService {
 
     // ⑦ 纯度校验
     for (Change change : changes) {
-      Matcher matcher = IMPURE_PATTERN.matcher(change.newString);
-      if (matcher.find()) {
+      String marker = impureMarker(change.newString);
+      if (marker != null) {
         Log.info("edit_batch rejected file=" + file + " code=" + CONTENT_IMPURE
             + " change=" + change.index);
         JsonObject detail = new JsonObject();
         detail.addProperty("change_index", change.index);
-        detail.addProperty("marker", matcher.group());
+        detail.addProperty("marker", marker);
         return failure(file, changes.size(), CONTENT_IMPURE, "CONTENT_IMPURE", detail,
             "newString 含渲染层元语标记，请使用源文件原文");
       }
@@ -278,7 +293,7 @@ final class EditBatchService {
 
   // ---- 参数 ----
 
-  private static final class Change {
+  static final class Change {
     final int index;
     final String oldString;
     final String newString;
@@ -293,7 +308,7 @@ final class EditBatchService {
     }
   }
 
-  private static List<Change> readChanges(JsonObject params) throws JsonRpcServer.RpcException {
+  static List<Change> readChanges(JsonObject params) throws JsonRpcServer.RpcException {
     JsonElement element = params.get("changes");
     if (element == null || !element.isJsonArray()) throw invalidParams("changes");
     JsonArray array = element.getAsJsonArray();
@@ -316,8 +331,8 @@ final class EditBatchService {
     return changes;
   }
 
-  /** options 可选；缺失取缺省 30s；出现时必须是 ≥1 的有限数值，否则 -32603。 */
-  private static long readLockTimeoutMs(JsonObject params) throws JsonRpcServer.RpcException {
+  /** options 可选；缺失取缺省 30s；出现时必须是 ≥1 的有限数值，否则 -32603。edit_batch 与 edit_transaction 共用。 */
+  static long readLockTimeoutMs(JsonObject params) throws JsonRpcServer.RpcException {
     JsonElement options = params.get("options");
     if (options == null || options.isJsonNull()) return DEFAULT_LOCK_TIMEOUT_MS;
     if (!options.isJsonObject()) throw invalidParams("options");
@@ -332,7 +347,7 @@ final class EditBatchService {
     return (long) Math.min(value, (double) Long.MAX_VALUE);
   }
 
-  private static String requireString(JsonObject params, String name) throws JsonRpcServer.RpcException {
+  static String requireString(JsonObject params, String name) throws JsonRpcServer.RpcException {
     JsonElement element = params.get(name);
     if (element == null || !element.isJsonPrimitive() || !element.getAsJsonPrimitive().isString()) {
       throw invalidParams(name);
@@ -340,7 +355,7 @@ final class EditBatchService {
     return element.getAsString();
   }
 
-  private static JsonRpcServer.RpcException invalidParams(String name) {
+  static JsonRpcServer.RpcException invalidParams(String name) {
     return new JsonRpcServer.RpcException(-32603, "invalid params: " + name, null);
   }
 
@@ -367,7 +382,13 @@ final class EditBatchService {
 
   // ---- 内容与匹配 ----
 
-  private static String readContent(Path path) throws JsonRpcServer.RpcException {
+  /** 返回 newString 中命中的第一个渲染层元语，未命中 null（edit_batch/edit_transaction 共用）。 */
+  static String impureMarker(String newString) {
+    Matcher matcher = IMPURE_PATTERN.matcher(newString);
+    return matcher.find() ? matcher.group() : null;
+  }
+
+  static String readContent(Path path) throws JsonRpcServer.RpcException {
     try {
       return Files.readString(path, StandardCharsets.UTF_8);
     } catch (IOException e) {
@@ -377,7 +398,7 @@ final class EditBatchService {
   }
 
   /** 非重叠匹配的全部起点（锚点唯一性判定用）。 */
-  private static List<Integer> matchOffsets(String content, String oldString) {
+  static List<Integer> matchOffsets(String content, String oldString) {
     List<Integer> offsets = new ArrayList<>();
     int from = 0;
     for (;;) {
@@ -389,7 +410,7 @@ final class EditBatchService {
   }
 
   /** 从后往前替换：低偏移的替换不会影响已处理的高偏移下标。 */
-  private static String applyChanges(String content, List<Change> changes) {
+  static String applyChanges(String content, List<Change> changes) {
     List<Change> sorted = new ArrayList<>(changes);
     sorted.sort(Comparator.comparingInt((Change change) -> change.start).reversed());
     StringBuilder builder = new StringBuilder(content);
@@ -401,18 +422,28 @@ final class EditBatchService {
 
   // ---- 原子写与同步 ----
 
+  /** 同目录 <file>.tmp 路径（edit_batch 原子写 / edit_transaction 预写阶段共用）。 */
+  static Path tmpPath(Path path) {
+    return path.resolveSibling(path.getFileName().toString() + ".tmp");
+  }
+
+  /** 写 <file>.tmp 并 fsync（不 rename）；edit_transaction 先全量写 tmp、写 journal 后再统一 rename。 */
+  static void writeTmp(Path path, String content) throws IOException {
+    try (FileChannel channel =
+        FileChannel.open(
+            tmpPath(path),
+            StandardOpenOption.CREATE,
+            StandardOpenOption.WRITE,
+            StandardOpenOption.TRUNCATE_EXISTING)) {
+      channel.write(ByteBuffer.wrap(content.getBytes(StandardCharsets.UTF_8)));
+      channel.force(true);
+    }
+  }
+
   private static void atomicWrite(Path path, String content) throws IOException {
-    Path tmp = path.resolveSibling(path.getFileName().toString() + ".tmp");
+    Path tmp = tmpPath(path);
     try {
-      try (FileChannel channel =
-          FileChannel.open(
-              tmp,
-              StandardOpenOption.CREATE,
-              StandardOpenOption.WRITE,
-              StandardOpenOption.TRUNCATE_EXISTING)) {
-        channel.write(ByteBuffer.wrap(content.getBytes(StandardCharsets.UTF_8)));
-        channel.force(true);
-      }
+      writeTmp(path, content);
       Files.move(tmp, path, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
     } finally {
       // 失败路径清理临时文件，避免 .tmp 残留（成功 move 后它已不存在）
@@ -425,7 +456,7 @@ final class EditBatchService {
   }
 
   /** 与 read_view 相同的被动一致性策略：仅在 mtime 与 VFS 时间戳不一致时刷新。 */
-  private static void refreshIfStale(VirtualFile virtualFile) {
+  static void refreshIfStale(VirtualFile virtualFile) {
     try {
       long mtime = Files.getLastModifiedTime(Paths.get(virtualFile.getPath())).toMillis();
       if (virtualFile.getTimeStamp() != mtime) virtualFile.refresh(false, false);
@@ -438,7 +469,7 @@ final class EditBatchService {
    * 让 Document/PSI 与磁盘内容一致：在 EDT 上按需重载文档并提交。
    * 原子写绕过了平台保存路径，Document 缓存不会自动感知新内容。
    */
-  private static void syncDocument(Project project, VirtualFile virtualFile, String diskContent) {
+  static void syncDocument(Project project, VirtualFile virtualFile, String diskContent) {
     ApplicationManager.getApplication()
         .invokeAndWait(
             () -> {
@@ -453,7 +484,7 @@ final class EditBatchService {
 
   // ---- line_changes ----
 
-  private static JsonArray lineChanges(String newContent, List<Change> changes) {
+  static JsonArray lineChanges(String newContent, List<Change> changes) {
     // 先按原坐标排序，累计前面替换的长度差得到每个 change 在新内容中的起点
     List<Change> byStart = new ArrayList<>(changes);
     byStart.sort(Comparator.comparingInt((Change change) -> change.start));
@@ -490,7 +521,7 @@ final class EditBatchService {
     return entry;
   }
 
-  private static int lineAt(String content, int offset) {
+  static int lineAt(String content, int offset) {
     int line = 1;
     int limit = Math.min(Math.max(offset, 0), content.length());
     for (int i = 0; i < limit; i++) {

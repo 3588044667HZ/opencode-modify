@@ -2,7 +2,7 @@
 
 按 `LLM-IDE-SPEC/`（main / intellij-headless / jsonrpc-channel / adapter-layer）实现的 IntelliJ
 无头语义守护：JSON-RPC 2.0 over AF_UNIX（NDJSON），提供 `ping` / `subscribe` / `read_view` /
-`blast_radius` / `edit_batch` / `verify_test` / `project_map` / `shutdown`。
+`blast_radius` / `edit_batch` / `edit_transaction` / `verify_test` / `project_map` / `shutdown`。
 Java 实现，无 Kotlin，可在无 Gradle、无网络的条件下用本地 IDEA 平台 jar 直接构建。
 
 ## 目录
@@ -17,6 +17,8 @@ semantic-server/
 │   ├── ReadViewService.java         # read_view 聚合：PSI/VFS/引用 resolve/诊断
 │   ├── BlastRadiusService.java      # blast_radius 聚合：定义/引用分类/入口/测试/callees/风险 + 缓存
 │   ├── EditBatchService.java        # edit_batch：文件级公平锁/版本戳/路径保护/纯度/锚点/重叠 + 原子写 + 诊断增量
+│   ├── EditTransactionService.java  # edit_transaction：多文件锁/journal/rename/启动恢复 + 复用 edit_batch 的校验与计算
+│   ├── WriteGate.java               # 写路径共享门：journal 恢复失败 → 写拒绝（RPC -32018），读不受影响
 │   ├── VerifyTestService.java       # verify_test：shell 透传/超时杀进程树/输出截断 + 六框架薄解析
 │   ├── ProjectMapService.java       # project_map：项目级地图（模块/入口/依赖/环 + 项目级缓存/异步构建）
 │   └── Log.java
@@ -27,14 +29,16 @@ semantic-server/
 ├── script/probe.ts                  # Bun 探针：ping/subscribe/read_view/shutdown
 ├── script/blast-probe.ts            # Bun 探针：blast_radius（fixtures 生成/缓存/scope 证据）
 ├── script/edit-probe.ts             # Bun 探针：edit_batch（模板块 copy/版本注入/并发 N 路/锁超时/fixtures 生成/raw NDJSON）
+├── script/edit-txn-probe.ts         # Bun 探针：edit_transaction（模板重置/逐文件版本注入/并发 N 路/fixtures 归一/raw NDJSON）
 ├── script/verify-probe.ts           # Bun 探针：verify_test（raw NDJSON/超时/cwd 错误/fixtures 归一）
 ├── script/map-probe.ts              # Bun 探针：project_map（building 轮询/并发比较/fixtures 归一）
 ├── script/protocol-conformance.ts   # 跨实现协议一致性测试（真实守护 ↔ OC 客户端）
 ├── fixtures/blast_radius/           # 协议 fixtures：input.json + output.json（真实守护响应）
 ├── fixtures/edit_batch/             # 协议 fixtures：template.java + input.json + output.json（版本归一）+ lock_timeout.json（手写）
+├── fixtures/edit_transaction/       # 协议 fixtures：input.json + output.json（版本归一）+ templates/{Alpha,Beta}.java（样本重置/恢复重跑）
 ├── fixtures/verify_test/            # 协议 fixtures：input.json + output.json（duration/输出归一）
 ├── fixtures/project_map/            # 协议 fixtures：input.json + output.json（project.root 归一）
-├── sample-project/                  # 跨文件调用样例（Main/Greeter + 故意报错的 Broken，含 .idea/iml；tests/ 1 过 1 败、tests_many/ 21 败，verify_test 用）
+├── sample-project/                  # 跨文件调用样例（Main/Greeter + 故意报错的 Broken + demo/txn 跨文件事务样本，含 .idea/iml；tests/ 1 过 1 败、tests_many/ 21 败，verify_test 用）
 ├── build.gradle.kts / settings.gradle.kts   # org.jetbrains.intellij.platform 2.2.1 + local IDEA 平台
 ├── .gradle-home/                    # Gradle 依赖仓库（项目本地，gitignore）
 └── README.md
@@ -396,6 +400,125 @@ bun script/edit-probe.ts .tmp/edit.sock --normalize-versions --out fixtures/edit
 - 写入是 NIO 原子写（非平台保存），不触发平台 formatter/保存钩子；无自动格式化、无内容
   规范化、无撤销（与 spec 约束一致）。
 
+## edit_transaction（跨文件原子编辑）
+
+`edit_transaction(params)`：`{"changes": [{"file": string, "baseVersion": string,
+"changes": [{"oldString": string, "newString": string, "description"?: string}]}],
+"options"?: {"lock_timeout_ms"?: number}}`。一次调用提交跨多个文件的变更集：**要么全部成功，
+要么全部回滚**；最多 10 个文件（超过按参数错误 RPC -32603 拒绝）。`options.lock_timeout_ms`
+缺省 30000，出现时必须 ≥1（否则 RPC -32603），且是**每把文件锁独立**的等待上限。
+v1 不支持新建文件（只修改已存在文件；不存在是 RPC -32001），也不做嵌套事务/跨项目事务。
+
+失败结果是 JSON-RPC 成功响应里的 `{"applied": false, "error": {code, message, detail, hint}}`
+（**没有**顶层 `file`/`changes_total`；与 edit_batch 的失败形状不同）。失败时所有文件均未写入
+（rename 阶段故障除外，见偏差）。
+
+处理顺序（冻结）：
+
+① 参数校验（空 `changes` / 某文件空 `changes` / 类型错 / 文件数 >10 → RPC -32603）
+→ ② 同一规范路径重复 → **-32019 DUPLICATE_FILE**（detail.file）→ ③ 路径保护（与 edit_batch
+同一套保护段/后缀；事务另要求文件位于项目根内——journal 用项目相对路径）→ **-32013**（detail.file，
+先于存在性）→ ④ 文件不存在 → RPC **-32001**（此时所有文件均已通过保护检查）→ ⑤ 按规范化路径
+字典序排序 → ⑥ 按序获取文件锁（公平 FIFO；每把独立等待 `lock_timeout_ms`，超时 → **-32017**
+detail{file, waited_ms} 并释放已持有）→ ⑦ 锁内校验全部 `baseVersion`（任一不匹配 → **-32012**
+detail{file, current_version, content}，释放全部）→ ⑧ 全部 `newString` 纯度 → **-32014**
+detail{file, change_index, changes_total, marker} → ⑨ 逐文件锚点（0 → **-32010**；多 →
+**-32011** 含 match_count/locations；与 edit_batch 相同的非重叠匹配）+ 同文件重叠 → **-32016**
+→ ⑩ 内存应用（任一失败整体拒绝）→ ⑪ 写阶段：每文件 `<file>.tmp` + fsync → 写 journal（fsync）
+→ 依次 rename → 删 journal → ⑫ 每文件重算版本/诊断 → 锁按逆序释放。
+**写入阶段之前任何失败都是零副作用**（无 tmp、无 journal、文件字节与版本不变）。
+
+成功结果：`applied / files_changed / changes_applied / changes_total`，
+`files: [{file, old_version, new_version, changes_applied, line_changes}]`（**按字典序**，每个文件
+都带 `line_changes`；计算与 edit_batch 共用同一实现），`diagnostics_delta: {<file>: {errors,
+warnings}}` 与扩展字段 `diagnostics_after`（before 在写阶段前采集、after 在全部 rename 后采集；
+delta = after - before，与 edit_batch 口径一致）。`file` 回显请求值。
+
+锁与死锁避免：所有事务按规范化路径字典序加锁，任意两个事务对同一文件集的获取顺序一致，
+不会出现"A 等 B、B 等 A"；事务与 edit_batch **共用同一把文件锁表**（key = 规范化绝对路径），
+事务与单文件写争用同一文件时按 FIFO 串行；锁在内存、进程退出即消失，崩溃后无需清理。
+写阶段在 edit_batch 同一把进程内执行门内（无头平台 manual highlight/VFS 写意图锁环的规避），
+文件锁与锁内版本校验语义不变。
+
+journal 与启动恢复：
+
+- 目录 `<project>/.opencode/txn-journal/<uuid>.json`（gitignore），内容
+  `{started_at, files: [{tmp, target}]}`，路径为项目相对、`/` 分隔；
+- 启动时扫描 journal 目录：全部 tmp 在 → 重放全部 rename；部分 tmp 在（缺失 tmp 的目标存在）
+  → 续传剩余；清单 tmp 缺失且目标未更新（目标不存在）→ 清理残留 tmp + journal（fsync 前中断）；
+- 重放幂等：按"tmp 是否还在"判断，目标已存在则跳过（已 rename 的条目不会重复处理）；
+- 恢复异常（非法 JSON、路径逃逸、目录不可读、rename 失败）→ **保留 journal + 置只读 + 日志**，
+  守护继续启动。
+
+只读门（-32018）：journal 恢复失败的守护进程照常启动并服务；`edit_batch`/`edit_transaction`
+入口检查共享门 `WriteGate`，命中返回 RPC **-32018**（message `journal recovery failed`，
+`error.data` 含 journal 路径与原因）；`read_view` / `blast_radius` / `project_map` / `verify_test`
+不受影响。只读状态在进程内生效、重启前不可解除（等待人工处理 journal 后重启）。
+
+错误码汇总（事务）：-32010 / -32011 / -32012 / -32013 / -32014 / -32016 / -32017 与 edit_batch
+同名同风格；-32011 的 hint 为 spec 原文（`提供更多上下文使锚点唯一，或调用
+fallback_option_direct 获取直接操作工具`）；**-32019** 为 spec 新增码；**-32018** 见只读门；
+文件数 >10 用 RPC **-32603**（不是结果错误码）。
+
+fixtures / 探针：
+
+- `fixtures/edit_transaction/input.json`：**不含 baseVersion**（由探针/契约测试经 read_view 注入），
+  2 文件 × 2 changes：Alpha 修一处类型错误（`return "zero";` → `return 0;`，使 errors delta 稳定
+  -1）并改 `return 10;`；Beta 改 `Alpha.base() * 2` 与 `Math.min(...)`（锚点唯一）；
+- `fixtures/edit_transaction/output.json`：真实成功结果，`files[].old_version`/`new_version`
+  归一为 `"<version>"`，其余原样；
+- `fixtures/edit_transaction/templates/{Alpha,Beta}.java`：与 `sample-project` 样本初始内容
+  **逐字节一致**，供每轮测试重置与恢复重跑；
+- `bun script/edit-txn-probe.ts [socket] [--params file.json | --params-json '{...}']
+  [--base-version v | --base-version N=v] [--lock-timeout-ms n] [--out file] [--normalize]
+  [--raw] [--copy|--no-copy] [--no-inject] [--no-wait] [--timeout secs] [--parallel n]
+  [--shutdown]`：默认按请求把 templates copy 回目标（重置），逐文件 read_view 取版本并注入
+  baseVersion，发送事务；`--out` 落盘、`--normalize` 归一版本；`--base-version N=v` 覆盖第 N 个
+  文件（1 起）用于制造 stale；`--parallel N` 开 N 个独立 socket、共享同一组 baseline 版本后
+  barrier 同时发送（并发争用验证）；`--no-inject` 跳过 read_view（用于不存在/保护路径用例）。
+
+验收证据（真实守护 + sample-project，raw NDJSON；每轮开始前用 templates 重置样本）：
+
+- 成功（`input.json`）：`applied:true`、`files_changed:2`、`changes_applied/changes_total:4`、
+  两文件 `new_version ≠ old_version`，`line_changes=[{5,modified},{9,modified}]`（两文件同形），
+  `diagnostics_delta: Alpha {errors:-1,warnings:0} / Beta {0,0}`，
+  `diagnostics_after: Alpha {0,0} / Beta {0,3}`；磁盘内容已变；journal 目录无残留文件；
+- 稳定性：连续两轮（重置后）归一化结果 `diff` 逐字节一致（RUNS_IDENTICAL）；
+- 回滚：第二文件换坏锚点 → `-32010`，detail `{file: Beta.java, change_index: 0, changes_total: 1,
+  oldString: "NO_SUCH_ANCHOR_TXN"}`；两文件 `cmp` 字节不变、read_view 版本仍为注入值（dd/eb）；
+- 版本不匹配：第二文件 stale（`--base-version 2=stale00`）→ `-32012` detail
+  `{file: Beta.java, current_version: "eb", content: <全文>}`；第一文件字节未变；
+- `-32019`（同一文件两次，detail.file）；`-32603`（11 个文件 →
+  `invalid params: changes: at most 10 files`）；`-32013`（`node_modules/x.js`，保护先于存在性）；
+  `-32001`（`NoSuch.java`，RPC 错误）；
+- 并发：`--parallel 2`（同组文件、同一 baseline 版本、独立 socket）→
+  `summary total=2 applied=1 codes={"-32012":1,"applied":1}`、elapsed 667..672ms，无死锁、
+  journal 无残留；
+- journal 恢复 a)（手工编排 rename 中途崩溃：两个 tmp 就绪、只 rename Alpha、写对应 journal）→
+  启动日志 `replayed journal ... renames=1`，两目标均为新内容、journal 删除、无 tmp；
+- journal 恢复 b)（tmp 不完整：Beta.java.tmp 在、Alpha.java.tmp 缺失且目标不存在）→
+  启动日志 `cleaned incomplete journal ...`，Beta.java.tmp + journal 删除，两目标保持旧内容；
+  另一份"全部 tmp 缺失、目标齐全"的 journal → `replayed ... renames=0`（幂等跳过）后删除；
+- journal 恢复 c)（非法 JSON + 路径逃逸 `../../escape.java.tmp`）→ 守护照常启动、journal 保留，
+  `edit_batch`/`edit_transaction` 均返回 `-32018 journal recovery failed`（data 含 journal 与
+  reason），`read_view` 正常返回（version 3）；
+- 构建：`bash script/build-local.sh` 编译通过并安装到 `.sandbox`。
+
+偏差与注记：
+
+- journal 无内容指纹，恢复时"目标未更新"以**目标文件不存在**判定（v1 不建文件，该分支用于
+  journal 指向的目标缺失的异常/损坏状态；正常崩溃模型下 tmp 缺失即已 rename）；
+- rename 阶段某个 rename 失败时采取 **commit-forward**：逐个尝试剩余 rename、保留 journal，
+  本次返回 `-32015 WRITE_FAILED{file, reason}`（下次启动续传）；不回滚——回滚会把已提交文件
+  再改回去，扩大不一致窗口；
+- 路径保护对**项目根外**文件同样拒绝（-32013）：journal 需要项目相对路径，spec 约束"所有文件
+  在同一项目内"；
+- 诊断 before/after 按文件独立计数（before 全部在写阶段前、after 全部在 rename 后），
+  跨文件诊断影响的解释口径与 edit_batch 相同（重算变更文件）；
+- `diagnostics_delta`/`diagnostics_after` 的键与 `files[].file` 均为请求回显值；
+- journal 目录在首次写入事务后保持存在（空目录）；`.gitignore` 已忽略
+  `sample-project/.opencode/`。
+
 ## verify_test（运行测试命令 + 薄解析）
 
 `verify_test(params)`：`{"command": string, "options"?: {"cwd"?: string, "timeout_ms"?: number,
@@ -537,8 +660,8 @@ bun script/map-probe.ts .tmp/map.sock --normalize-root --wait-ready --out fixtur
 
 验收证据（真实守护 + sample-project，raw NDJSON）：
 
-- structure：7 模块（demo[3]/api/cyclea/cycleb/tasks[6]/tests/tests_many）、root_files
-  `["sample-project.iml"]`、total_files 15、total_modules 7；入口 2 个 main（Main.java:6、
+- structure：8 模块（demo[3]/api/cyclea/cycleb/tasks[6]/txn[2]/tests/tests_many）、root_files
+  `["sample-project.iml"]`、total_files 17、total_modules 8；入口 2 个 main（Main.java:6、
   TaskRunner.java:4）；失效后首查返回 `building:true, progress:0`（计数 0、数组空）；
 - dependencies：3 条边（`demo.api→demo.tasks`、`demo.cyclea↔demo.cycleb`，值为模块 path，形如
   `src/main/java/demo/api`），cycles `[[…/demo/cyclea, …/demo/cycleb]]`；
@@ -553,11 +676,13 @@ bun script/map-probe.ts .tmp/map.sock --normalize-root --wait-ready --out fixtur
   查询重建出新边 `cyclea→tasks (1)`；还原后回到 3 条边；
 - 失效 b) 结构变化：新增 `mods/m01..m21`（各 1 个 .java）→ `invalidated (structure changed at .)`
   → 全量重建 `modules=28 files=36`，返回 20 个模块（m01..m20），total_modules 28、total_files 36；
-  删除 mods 后恢复 7/15；
+  删除 mods 后恢复 8/17；
 - 路由：临时 `RouteApi.java`（`@Get/@Path`）→ entry `…/RouteApi.java:19 listUsers (route)`
   （验证后已删除）；
 - 错误：冷启动 `--fail-fast` → `{"code":-32000,"message":"indexing","data":{"progress":0.02}}`；
   `view:"bogus"` / `view:123` / `scope:123` → -32603；未知前缀 scope 忽略（全项目）。
+  （以上计数为当前样本快照：edit_transaction 任务新增了 `demo/txn/{Alpha,Beta}.java`，
+  `fixtures/project_map/output.json` 已按新样本重新生成以保持一致。）
 
 偏差与注记：
 
