@@ -174,6 +174,23 @@ export const Info = Schema.Struct({
     description:
       "Enable or configure LSP servers. Omit or set to false to disable, true to enable built-ins, or an object to enable built-ins with overrides.",
   }),
+  semantic: Schema.optional(
+    Schema.Struct({
+      enabled: Schema.optional(Schema.Boolean).annotate({
+        description: "Enable the semantic engine daemon (default: false)",
+      }),
+      command: Schema.optional(Schema.mutable(Schema.Array(Schema.String))).annotate({
+        description:
+          "Base argv used to launch the semantic engine daemon. The manager appends the project directory and the socket path.",
+      }),
+      socket_dir: Schema.optional(Schema.String).annotate({
+        description: "Directory for the semantic daemon socket (default: system temp directory)",
+      }),
+      idle_timeout_ms: Schema.optional(NonNegativeInt).annotate({
+        description: "Idle timeout in milliseconds passed to the semantic daemon",
+      }),
+    }),
+  ).annotate({ description: "Semantic engine daemon configuration" }),
   instructions: Schema.optional(Schema.mutable(Schema.Array(Schema.String))).annotate({
     description: "Additional instruction files or patterns to include",
   }),

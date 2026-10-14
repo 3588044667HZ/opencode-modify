@@ -1,0 +1,208 @@
+import { Option, Schema } from "effect"
+import { optional } from "@opencode-ai/schema/schema"
+
+export const Views = ["entry", "sequential", "continue", "definition"] as const
+export type View = (typeof Views)[number]
+
+export const ErrorCode = {
+  indexing: -32000,
+  fileNotFound: -32001,
+  internalError: -32603,
+} as const
+
+export const Defaults = {
+  connectTimeoutMs: 5_000,
+  requestTimeoutMs: 15_000,
+  socketReadyTimeoutMs: 60_000,
+  socketRetryIntervalMs: 200,
+  indexPollIntervalMs: 1_000,
+} as const
+
+export interface Request {
+  readonly jsonrpc: "2.0"
+  readonly id: number
+  readonly method: string
+  readonly params?: unknown
+}
+
+export interface Success {
+  readonly jsonrpc: "2.0"
+  readonly id: number
+  readonly result: unknown
+}
+
+export interface Failure {
+  readonly jsonrpc: "2.0"
+  readonly id: number
+  readonly error: {
+    readonly code: number
+    readonly message: string
+    readonly data?: unknown
+  }
+}
+
+export type Response = Success | Failure
+
+export interface Notification {
+  readonly jsonrpc: "2.0"
+  readonly method: string
+  readonly params?: unknown
+}
+
+export type Message = Response | Notification
+
+export function isResponse(message: Message): message is Response {
+  return "id" in message && typeof message.id === "number"
+}
+
+export class RpcError extends Schema.TaggedErrorClass<RpcError>()("SemanticRpcError", {
+  code: Schema.Int,
+  message: Schema.String,
+  data: optional(Schema.Unknown),
+}) {}
+
+export class TimeoutError extends Schema.TaggedErrorClass<TimeoutError>()("SemanticTimeoutError", {
+  message: Schema.String,
+  method: Schema.String,
+  timeout_ms: Schema.Int,
+}) {}
+
+export class ConnectionError extends Schema.TaggedErrorClass<ConnectionError>()("SemanticConnectionError", {
+  message: Schema.String,
+}) {}
+
+export class UnavailableError extends Schema.TaggedErrorClass<UnavailableError>()("SemanticUnavailableError", {
+  message: Schema.String,
+  progress: optional(Schema.Number),
+}) {}
+
+export type SemanticError = RpcError | TimeoutError | ConnectionError | UnavailableError
+
+export function toSemanticError(cause: unknown): SemanticError {
+  if (
+    cause instanceof RpcError ||
+    cause instanceof TimeoutError ||
+    cause instanceof ConnectionError ||
+    cause instanceof UnavailableError
+  ) {
+    return cause
+  }
+  return new ConnectionError({ message: cause instanceof Error ? cause.message : String(cause) })
+}
+
+export function describeError(error: SemanticError): string {
+  if (error instanceof RpcError) {
+    if (error.code === ErrorCode.indexing) {
+      const progress = progressOf(error.data)
+      return progress === undefined
+        ? "semantic engine is still indexing, retry this call shortly."
+        : `semantic engine is still indexing (progress: ${Math.round(progress * 100)}%), retry this call shortly.`
+    }
+    if (error.code === ErrorCode.fileNotFound) {
+      return `semantic engine could not find this file (it may not be indexed): ${error.message}`
+    }
+    return `semantic engine error (${error.code}): ${error.message}`
+  }
+  if (error instanceof UnavailableError) {
+    if (error.progress === undefined) return error.message
+    return `${error.message} (progress: ${Math.round(error.progress * 100)}%)`
+  }
+  if (error instanceof TimeoutError) return error.message
+  return `semantic engine unavailable: ${error.message}`
+}
+
+function progressOf(data: unknown): number | undefined {
+  if (typeof data !== "object" || data === null) return undefined
+  const progress = (data as { progress?: unknown }).progress
+  return typeof progress === "number" && Number.isFinite(progress) ? progress : undefined
+}
+
+export const PingResult = Schema.Struct({
+  indexing: Schema.Boolean,
+  progress: Schema.Number,
+  phase: optional(Schema.String),
+  current: optional(Schema.String),
+  eta: optional(Schema.Number),
+})
+export type PingResult = typeof PingResult.Type
+
+export const IndexingNotification = Schema.Struct({
+  phase: Schema.String,
+  progress: Schema.Number,
+  current: optional(Schema.String),
+  eta: optional(Schema.Number),
+})
+export type IndexingNotification = typeof IndexingNotification.Type
+
+export const SubscribeResult = Schema.Struct({ ok: Schema.Boolean })
+export type SubscribeResult = typeof SubscribeResult.Type
+
+export const ShutdownResult = Schema.Struct({ ok: Schema.Boolean })
+export type ShutdownResult = typeof ShutdownResult.Type
+
+const DiagnosticSeverity = Schema.Literals(["error", "warning"])
+
+export const InlineDiagnostic = Schema.Struct({
+  severity: DiagnosticSeverity,
+  message: Schema.String,
+})
+export type InlineDiagnostic = typeof InlineDiagnostic.Type
+
+export const Anchor = Schema.Struct({
+  symbol: Schema.String,
+  location: Schema.String,
+})
+export type Anchor = typeof Anchor.Type
+
+export const ContentLine = Schema.Struct({
+  line: Schema.Int,
+  text: Schema.String,
+  diagnostic: optional(InlineDiagnostic),
+  anchor: optional(Anchor),
+})
+export type ContentLine = typeof ContentLine.Type
+
+export const Diagnostic = Schema.Struct({
+  line: Schema.Int,
+  severity: DiagnosticSeverity,
+  message: Schema.String,
+})
+export type Diagnostic = typeof Diagnostic.Type
+
+export const CoverageRange = Schema.Tuple([Schema.Int, Schema.Int])
+export type CoverageRange = typeof CoverageRange.Type
+
+export const ReadViewResult = Schema.Struct({
+  file: Schema.String,
+  version: Schema.String,
+  size: Schema.Struct({ lines: Schema.Int, symbols: Schema.Int }),
+  status: Schema.Struct({ modified: Schema.Boolean, errors: Schema.Int }),
+  position: optional(
+    Schema.Struct({
+      current: Schema.Int,
+      total: Schema.Int,
+      in_symbol: optional(Schema.String),
+      remaining_symbols: Schema.Int,
+    }),
+  ),
+  content: Schema.Array(ContentLine),
+  coverage: Schema.Struct({
+    read: Schema.Array(CoverageRange),
+    unread: Schema.Array(CoverageRange),
+  }),
+  diagnostics: Schema.Array(Diagnostic),
+}).annotate({ identifier: "ReadViewResult" })
+export type ReadViewResult = typeof ReadViewResult.Type
+
+export interface ReadViewRequest {
+  readonly file: string
+  readonly view: View
+  readonly position?: { readonly line: number }
+  readonly symbol?: string
+}
+
+export function decodeOption<S extends Schema.Codec<unknown, unknown>>(schema: S, value: unknown) {
+  return Option.getOrUndefined(Schema.decodeUnknownOption(schema)(value)) as S["Type"] | undefined
+}
+
+export * as Protocol from "./protocol"

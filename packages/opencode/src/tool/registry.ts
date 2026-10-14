@@ -11,6 +11,7 @@ import { EditTool } from "./edit"
 import { GlobTool } from "./glob"
 import { GrepTool } from "./grep"
 import { ReadTool } from "./read"
+import { ReadViewTool } from "./read-view"
 import { TaskTool } from "./task"
 import { DispatchTool } from "./dispatch"
 import { TeamTool } from "./team"
@@ -50,6 +51,7 @@ import { EffectBridge } from "@/effect/bridge"
 import { Question } from "../question"
 import { Todo } from "../session/todo"
 import { LSP } from "@/lsp/lsp"
+import { Semantic } from "@/semantic/manager"
 import { Instruction } from "../session/instruction"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { EventV2Bridge } from "@/event-v2-bridge"
@@ -115,6 +117,7 @@ const layer = Layer.effect(
     const agentInbox = flags.experimentalAgentTeams ? yield* AgentInboxTool : undefined
     const blackboard = flags.experimentalAgentTeams ? yield* BlackboardTool : undefined
     const read = yield* ReadTool
+    const readview = yield* ReadViewTool
     const question = yield* QuestionTool
     const todo = yield* TodoWriteTool
     const lsptool = yield* LspTool
@@ -217,13 +220,14 @@ const layer = Layer.effect(
           }
         }
 
-        yield* config.get()
+        const cfg = yield* config.get()
         const questionEnabled = ["app", "cli", "desktop"].includes(flags.client) || flags.enableQuestionTool
 
         const tool = yield* Effect.all({
           invalid: Tool.init(invalid),
           shell: Tool.init(shell),
           read: Tool.init(read),
+          read_view: Tool.init(readview),
           glob: Tool.init(globtool),
           grep: Tool.init(greptool),
           edit: Tool.init(edit),
@@ -252,6 +256,7 @@ const layer = Layer.effect(
             ...(questionEnabled ? [tool.question] : []),
             tool.shell,
             tool.read,
+            ...(cfg.semantic?.enabled ? [tool.read_view] : []),
             tool.glob,
             tool.grep,
             tool.edit,
@@ -483,6 +488,7 @@ export const node = LayerNode.make({
     BackgroundJob.node,
     Provider.node,
     LSP.node,
+    Semantic.node,
     Instruction.node,
     FSUtil.node,
     EventV2Bridge.node,
