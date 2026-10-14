@@ -5,6 +5,7 @@ export interface Client {
   readonly ping: () => Promise<Protocol.PingResult>
   readonly subscribe: () => Promise<void>
   readonly readView: (input: Protocol.ReadViewRequest) => Promise<Protocol.ReadViewResult>
+  readonly blastRadius: (input: Protocol.BlastRadiusRequest) => Promise<Protocol.BlastRadiusResult>
   readonly shutdown: () => Promise<void>
   readonly onIndexing: (listener: (notification: Protocol.IndexingNotification) => void) => () => void
   readonly onClose: (listener: (error?: Error) => void) => () => void
@@ -116,6 +117,11 @@ export async function connect(path: string, options?: ClientOptions): Promise<Cl
     readView: async (input) => {
       const decoded = Protocol.decodeOption(Protocol.ReadViewResult, await request("read_view", input))
       if (decoded === undefined) throw decodeFailure("read_view")
+      return decoded
+    },
+    blastRadius: async (input) => {
+      const decoded = Protocol.decodeOption(Protocol.BlastRadiusResult, await request("blast_radius", input))
+      if (decoded === undefined) throw decodeFailure("blast_radius")
       return decoded
     },
     shutdown: async () => {

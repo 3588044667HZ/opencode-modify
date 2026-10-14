@@ -12,6 +12,7 @@ import { GlobTool } from "./glob"
 import { GrepTool } from "./grep"
 import { ReadTool } from "./read"
 import { ReadViewTool } from "./read-view"
+import { BlastRadiusTool } from "./blast-radius"
 import { TaskTool } from "./task"
 import { DispatchTool } from "./dispatch"
 import { TeamTool } from "./team"
@@ -118,6 +119,7 @@ const layer = Layer.effect(
     const blackboard = flags.experimentalAgentTeams ? yield* BlackboardTool : undefined
     const read = yield* ReadTool
     const readview = yield* ReadViewTool
+    const blastradius = yield* BlastRadiusTool
     const question = yield* QuestionTool
     const todo = yield* TodoWriteTool
     const lsptool = yield* LspTool
@@ -228,6 +230,7 @@ const layer = Layer.effect(
           shell: Tool.init(shell),
           read: Tool.init(read),
           read_view: Tool.init(readview),
+          blast_radius: Tool.init(blastradius),
           glob: Tool.init(globtool),
           grep: Tool.init(greptool),
           edit: Tool.init(edit),
@@ -257,6 +260,7 @@ const layer = Layer.effect(
             tool.shell,
             tool.read,
             ...(cfg.semantic?.enabled ? [tool.read_view] : []),
+            ...(cfg.semantic?.enabled ? [tool.blast_radius] : []),
             tool.glob,
             tool.grep,
             tool.edit,

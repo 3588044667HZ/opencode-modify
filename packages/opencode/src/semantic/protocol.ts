@@ -7,6 +7,7 @@ export type View = (typeof Views)[number]
 export const ErrorCode = {
   indexing: -32000,
   fileNotFound: -32001,
+  symbolNotFound: -32002,
   internalError: -32603,
 } as const
 
@@ -100,6 +101,9 @@ export function describeError(error: SemanticError): string {
     }
     if (error.code === ErrorCode.fileNotFound) {
       return `semantic engine could not find this file (it may not be indexed): ${error.message}`
+    }
+    if (error.code === ErrorCode.symbolNotFound) {
+      return `semantic engine could not resolve symbol (it may not exist or be indexed): ${error.message}`
     }
     return `semantic engine error (${error.code}): ${error.message}`
   }
@@ -199,6 +203,69 @@ export interface ReadViewRequest {
   readonly view: View
   readonly position?: { readonly line: number }
   readonly symbol?: string
+}
+
+export const BlastRadiusRisks = ["low", "medium", "high"] as const
+export type BlastRadiusRisk = (typeof BlastRadiusRisks)[number]
+
+const BlastRadiusDefinition = Schema.Struct({
+  file: Schema.String,
+  line: Schema.Int,
+  kind: Schema.String,
+})
+
+const BlastRadiusCaller = Schema.Struct({
+  file: Schema.String,
+  line: Schema.Int,
+  context: Schema.String,
+  is_test: Schema.Boolean,
+})
+
+const BlastRadiusCallee = Schema.Struct({
+  symbol: Schema.String,
+  file: Schema.String,
+  line: Schema.Int,
+})
+
+const BlastRadiusEntryPoint = Schema.Struct({
+  file: Schema.String,
+  line: Schema.Int,
+  context: Schema.String,
+  reason: Schema.String,
+})
+
+const BlastRadiusTest = Schema.Struct({
+  file: Schema.String,
+  line: Schema.Int,
+  name: Schema.String,
+})
+
+const BlastRadiusSummary = Schema.Struct({
+  callers_count: Schema.Int,
+  callers_total: optional(Schema.Int),
+  callees_count: Schema.Int,
+  files_count: Schema.Int,
+  has_public_api_usage: Schema.Boolean,
+  risk: Schema.Literals(BlastRadiusRisks),
+})
+
+// Strict decoding: the frozen blast_radius contract must not silently accept
+// fields the daemon is not supposed to send.
+export const BlastRadiusResult = Schema.Struct({
+  symbol: Schema.String,
+  definition: BlastRadiusDefinition,
+  callers: Schema.Array(BlastRadiusCaller),
+  callees: Schema.Array(BlastRadiusCallee),
+  affected_files: Schema.Array(Schema.String),
+  entry_points: Schema.Array(BlastRadiusEntryPoint),
+  tests_affected: Schema.Array(BlastRadiusTest),
+  summary: BlastRadiusSummary,
+}).annotate({ identifier: "BlastRadiusResult", parseOptions: { onExcessProperty: "error" } })
+export type BlastRadiusResult = typeof BlastRadiusResult.Type
+
+export interface BlastRadiusRequest {
+  readonly symbol: string
+  readonly scope?: string
 }
 
 export function decodeOption<S extends Schema.Codec<unknown, unknown>>(schema: S, value: unknown) {

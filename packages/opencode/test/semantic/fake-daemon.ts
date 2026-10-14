@@ -1,9 +1,9 @@
 // Minimal fake semantic daemon for tests. Implements the frozen JSON-RPC
 // protocol over a unix socket / Windows named pipe.
 //
-// Usage: bun fake-daemon.ts [--indexing | --indexing-forever] [--read-view-error=indexing|notfound] <project_dir> <socket_path>
+// Usage: bun fake-daemon.ts [--indexing | --indexing-forever] [--read-view-error=indexing|notfound] [--blast-radius-error=indexing|symbol] <project_dir> <socket_path>
 import net from "node:net"
-import { SAMPLE_RESULT } from "./fixture"
+import { SAMPLE_BLAST_RESULT, SAMPLE_RESULT } from "./fixture"
 
 const argv = process.argv.slice(2)
 const flags = argv.filter((arg) => arg.startsWith("--"))
@@ -18,6 +18,7 @@ const mode = {
   indexing: flags.includes("--indexing"),
   forever: flags.includes("--indexing-forever"),
   readViewError: flags.find((flag) => flag.startsWith("--read-view-error="))?.split("=")[1],
+  blastRadiusError: flags.find((flag) => flag.startsWith("--blast-radius-error="))?.split("=")[1],
 }
 
 const state = {
@@ -99,6 +100,17 @@ async function handle(socket: net.Socket, message: any) {
         return
       }
       respond(socket, message.id, SAMPLE_RESULT)
+      return
+    case "blast_radius":
+      if (mode.blastRadiusError === "indexing") {
+        respondError(socket, message.id, -32000, "indexing", { progress: state.progress })
+        return
+      }
+      if (mode.blastRadiusError === "symbol") {
+        respondError(socket, message.id, -32002, "symbol not found")
+        return
+      }
+      respond(socket, message.id, SAMPLE_BLAST_RESULT)
       return
     case "shutdown":
       respond(socket, message.id, { ok: true })

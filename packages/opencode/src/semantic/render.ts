@@ -63,3 +63,37 @@ function coverageLine(result: Protocol.ReadViewResult): string | undefined {
 function formatRanges(ranges: ReadonlyArray<Protocol.CoverageRange>): string {
   return ranges.map(([from, to]) => `L${from}-${to}`).join(", ")
 }
+
+export function renderBlastRadius(result: Protocol.BlastRadiusResult): string {
+  const definition = result.definition
+  const lines = [`${result.symbol}() @ ${definition.file}:${definition.line} (${definition.kind})`]
+  lines.push(callersLine(result))
+  lines.push(calleesLine(result))
+  lines.push(`  affected: ${result.summary.files_count} files`)
+  if (result.entry_points.length === 0) lines.push("  entry: none")
+  for (const entry of result.entry_points) {
+    lines.push(`  entry: ${entry.file}:${entry.line} ${entry.context} ← ${entry.reason}`)
+  }
+  lines.push(testsLine(result))
+  lines.push(`  risk: ${result.summary.risk}`)
+  return lines.join("\n")
+}
+
+function callersLine(result: Protocol.BlastRadiusResult): string {
+  const summary = result.summary
+  if (summary.callers_total !== undefined && summary.callers_total > result.callers.length) {
+    return `  callers: ${summary.callers_count}+ (total ${summary.callers_total})`
+  }
+  const callers = result.callers.map((caller) => `${caller.file}:${caller.line} ${caller.context}`)
+  return `  callers: ${summary.callers_count} [${callers.join(", ")}]`
+}
+
+function calleesLine(result: Protocol.BlastRadiusResult): string {
+  const callees = result.callees.map((callee) => `${callee.symbol} @ ${callee.file}:${callee.line}`)
+  return `  callees: ${result.summary.callees_count} [${callees.join(", ")}]`
+}
+
+function testsLine(result: Protocol.BlastRadiusResult): string {
+  const tests = result.tests_affected.map((test) => `${test.file}::${test.name}`)
+  return `  tests: ${tests.length} [${tests.join(", ")}]`
+}
