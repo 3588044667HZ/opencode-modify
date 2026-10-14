@@ -2,7 +2,7 @@
 
 按 `LLM-IDE-SPEC/`（main / intellij-headless / jsonrpc-channel / adapter-layer）实现的 IntelliJ
 无头语义守护：JSON-RPC 2.0 over AF_UNIX（NDJSON），提供 `ping` / `subscribe` / `read_view` /
-`blast_radius` / `shutdown`。
+`blast_radius` / `edit_batch` / `shutdown`。
 Java 实现，无 Kotlin，可在无 Gradle、无网络的条件下用本地 IDEA 平台 jar 直接构建。
 
 ## 目录
@@ -16,6 +16,7 @@ semantic-server/
 │   ├── IndexMonitor.java            # DumbService 轮询 → notifications/indexing（阶段近似进度）
 │   ├── ReadViewService.java         # read_view 聚合：PSI/VFS/引用 resolve/诊断
 │   ├── BlastRadiusService.java      # blast_radius 聚合：定义/引用分类/入口/测试/callees/风险 + 缓存
+│   ├── EditBatchService.java        # edit_batch：版本戳/路径保护/纯度/锚点/重叠 + 原子写 + 诊断增量
 │   └── Log.java
 ├── src/main/resources/META-INF/plugin.xml   # appStarter EP + 最小依赖
 ├── script/build-local.sh            # javac + jar 打包 + 安装到 .sandbox/plugins
@@ -23,8 +24,10 @@ semantic-server/
 ├── script/run-local.sh              # 用本地 IDEA 平台 + JBR 启动守护（镜像 bin/idea.bat）
 ├── script/probe.ts                  # Bun 探针：ping/subscribe/read_view/shutdown
 ├── script/blast-probe.ts            # Bun 探针：blast_radius（fixtures 生成/缓存/scope 证据）
+├── script/edit-probe.ts             # Bun 探针：edit_batch（模板块 copy/版本注入/fixtures 生成/raw NDJSON）
 ├── script/protocol-conformance.ts   # 跨实现协议一致性测试（真实守护 ↔ OC 客户端）
 ├── fixtures/blast_radius/           # 协议 fixtures：input.json + output.json（真实守护响应）
+├── fixtures/edit_batch/             # 协议 fixtures：template.java + input.json + output.json（版本归一）
 ├── sample-project/                  # 跨文件调用样例（Main/Greeter + 故意报错的 Broken，含 .idea/iml）
 ├── build.gradle.kts / settings.gradle.kts   # org.jetbrains.intellij.platform 2.2.1 + local IDEA 平台
 ├── .gradle-home/                    # Gradle 依赖仓库（项目本地，gitignore）
@@ -204,6 +207,108 @@ scope 非字符串 → `-32603`）。
   只提供通用传输层与分发），就绪检查与 read_view 一致；
 - 冷启动竞态：向项目新增文件后首次打开时，短名索引更新可能略滞后于 ready 判定，此时查询可能
   返回 `-32002`；稍候重试即可（索引预热后本机未复现）。
+
+## edit_batch（单文件多区域原子编辑）
+
+`edit_batch(params)`：`{"file": string, "changes": [{"oldString": string, "newString": string,
+"description"?: string}], "baseVersion": string}`。单文件、文本锚点、全成功或全失败的原子编辑；
+写路径基础设施（版本戳校验、路径保护、纯度校验、原子写）在此首次落地。
+
+成功结果：
+
+- `file / applied / changes_applied / changes_total / old_version / new_version`；
+- `diagnostics_delta: {errors, warnings}`：改前 vs 改后的诊断差异（delta = after - before）；
+- `diagnostics_after: {errors, warnings}`：扩展字段（渲染“改前→改后”需要，冻结协议只要求 delta）；
+- `line_changes: [{line, action}]`：新内容坐标、逐行输出；action 规则：`newString` 为空 →
+  `deleted`（删除点 1 条）；新行数 > 旧行数 → `inserted`（逐行）；否则 `modified`（k 行 k 条）。
+
+失败结果（仍是 JSON-RPC 成功响应，`result.applied=false`）：
+
+```json
+{"applied": false, "file": "src/main/java/demo/tasks/EditableSample.java", "changes_total": 1,
+ "error": {"code": -32011, "message": "ANCHOR_NOT_UNIQUE",
+           "detail": {"change_index": 0, "oldString": "count", "match_count": 2, "locations": [4, 6]},
+           "hint": "提供更多上下文使锚点唯一，或调用 map() 获取直接操作工具"}}
+```
+
+| 码 | 名称 | 触发 | detail |
+|----|------|------|--------|
+| -32010 | `ANCHOR_NOT_FOUND` | `oldString` 在文件中找不到 | change_index, oldString |
+| -32011 | `ANCHOR_NOT_UNIQUE` | `oldString` 匹配多处 | change_index, oldString, match_count, locations（行号） |
+| -32012 | `VERSION_MISMATCH` | `baseVersion` 与当前版本不符 | current_version, content |
+| -32013 | `PATH_PROTECTED` | 路径命中保护列表 | path |
+| -32014 | `CONTENT_IMPURE` | `newString` 含渲染层元语 | change_index, marker |
+| -32015 | `WRITE_FAILED` | 临时文件写入/rename 失败 | reason |
+| -32016 | `CHANGE_CONFLICT` | 两个 change 的锚点区间相交（spec 要求拒绝但未定义码，本实现新增） | change_index, conflict_with_index |
+
+-32011 的 hint 为 spec 原文；其余为同风格中文短提示。文件不存在仍是 RPC 错误 `-32001`
+（与 read_view 一致）；参数缺失/类型错/空 changes/空 oldString 是 RPC `-32603`。
+
+处理顺序（冻结）：
+
+① 参数校验（-32603）→ ② 路径保护（保护段 `.venv/ venv/ env/ node_modules/ .git/ dist/ build/
+target/ out/ __pycache__/ .pytest_cache/ .mypy_cache/`，后缀 `*.lock *.min.js *.min.css`；命中即
+-32013，**先于存在性检查**）→ ③ 文件不存在 → RPC -32001 → ④ 读内容 + 当前版本（先按 mtime
+差异 refresh VFS）→ ⑤ `baseVersion` 不匹配 → -32012（返回 current_version + content）→ ⑥ 纯度
+（`[err:`、`→ def@`、`L\d+ \[`、`pos: L\d+`）→ ⑦ 锚点恰好出现 1 次（非重叠计数；0 → -32010，
+>1 → -32011）→ ⑧ 两锚点区间相交 → -32016（相邻不算）→ ⑨ 从后往前内存应用 → ⑩ 诊断 before
+计数 → ⑪ 原子写 → ⑫ VFS refresh + 新版本 → ⑬ 诊断 after、delta、line_changes。
+
+原子写：同目录 `<file>.tmp` → `FileChannel.force(true)` fsync → `Files.move(ATOMIC_MOVE,
+REPLACE_EXISTING)` 覆盖；任何失败清理 .tmp 并返回 -32015（本机 Windows 实测
+ATOMIC_MOVE+REPLACE_EXISTING 可用）。写入绕过平台保存路径，写后执行 VFS refresh，并在 EDT 上
+按需 `FileDocumentManager.reloadFromDisk` + `PsiDocumentManager.commitAllDocuments`，保证
+PSI/诊断基于新内容重算；诊断计数复用 ReadViewService 的 `collectDiagnostics` 与手动高亮缓存
+（缓存键含 VFS modificationStamp，写后自动 miss）。
+
+缓存失效：写入触发 PSI 变更 → `PsiModificationTracker` modCount 变化，`BlastRadiusService`
+静态缓存自动失效（无需显式通知）——实测连续查询 `cache hit`（modCount=16）后编辑一次，
+再查询为 `cache miss (computed)`（modCount=20）。
+
+fixtures：`fixtures/edit_batch/template.java`（固定模板）＋ `input.json`（**故意不含
+baseVersion**，由探针/契约测试经 read_view 注入）＋ `output.json`（真实守护响应；其中
+`old_version`/`new_version` 两个值替换为字串 `"<version>"`，其余原样美化缩进）。生成命令：
+
+```bash
+bash script/build-local.sh
+bash script/run-local.sh sample-project .tmp/edit.sock --idle-seconds 600
+bun script/edit-probe.ts .tmp/edit.sock --normalize-versions --out fixtures/edit_batch/output.json
+```
+
+探针：`bun script/edit-probe.ts [socket] [--params file | --params-json '{...}']
+[--base-version v] [--out file] [--normalize-versions] [--raw] [--copy|--no-copy] [--no-inject]
+[--no-wait] [--timeout secs] [--shutdown] [--cleanup]`；默认 copy template → 目标、read_view 取
+version、注入 baseVersion 后发送；`--raw` 打印原始 NDJSON 请求/响应帧。
+
+验收证据（真实守护 + sample-project；成功用例的 target 是生成物，跑完已删除）：
+
+- a) 成功：copy template → read_view `version=1a139f262e6` → 发送两条 changes → `applied:true`、
+  `changes_applied:2`、`changes_total:2`，`line_changes=[{4,modified},{6,modified}]`，
+  `diagnostics_delta={errors:-1,warnings:0}`，`diagnostics_after={errors:0,warnings:2}`，
+  `new_version=a ≠ old_version`；磁盘内容变为 `int count = 7; / return count + 1;`；
+- b) `--base-version deadbeef` → -32012，`detail.current_version:"a"` + 全文 content；
+- c) -32010（锚点缺失）、-32011（`count` 匹配 2 处，locations `[4,6]`，hint 为 spec 原文）、
+  -32016（`int total() {` 与 `total() {` 区间相交：change 1 ↔ 0）、-32014（marker `[err:`）；
+- d) `node_modules/x.js`（文件不存在）→ -32013（保护先于存在性）；
+- e) `src/main/java/demo/NoSuch.java` → RPC -32001 `file not found`；
+- f) 事务性：成功前跑一次故意失败的批次（-32010），目标文件 md5 前后一致、目录无 `.tmp` 残留；
+- g) 成功后再用旧 `baseVersion`（`1a139f262e6`）→ -32012（证明版本戳已更新为 `a`）；
+- 附加：连续编辑（`+1`→`+2`）后 before/after 诊断计数正确跟随；插入/删除批次
+  `line_changes=[{5,inserted},{6,inserted},{7,deleted}]` 且磁盘内容正确；
+- 缓存失效证据：如上实测（modCount 16 → 20，`cache hit` → `cache miss`）。
+
+偏差说明：
+
+- -32016 为 spec 未定义的新增码（spec 只要求“重叠拒绝”）；
+- `diagnostics_after` 为冻结协议的扩展字段（渲染“改前→改后”需要），delta = after - before；
+- 锚点匹配为非重叠计数（`indexOf` 按 oldString 长度步进）；
+- 失败结果的 `file` 回显请求值，成功结果同样回显请求值（与 read_view 的 displayPath 风格可能
+  不同：绝对路径输入时回显绝对路径）；
+- `line_changes` 的 action 只有三档（一个 change 内所有行同 action）：多行替换为少行时报
+  `modified`（按新内容行数输出）；
+- 路径保护按“相对项目根的路径段”判定（项目根目录名本身不参与），后缀按文件名判定；
+- 写入是 NIO 原子写（非平台保存），不触发平台 formatter/保存钩子；无自动格式化、无内容
+  规范化、无撤销（与 spec 约束一致）。
 
 ## 启动方式尝试记录
 

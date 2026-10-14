@@ -1,0 +1,26 @@
+{
+  "file": "src/main/java/demo/tasks/EditableSample.java",
+  "applied": true,
+  "changes_applied": 2,
+  "changes_total": 2,
+  "old_version": "<version>",
+  "new_version": "<version>",
+  "diagnostics_delta": {
+    "errors": -1,
+    "warnings": 0
+  },
+  "diagnostics_after": {
+    "errors": 0,
+    "warnings": 2
+  },
+  "line_changes": [
+    {
+      "line": 4,
+      "action": "modified"
+    },
+    {
+      "line": 6,
+      "action": "modified"
+    }
+  ]
+}

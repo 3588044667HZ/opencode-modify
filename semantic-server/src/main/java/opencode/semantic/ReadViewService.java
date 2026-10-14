@@ -349,6 +349,21 @@ final class ReadViewService {
     return result;
   }
 
+  /** edit_batch 用：当前文件的诊断计数 [errors, warnings]（复用 collectDiagnostics 与手动高亮缓存）。 */
+  static int[] diagnosticCounts(Project project, VirtualFile virtualFile) {
+    PsiFile psiFile = PsiManager.getInstance(project).findFile(virtualFile);
+    if (psiFile == null) return new int[] {0, 0};
+    Document document = PsiDocumentManager.getInstance(project).getDocument(psiFile);
+    if (document == null) return new int[] {0, 0};
+    int errors = 0;
+    int warnings = 0;
+    for (Diagnostic diagnostic : collectDiagnostics(project, psiFile, document)) {
+      if ("error".equals(diagnostic.severity)) errors++;
+      else if ("warning".equals(diagnostic.severity)) warnings++;
+    }
+    return new int[] {errors, warnings};
+  }
+
   private static final Map<String, List<HighlightInfo>> MANUAL_HIGHLIGHT_CACHE = new ConcurrentHashMap<>();
 
   private static boolean diagnosticCacheable(PsiFile psiFile, Document document) {
@@ -558,7 +573,7 @@ final class ReadViewService {
    * 版本戳：优先 VFS modificationStamp（spec 要求）；本机新 VFS 上初始值可能为 0，
    * 此时退化为文件系统 mtime，保证文件修改后版本戳变化。
    */
-  private static String versionOf(VirtualFile virtualFile) {
+  static String versionOf(VirtualFile virtualFile) {
     long stamp = virtualFile.getModificationStamp();
     if (stamp > 0) return Long.toHexString(stamp);
     try {

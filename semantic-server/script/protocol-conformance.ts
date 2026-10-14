@@ -20,6 +20,9 @@ const BROKEN = path.join(FIXTURE_DIR, "Broken.java")
 const MISSING = path.join(FIXTURE_DIR, "Missing.java")
 const FIXTURE_INPUT = path.join(SERVER_DIR, "fixtures", "blast_radius", "input.json")
 const FIXTURE_OUTPUT = path.join(SERVER_DIR, "fixtures", "blast_radius", "output.json")
+const EDIT_DIR = path.join(SERVER_DIR, "fixtures", "edit_batch")
+const EDIT_TARGET = path.join(FIXTURE_DIR, "tasks", "EditableSample.java")
+const EDIT_REL = "src/main/java/demo/tasks/EditableSample.java"
 
 const clientModule = await import(pathToFileURL(path.join(ROOT, "packages/opencode/src/semantic/client.ts")).href)
 const transportModule = await import(pathToFileURL(path.join(ROOT, "packages/opencode/src/semantic/transport.ts")).href)
@@ -79,6 +82,19 @@ type BlastRadiusResult = {
     has_public_api_usage: boolean
     risk: string
   }
+}
+
+type EditBatchResult = {
+  applied: boolean
+  file?: string
+  changes_applied?: number
+  changes_total?: number
+  old_version?: string
+  new_version?: string
+  diagnostics_delta?: { errors: number; warnings: number }
+  diagnostics_after?: { errors: number; warnings: number }
+  line_changes?: Array<{ line: number; action: string }>
+  error?: { code?: number; message?: string; detail?: Record<string, unknown>; hint?: string }
 }
 
 const checks: Array<{ name: string; ok: boolean; detail: string }> = []
@@ -331,7 +347,9 @@ async function cleanupStaleServer(): Promise<void> {
   for (let attempt = 0; attempt < 25; attempt++) {
     const again = await tryConnect(200)
     if (!again.ok) {
-      fs.rmSync(SOCKET, { force: true })
+  fs.rmSync(EDIT_TARGET, { force: true })
+  fs.rmSync(`${EDIT_TARGET}.tmp`, { force: true })
+  fs.rmSync(SOCKET, { force: true })
       return
     }
     again.socket.destroy()
@@ -643,6 +661,209 @@ try {
     )
   } catch (error) {
     check("[15] scope=file: 仅返回该文件引用（全为测试）", false, `${(error as Error).name}: ${(error as Error).message}`)
+  }
+
+  // ---- 用例 16-19：edit_batch 契约（fixtures + 失败路径 + 事务性 + 成功/版本更新） ----
+  const editInput = (await Bun.file(path.join(EDIT_DIR, "input.json")).json()) as {
+    file: string
+    changes: Array<{ oldString: string; newString: string; description?: string }>
+  }
+  const editGolden = (await Bun.file(path.join(EDIT_DIR, "output.json")).json()) as EditBatchResult
+  check(
+    "[16] 客户端严格解码 fixtures/edit_batch/output.json",
+    strictDecode(protocol.EditBatchResult, editGolden) !== undefined,
+    `applied=${editGolden.applied} changes=${editGolden.changes_applied}/${editGolden.changes_total}`,
+  )
+
+  fs.mkdirSync(path.dirname(EDIT_TARGET), { recursive: true })
+  const editTemplate = await Bun.file(path.join(EDIT_DIR, "template.java")).text()
+  fs.writeFileSync(EDIT_TARGET, editTemplate)
+  let editBaseVersion: string | undefined
+  try {
+    const snapshot = (await typed.readView({ file: EDIT_REL, view: "entry" })) as ReadViewResult
+    editBaseVersion = snapshot.version
+    check(
+      "[16] 模板写入后 read_view 取到 baseVersion",
+      typeof editBaseVersion === "string" && editBaseVersion.length > 0,
+      `version=${editBaseVersion}`,
+    )
+  } catch (error) {
+    check("[16] 模板写入后 read_view 取到 baseVersion", false, `${(error as Error).name}: ${(error as Error).message}`)
+  }
+
+  const failEdit = async (
+    name: string,
+    input: { file: string; changes: Array<{ oldString: string; newString: string }>; baseVersion: string },
+  ): Promise<EditBatchResult | undefined> => {
+    try {
+      const result = (await typed.editBatch(input)) as EditBatchResult
+      check(name, result.applied === false, `applied=${result.applied} error=${clip(JSON.stringify(result.error))}`)
+      return result
+    } catch (error) {
+      check(name, false, `${(error as Error).name}: ${(error as Error).message}`)
+      return undefined
+    }
+  }
+
+  if (editBaseVersion !== undefined) {
+    const mismatch = await failEdit("[17] 错 baseVersion → -32012", {
+      file: editInput.file,
+      changes: editInput.changes,
+      baseVersion: "deadbeef00",
+    })
+    const mismatchDetail = mismatch?.error?.detail as { current_version?: unknown; content?: unknown } | undefined
+    check(
+      "[17] -32012 detail 含 current_version 与非空 content",
+      mismatch?.error?.code === -32012 &&
+        typeof mismatchDetail?.current_version === "string" &&
+        typeof mismatchDetail?.content === "string" &&
+        mismatchDetail.content.length > 0,
+      `detail=${clip(JSON.stringify(mismatch?.error?.detail))}`,
+    )
+
+    const impure = await failEdit("[17] newString 含元语 → -32014", {
+      file: editInput.file,
+      changes: [{ oldString: 'int count = "fixme";', newString: "int count = 7; [err: impurity]" }],
+      baseVersion: editBaseVersion,
+    })
+    check(
+      "[17] -32014 detail.change_index=0",
+      impure?.error?.code === -32014 && (impure?.error?.detail as { change_index?: unknown } | undefined)?.change_index === 0,
+      `error=${clip(JSON.stringify(impure?.error))}`,
+    )
+
+    const notFound = await failEdit("[17] 锚点不存在 → -32010", {
+      file: editInput.file,
+      changes: [{ oldString: "NO_SUCH_ANCHOR_STRING", newString: "x" }],
+      baseVersion: editBaseVersion,
+    })
+    check(
+      "[17] -32010 detail.oldString 回显",
+      notFound?.error?.code === -32010 &&
+        (notFound?.error?.detail as { oldString?: unknown } | undefined)?.oldString === "NO_SUCH_ANCHOR_STRING",
+      `error=${clip(JSON.stringify(notFound?.error))}`,
+    )
+
+    const notUnique = await failEdit("[17] 锚点多处 → -32011", {
+      file: editInput.file,
+      changes: [{ oldString: "count", newString: "total" }],
+      baseVersion: editBaseVersion,
+    })
+    const notUniqueDetail = notUnique?.error?.detail as { match_count?: number; locations?: number[] } | undefined
+    check(
+      "[17] -32011 match_count=2 且 locations=[4,6]",
+      notUnique?.error?.code === -32011 &&
+        notUniqueDetail?.match_count === 2 &&
+        JSON.stringify(notUniqueDetail?.locations) === JSON.stringify([4, 6]),
+      `detail=${clip(JSON.stringify(notUnique?.error?.detail))}`,
+    )
+    if (notUnique !== undefined) {
+      const failureRendered = renderModule.renderEditBatch(notUnique)
+      const expectedFailure = [
+        "edit_batch FAILED: change 1/1 anchor not unique",
+        `  ${editInput.file}: "count" matches 2 locations [L4, L6]`,
+        "  hint: 提供更多上下文使锚点唯一，或调用 map() 获取直接操作工具",
+      ].join("\n")
+      check("[17] 失败渲染逐字节一致", failureRendered === expectedFailure, clip(failureRendered.replace(/\n/g, " ⏎ "), 260))
+    }
+
+    const conflict = await failEdit("[17] 锚点重叠 → -32016", {
+      file: editInput.file,
+      changes: [
+        { oldString: 'int count = "fixme";', newString: "int count = 7;" },
+        { oldString: 'count = "fixme"', newString: "count = 9" },
+      ],
+      baseVersion: editBaseVersion,
+    })
+    check(
+      "[17] -32016 detail 含冲突索引",
+      conflict?.error?.code === -32016 &&
+        (conflict?.error?.detail as { conflict_with_index?: unknown } | undefined)?.conflict_with_index !== undefined,
+      `error=${clip(JSON.stringify(conflict?.error))}`,
+    )
+
+    const protectedPath = await failEdit("[17] 保护路径 → -32013", {
+      file: "node_modules/x.js",
+      changes: [{ oldString: "a", newString: "b" }],
+      baseVersion: "x",
+    })
+    check("[17] -32013 code 精确", protectedPath?.error?.code === -32013, `error=${clip(JSON.stringify(protectedPath?.error))}`)
+
+    let missingFileCode: number | undefined
+    try {
+      await typed.editBatch({
+        file: "src/main/java/demo/tasks/MissingFile.java",
+        changes: [{ oldString: "a", newString: "b" }],
+        baseVersion: "x",
+      })
+    } catch (error) {
+      missingFileCode = (error as { code?: number }).code
+    }
+    check("[17] 不存在非保护文件 → RPC -32001", missingFileCode === -32001, `code=${missingFileCode}`)
+  }
+
+  const afterFailures = fs.readFileSync(EDIT_TARGET, "utf8")
+  check("[18] 失败批次未写盘（内容 === 模板）", afterFailures === editTemplate, `len=${afterFailures.length} template=${editTemplate.length}`)
+  check("[18] 无 .tmp 残留", !fs.existsSync(`${EDIT_TARGET}.tmp`), `${EDIT_TARGET}.tmp`)
+
+  if (editBaseVersion !== undefined) {
+    try {
+      const result = (await typed.editBatch({
+        file: editInput.file,
+        changes: editInput.changes,
+        baseVersion: editBaseVersion,
+      })) as EditBatchResult
+      check(
+        "[19] edit_batch applied 成功",
+        result.applied === true,
+        `applied=${result.applied} error=${clip(JSON.stringify(result.error ?? null))}`,
+      )
+      const normalizedActual = { ...result, old_version: "<version>", new_version: "<version>" }
+      check(
+        "[19] 与 fixtures output.json 深度一致（版本归一）",
+        JSON.stringify(canonical(normalizedActual)) === JSON.stringify(canonical(editGolden)),
+        `changes=${result.changes_applied}/${result.changes_total} delta=${JSON.stringify(result.diagnostics_delta)} after=${JSON.stringify(result.diagnostics_after)}`,
+        { actual: result, expected: editGolden },
+      )
+      check(
+        "[19] line_changes=[{4,modified},{6,modified}]",
+        JSON.stringify(result.line_changes) === JSON.stringify([
+          { line: 4, action: "modified" },
+          { line: 6, action: "modified" },
+        ]),
+        JSON.stringify(result.line_changes),
+      )
+      check(
+        "[19] 版本更新：old=baseVersion、new≠old",
+        result.old_version === editBaseVersion &&
+          typeof result.new_version === "string" &&
+          result.new_version.length > 0 &&
+          result.new_version !== editBaseVersion,
+        `old=${result.old_version} new=${result.new_version}`,
+      )
+      const disk = fs.readFileSync(EDIT_TARGET, "utf8")
+      check(
+        "[19] 磁盘内容已原子更新",
+        disk.includes("int count = 7;") && disk.includes("return count + 1;") && !disk.includes("fixme"),
+        disk.replace(/\n/g, " ⏎ "),
+      )
+      const successRendered = renderModule.renderEditBatch(result)
+      check(
+        "[19] 成功渲染格式（含 1 err → 0 err 与版本行）",
+        successRendered.startsWith(
+          `edit_batch applied 2/2 changes\n  ${editInput.file}: L4 (modified), L6 (modified)\n  diagnostics: 1 err → 0 err\n  version: `,
+        ) && successRendered.endsWith(`${editBaseVersion} → ${result.new_version}`),
+        clip(successRendered.replace(/\n/g, " ⏎ "), 260),
+      )
+      const stale = await failEdit("[19] 成功后旧 baseVersion 重发 → -32012", {
+        file: editInput.file,
+        changes: editInput.changes,
+        baseVersion: editBaseVersion,
+      })
+      check("[19] 版本已更新（stale 拒绝）", stale?.error?.code === -32012, `error=${clip(JSON.stringify(stale?.error))}`)
+    } catch (error) {
+      check("[19] edit_batch applied 成功", false, `${(error as Error).name}: ${(error as Error).message}`)
+    }
   }
 
   // ---- 用例 9：shutdown + 连接失败 ----

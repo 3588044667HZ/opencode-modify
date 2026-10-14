@@ -1,0 +1,1 @@
+{"file":"src/main/java/demo/tasks/EditableSample.java","changes":[{"oldString":"int count = \"fixme\";","newString":"int count = 7;"},{"oldString":"return count;","newString":"return count + 1;"}]}
