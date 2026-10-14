@@ -60,6 +60,8 @@ export interface Def<
   description: string
   parameters: Parameters
   jsonSchema?: JSONSchema7
+  // 可见性标记：只影响模型可见列表与提示词，不影响调用解析与执行。
+  hide?: boolean
   execute(args: Schema.Schema.Type<Parameters>, ctx: Context): Effect.Effect<ExecuteResult<M>>
   formatValidationError?(error: unknown): string
 }
@@ -178,6 +180,19 @@ export function init<P extends Schema.Decoder<unknown>, M extends Metadata>(
       id: info.id,
     }
   })
+}
+
+export function isHidden(tool: { readonly hide?: boolean }): boolean {
+  return tool.hide === true
+}
+
+// 模型可见列表的唯一过滤器；调用解析路径不得使用它。
+export function visibleTools<T extends { readonly hide?: boolean }>(tools: readonly T[]): T[] {
+  return tools.filter((tool) => !isHidden(tool))
+}
+
+export function hiddenTools<T extends { readonly hide?: boolean }>(tools: readonly T[]): T[] {
+  return tools.filter(isHidden)
 }
 
 export * as Tool from "./tool"

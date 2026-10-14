@@ -89,12 +89,17 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
         .pipe(Effect.orDie),
   })
 
-  for (const item of yield* registry.tools({
-    modelID: ModelV2.ID.make(input.model.api.id),
-    providerID: input.model.providerID,
-    agent: input.agent,
-    permission: input.session.permission,
-  })) {
+  const catalog = toolCatalog({
+    visible: yield* registry.tools({
+      modelID: ModelV2.ID.make(input.model.api.id),
+      providerID: input.model.providerID,
+      agent: input.agent,
+      permission: input.session.permission,
+    }),
+    all: yield* registry.all(),
+  })
+
+  for (const item of catalog.execution) {
     const schema = ProviderTransform.schema(input.model, ToolJsonSchema.fromTool(item))
     tools[item.id] = tool({
       description: item.description,
@@ -385,7 +390,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     })
   }
 
-  if (flags.experimentalCodeMode) return tools
+  if (flags.experimentalCodeMode) return { tools, activeTools: activeToolIDs(tools, catalog.hidden) }
 
   for (const [key, entry] of Object.entries(yield* mcp.tools())) {
     const item = McpCatalog.convertTool(entry.def, entry.client, entry.timeout)
@@ -489,8 +494,27 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     tools[key] = item
   }
 
-  return tools
+  return { tools, activeTools: activeToolIDs(tools, catalog.hidden) }
 })
+
+// 展示与执行共用同一注册表，但可见性不同：execution 含隐藏工具用于调用解析，
+// active 标记只把可见工具暴露给模型（隐藏工具仍可按名字解析并执行）。
+export function toolCatalog<T extends { readonly id: string; readonly hide?: boolean }>(input: {
+  visible: readonly T[]
+  all: readonly T[]
+}) {
+  const hidden = Tool.hiddenTools(input.all)
+  return {
+    execution: [...input.visible, ...hidden],
+    active: input.visible.map((item) => item.id),
+    hidden,
+  }
+}
+
+function activeToolIDs(tools: Record<string, unknown>, hidden: readonly { readonly id: string }[]) {
+  const hiddenIDs = new Set(hidden.map((item) => item.id))
+  return Object.keys(tools).filter((id) => !hiddenIDs.has(id))
+}
 
 function toRecord(value: unknown) {
   if (isRecord(value)) return value

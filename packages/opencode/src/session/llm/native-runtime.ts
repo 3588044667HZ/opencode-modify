@@ -33,6 +33,7 @@ type StreamInput = {
   readonly llmClient: LLMClientShape
   readonly messages: ModelMessage[]
   readonly tools: Record<string, Tool>
+  readonly activeTools?: readonly string[]
   readonly toolChoice?: "auto" | "required" | "none"
   readonly temperature?: number
   readonly topP?: number
@@ -87,6 +88,9 @@ export function stream(input: StreamInput): StreamResult {
   // — if a field ever needs to differ between the two surfaces, the
   // translation belongs here, not split across both packages.
   const tools = nativeTools(input.tools, input)
+  // 隐藏工具仍留在 tools 中用于 ToolRuntime.dispatch，但不发送定义给 provider。
+  const visible = input.activeTools ? new Set(input.activeTools) : undefined
+  const definitions = visible ? Object.fromEntries(Object.entries(tools).filter(([name]) => visible.has(name))) : tools
   const request = LLMNative.request({
     model: input.model,
     apiKey: current.apiKey,
@@ -108,7 +112,7 @@ export function stream(input: StreamInput): StreamResult {
         const provider = input.llmClient
           .stream(
             LLMRequest.update(request, {
-              tools: [...request.tools, ...toDefinitions(tools)],
+              tools: [...request.tools, ...toDefinitions(definitions)],
             }),
           )
           .pipe(

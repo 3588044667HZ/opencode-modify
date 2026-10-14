@@ -43,6 +43,8 @@ import { WebSearchTool } from "./websearch"
 import { LspTool } from "./lsp"
 import * as Truncate from "./truncate"
 import { ApplyPatchTool } from "./apply_patch"
+import { FallbackOptionDirectTool } from "./fallback-option-direct"
+import { ToolJsonSchema } from "./json-schema"
 import { Glob } from "@opencode-ai/core/util/glob"
 import path from "path"
 import { pathToFileURL } from "url"
@@ -261,37 +263,48 @@ const layer = Layer.effect(
           ...(codeModeTool ? { execute: Tool.init(codeModeTool) } : {}),
         })
 
+        const base: Tool.Def[] = [
+          tool.invalid,
+          ...(questionEnabled ? [tool.question] : []),
+          tool.shell,
+          tool.read,
+          ...(cfg.semantic?.enabled ? [tool.read_view] : []),
+          ...(cfg.semantic?.enabled ? [tool.blast_radius] : []),
+          ...(cfg.semantic?.enabled ? [tool.edit_batch] : []),
+          ...(cfg.semantic?.enabled ? [tool.project_map] : []),
+          ...(cfg.semantic?.enabled ? [tool.verify_test] : []),
+          tool.glob,
+          tool.grep,
+          tool.edit,
+          tool.write,
+          tool.task,
+          tool.fetch,
+          tool.todo,
+          tool.search,
+          tool.skill,
+          tool.patch,
+          ...(tool.dispatch ? [tool.dispatch] : []),
+          ...(tool.team ? [tool.team] : []),
+          ...(tool.agent_send ? [tool.agent_send] : []),
+          ...(tool.agent_inbox ? [tool.agent_inbox] : []),
+          ...(tool.blackboard ? [tool.blackboard] : []),
+          ...(tool.execute ? [tool.execute] : []),
+          ...(flags.experimentalLspTool ? [tool.lsp] : []),
+          ...(flags.experimentalPlanMode && flags.client === "cli" ? [tool.plan] : []),
+        ]
+
+        // fallback_option_direct 始终可见；它的内容在状态创建时从注册表快照生成。
+        const fallback = yield* FallbackOptionDirectTool.create({
+          tools: Tool.hiddenTools(base).map((item) => ({
+            name: item.id,
+            description: item.description,
+            parameters: Object.keys(ToolJsonSchema.fromTool(item).properties ?? {}),
+          })),
+        }).pipe(Effect.provideService(Truncate.Service, truncate), Effect.provideService(Agent.Service, agents))
+
         return {
           custom,
-          builtin: [
-            tool.invalid,
-            ...(questionEnabled ? [tool.question] : []),
-            tool.shell,
-            tool.read,
-            ...(cfg.semantic?.enabled ? [tool.read_view] : []),
-            ...(cfg.semantic?.enabled ? [tool.blast_radius] : []),
-            ...(cfg.semantic?.enabled ? [tool.edit_batch] : []),
-            ...(cfg.semantic?.enabled ? [tool.project_map] : []),
-            ...(cfg.semantic?.enabled ? [tool.verify_test] : []),
-            tool.glob,
-            tool.grep,
-            tool.edit,
-            tool.write,
-            tool.task,
-            tool.fetch,
-            tool.todo,
-            tool.search,
-            tool.skill,
-            tool.patch,
-            ...(tool.dispatch ? [tool.dispatch] : []),
-            ...(tool.team ? [tool.team] : []),
-            ...(tool.agent_send ? [tool.agent_send] : []),
-            ...(tool.agent_inbox ? [tool.agent_inbox] : []),
-            ...(tool.blackboard ? [tool.blackboard] : []),
-            ...(tool.execute ? [tool.execute] : []),
-            ...(flags.experimentalLspTool ? [tool.lsp] : []),
-            ...(flags.experimentalPlanMode && flags.client === "cli" ? [tool.plan] : []),
-          ],
+          builtin: [...base, fallback],
           task: tool.task,
           read: tool.read,
         }
@@ -326,8 +339,7 @@ const layer = Layer.effect(
       if (!dispatch) return
       const cfg = yield* config.get()
       const teams = Object.entries(cfg.team ?? {}).toSorted(([a], [b]) => a.localeCompare(b))
-      if (teams.length === 0)
-        return "No team rosters are configured; pass tasks to form an ad-hoc team for this call."
+      if (teams.length === 0) return "No team rosters are configured; pass tasks to form an ad-hoc team for this call."
       return [
         'Available team rosters (configured in opencode.json under "team"):',
         ...teams.map(([name, team]) => {
@@ -349,7 +361,8 @@ const layer = Layer.effect(
     })
 
     const tools: Interface["tools"] = Effect.fn("ToolRegistry.tools")(function* (input) {
-      const filtered = (yield* all()).filter((tool) => {
+      // 模型可见目录：隐藏工具在此过滤；调用解析走 all()，不受影响。
+      const filtered = Tool.visibleTools(yield* all()).filter((tool) => {
         if (tool.id === WebSearchTool.id) {
           return webSearchEnabled(input.providerID, { exa: flags.enableExa, parallel: flags.enableParallel })
         }

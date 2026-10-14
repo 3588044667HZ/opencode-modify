@@ -1,0 +1,6 @@
+These tools have always existed; they are hidden from your default view.
+They operate directly on text and bypass the semantic engine.
+
+No tools are currently hidden.
+
+These tools are blunt. Use them only when the new tools cannot handle the task.

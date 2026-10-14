@@ -28,6 +28,7 @@ type PrepareInput = {
   readonly messages: ModelMessage[]
   readonly small?: boolean
   readonly tools: Record<string, Tool>
+  readonly activeTools?: readonly string[]
   readonly provider: Provider.Info
   readonly auth: Auth.Info | undefined
   readonly plugin: Plugin.Interface
@@ -39,6 +40,7 @@ export type Prepared = {
   readonly system: string[]
   readonly messages: ModelMessage[]
   readonly tools: Record<string, Tool>
+  readonly activeTools: string[]
   readonly params: {
     readonly temperature?: number
     readonly topP?: number
@@ -146,6 +148,9 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
   )
 
   const tools = resolveTools(input)
+  // 可见列表 = 会话给出的 activeTools（缺省为全部工具）；隐藏工具保留在 tools
+  // 中供解析与执行，但不进入 provider 的 tool 定义。
+  const activeTools = visibleToolNames(tools, input.activeTools)
   // Codex parity: OpenAI Responses-family providers hardcode `strict: false`
   // on every function tool so MCP-sourced and dynamic schemas that don't
   // satisfy OpenAI's structured-outputs constraints still register.
@@ -172,6 +177,7 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
       }),
       execute: async () => ({ output: "", title: "", metadata: {} }),
     })
+    activeTools.push("_noop")
   }
 
   const opencodeProjectID = input.model.providerID.startsWith("opencode")
@@ -182,6 +188,7 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
     system,
     messages,
     tools: Object.fromEntries(Object.entries(tools).toSorted(([a], [b]) => a.localeCompare(b))),
+    activeTools,
     params,
     messageTransformOptions: options,
     headers: {
@@ -211,6 +218,12 @@ function resolveTools(input: Pick<PrepareInput, "tools" | "agent" | "permission"
     Permission.merge(input.agent.permission, input.permission ?? []),
   )
   return Record.filter(input.tools, (_, k) => input.user.tools?.[k] !== false && !disabled.has(k))
+}
+
+// 组装 provider 可见的 tool 名：activeTools 显式给出时以它为准，否则全部工具；
+// 两种情况都会剔除内部修复工具与已被权限/用户配置移除的工具。
+export function visibleToolNames(tools: Record<string, unknown>, activeTools?: readonly string[]): string[] {
+  return (activeTools ?? Object.keys(tools)).filter((name) => name !== "invalid" && name in tools)
 }
 
 export function hasToolCalls(messages: ModelMessage[]): boolean {

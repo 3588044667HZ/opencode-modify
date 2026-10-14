@@ -43,6 +43,8 @@ export type StreamInput = {
   messages: ModelMessage[]
   small?: boolean
   tools: Record<string, Tool>
+  // 模型可见的 tool 名；缺省等于 tools 的全部键（用于隐藏工具仍可解析但不可见）。
+  activeTools?: readonly string[]
   retries?: number
   toolChoice?: "auto" | "required" | "none"
 }
@@ -231,6 +233,7 @@ const live: Layer.Layer<
           llmClient,
           messages: prepared.messages,
           tools: prepared.tools,
+          activeTools: prepared.activeTools,
           toolChoice: input.toolChoice,
           temperature: prepared.params.temperature,
           topP: prepared.params.topP,
@@ -314,7 +317,7 @@ const live: Layer.Layer<
           topP: prepared.params.topP,
           topK: prepared.params.topK,
           providerOptions: ProviderTransform.providerOptions(input.model, prepared.params.options),
-          activeTools: Object.keys(prepared.tools).filter((x) => x !== "invalid"),
+          activeTools: prepared.activeTools,
           tools: prepared.tools,
           toolChoice: input.toolChoice,
           maxOutputTokens: prepared.params.maxOutputTokens,
