@@ -1,3 +1,4 @@
+import path from "path"
 import { Protocol } from "./protocol"
 
 // Annotations (diagnostics and anchors) start at a fixed column so multiple
@@ -178,6 +179,98 @@ function editBatchDetailLine(result: Protocol.EditBatchFailure): string {
       return `change ${(detail?.change_index ?? 0) + 1} overlaps change ${(detail?.conflict_with_index ?? 0) + 1}`
     case Protocol.EditBatchErrorCode.lockTimeout:
       return `lock timeout after ${detail?.waited_ms ?? "?"}ms`
+    default:
+      return error.message
+  }
+}
+
+export function renderEditTransaction(result: Protocol.EditTransactionResult): string {
+  if (result.applied) return editTransactionSuccess(result)
+  return editTransactionFailure(result)
+}
+
+function editTransactionSuccess(result: Protocol.EditTransactionSuccess): string {
+  // 对齐宽度 = 最长 "文件:" + 2，与 spec 样例（最长 tests/test_engine.ts: 后跟 2 空格）逐字节一致。
+  const width = result.files.reduce((max, file) => Math.max(max, file.file.length + 1), 0) + 2
+  const lines = [
+    `edit_transaction applied ${result.changes_applied}/${result.changes_total} changes across ${result.files_changed} files`,
+  ]
+  for (const file of result.files) {
+    lines.push(
+      `  ${`${file.file}:`.padEnd(width)}${transactionLineList(file.line_changes)} (${file.changes_applied} changes)`,
+    )
+  }
+  for (const [file, delta] of Object.entries(result.diagnostics_delta)) {
+    // 只展示发生变化的文件；before 由 after - delta 反推，避免额外请求一次快照。
+    if (delta.errors === 0 && delta.warnings === 0) continue
+    const after = result.diagnostics_after[file] ?? { errors: 0, warnings: 0 }
+    const warnings = delta.warnings === 0 ? "" : `, ${after.warnings - delta.warnings} warn → ${after.warnings} warn`
+    lines.push(`  diagnostics: ${after.errors - delta.errors} err → ${after.errors} err${warnings} (${path.basename(file)})`)
+  }
+  return lines.join("\n")
+}
+
+function transactionLineList(changes: ReadonlyArray<Protocol.EditBatchLineChange> | undefined): string {
+  if (!changes || changes.length === 0) return "-"
+  // 事务渲染忽略 action，仅按行号合并连续区间。
+  const groups: Array<{ from: number; to: number }> = []
+  for (const change of changes) {
+    const last = groups.at(-1)
+    if (last && change.line === last.to + 1) {
+      last.to = change.line
+      continue
+    }
+    groups.push({ from: change.line, to: change.line })
+  }
+  return groups.map((group) => (group.from === group.to ? `L${group.from}` : `L${group.from}-${group.to}`)).join(", ")
+}
+
+function editTransactionFailure(result: Protocol.EditTransactionFailure): string {
+  const detail = result.error.detail
+  const human = HumanTransactionFailure[result.error.code] ?? result.error.message
+  const headline = [
+    human,
+    ...(detail?.file === undefined ? [] : [`in ${detail.file}`]),
+    ...(detail?.change_index === undefined ? [] : [`(change ${detail.change_index + 1}/${detail.changes_total ?? "?"})`]),
+  ].join(" ")
+  const lines = [`edit_transaction FAILED: ${headline}`, `  ${editTransactionDetailLine(result.error)}`]
+  if (result.error.hint !== undefined) lines.push(`  hint: ${result.error.hint}`)
+  lines.push("  所有文件均未修改")
+  return lines.join("\n")
+}
+
+const HumanTransactionFailure: Record<number, string | undefined> = {
+  [Protocol.EditTransactionErrorCode.anchorNotFound]: "anchor not found",
+  [Protocol.EditTransactionErrorCode.anchorNotUnique]: "anchor not unique",
+  [Protocol.EditTransactionErrorCode.versionMismatch]: "version mismatch",
+  [Protocol.EditTransactionErrorCode.pathProtected]: "path protected",
+  [Protocol.EditTransactionErrorCode.contentImpure]: "content impure",
+  [Protocol.EditTransactionErrorCode.changeConflict]: "change conflict",
+  [Protocol.EditTransactionErrorCode.lockTimeout]: "lock timeout",
+  [Protocol.EditTransactionErrorCode.duplicateFile]: "duplicate file",
+}
+
+function editTransactionDetailLine(error: Protocol.EditTransactionError): string {
+  const detail = error.detail
+  switch (error.code) {
+    case Protocol.EditTransactionErrorCode.anchorNotUnique: {
+      const locations = (detail?.locations ?? []).map((line) => `L${line}`).join(", ")
+      return `"${detail?.oldString ?? "?"}" matches ${detail?.match_count ?? "?"} locations [${locations}]`
+    }
+    case Protocol.EditTransactionErrorCode.anchorNotFound:
+      return `"${detail?.oldString ?? "?"}" not found`
+    case Protocol.EditTransactionErrorCode.versionMismatch:
+      return `version mismatch (current ${detail?.current_version ?? "?"})`
+    case Protocol.EditTransactionErrorCode.pathProtected:
+      return "path protected"
+    case Protocol.EditTransactionErrorCode.contentImpure:
+      return `change ${(detail?.change_index ?? 0) + 1} contains render-layer metasyntax (${detail?.marker ?? "?"})`
+    case Protocol.EditTransactionErrorCode.changeConflict:
+      return `change ${(detail?.change_index ?? 0) + 1} overlaps change ${(detail?.conflict_with_index ?? 0) + 1}`
+    case Protocol.EditTransactionErrorCode.lockTimeout:
+      return `lock timeout after ${detail?.waited_ms ?? "?"}ms`
+    case Protocol.EditTransactionErrorCode.duplicateFile:
+      return `duplicate file ${detail?.file ?? "?"}`
     default:
       return error.message
   }

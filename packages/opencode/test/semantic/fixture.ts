@@ -128,6 +128,94 @@ export const SAMPLE_EDIT_BATCH_FAILURE_RENDER = [
   "  hint: 提供更多上下文使锚点唯一，或调用 map() 获取直接操作工具",
 ].join("\n")
 
+// Fixed edit_transaction responses used by the fake daemon. Crafted so
+// renderEditTransaction output matches the sample in LLM-IDE-SPEC/edit-transaction.md
+// byte for byte: diagnostics_after is synthesized so before = after - delta, and
+// every file carries line_changes so the merged line list can be rendered.
+export const SAMPLE_EDIT_TRANSACTION_SUCCESS: Protocol.EditTransactionSuccess = {
+  applied: true,
+  files_changed: 3,
+  changes_applied: 7,
+  changes_total: 7,
+  files: [
+    {
+      file: "src/core/engine.ts",
+      old_version: "a3f9c2",
+      new_version: "b7e1d4",
+      changes_applied: 3,
+      line_changes: [
+        { line: 42, action: "modified" },
+        { line: 43, action: "modified" },
+        { line: 44, action: "modified" },
+        { line: 67, action: "modified" },
+        { line: 89, action: "inserted" },
+      ],
+    },
+    {
+      file: "src/api/routes.ts",
+      old_version: "c1d2e3",
+      new_version: "f4a5b6",
+      changes_applied: 2,
+      line_changes: [
+        { line: 24, action: "modified" },
+        { line: 31, action: "inserted" },
+      ],
+    },
+    {
+      file: "tests/test_engine.ts",
+      old_version: "1a2b3c",
+      new_version: "4d5e6f",
+      changes_applied: 2,
+      line_changes: [
+        { line: 88, action: "modified" },
+        { line: 95, action: "modified" },
+      ],
+    },
+  ],
+  diagnostics_delta: {
+    "src/core/engine.ts": { errors: -2, warnings: 0 },
+    "src/api/routes.ts": { errors: 0, warnings: 0 },
+    "tests/test_engine.ts": { errors: 0, warnings: 0 },
+  },
+  diagnostics_after: {
+    "src/core/engine.ts": { errors: 0, warnings: 0 },
+    "src/api/routes.ts": { errors: 0, warnings: 0 },
+    "tests/test_engine.ts": { errors: 0, warnings: 0 },
+  },
+}
+
+export const SAMPLE_EDIT_TRANSACTION_SUCCESS_RENDER = [
+  "edit_transaction applied 7/7 changes across 3 files",
+  "  src/core/engine.ts:    L42-44, L67, L89 (3 changes)",
+  "  src/api/routes.ts:     L24, L31 (2 changes)",
+  "  tests/test_engine.ts:  L88, L95 (2 changes)",
+  "  diagnostics: 2 err → 0 err (engine.ts)",
+].join("\n")
+
+export const SAMPLE_EDIT_TRANSACTION_FAILURE: Protocol.EditTransactionFailure = {
+  applied: false,
+  error: {
+    code: -32011,
+    message: "ANCHOR_NOT_UNIQUE",
+    detail: {
+      file: "src/core/engine.ts",
+      change_index: 1,
+      changes_total: 3,
+      oldString: "return json.load(data)",
+      match_count: 3,
+      locations: [42, 67, 89],
+    },
+    hint: "提供更多上下文使锚点唯一，或调用 fallback_option_direct",
+  },
+}
+
+export const SAMPLE_EDIT_TRANSACTION_FAILURE_RENDER = [
+  "edit_transaction FAILED: anchor not unique in src/core/engine.ts (change 2/3)",
+  '  "return json.load(data)" matches 3 locations [L42, L67, L89]',
+  "  hint: 提供更多上下文使锚点唯一，或调用 fallback_option_direct",
+  "  所有文件均未修改",
+].join("\n")
+
 // Fixed verify_test responses used by the fake daemon. Crafted so
 // renderVerifyTest output is byte-identical to the samples in
 // LLM-IDE-SPEC/verify-test.md.

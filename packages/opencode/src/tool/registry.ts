@@ -14,6 +14,7 @@ import { ReadTool } from "./read"
 import { ReadViewTool } from "./read-view"
 import { BlastRadiusTool } from "./blast-radius"
 import { EditBatchTool } from "./edit-batch"
+import { EditTransactionTool } from "./edit-transaction"
 import { ProjectMapTool } from "./project-map"
 import { VerifyTestTool } from "./verify-test"
 import { TaskTool } from "./task"
@@ -126,6 +127,7 @@ const layer = Layer.effect(
     const readview = yield* ReadViewTool
     const blastradius = yield* BlastRadiusTool
     const editbatch = yield* EditBatchTool
+    const edittransaction = yield* EditTransactionTool
     const projectmap = yield* ProjectMapTool
     const verifytest = yield* VerifyTestTool
     const question = yield* QuestionTool
@@ -240,6 +242,7 @@ const layer = Layer.effect(
           read_view: Tool.init(readview),
           blast_radius: Tool.init(blastradius),
           edit_batch: Tool.init(editbatch),
+          edit_transaction: Tool.init(edittransaction),
           project_map: Tool.init(projectmap),
           verify_test: Tool.init(verifytest),
           glob: Tool.init(globtool),
@@ -271,6 +274,7 @@ const layer = Layer.effect(
           ...(cfg.semantic?.enabled ? [tool.read_view] : []),
           ...(cfg.semantic?.enabled ? [tool.blast_radius] : []),
           ...(cfg.semantic?.enabled ? [tool.edit_batch] : []),
+          ...(cfg.semantic?.enabled ? [tool.edit_transaction] : []),
           ...(cfg.semantic?.enabled ? [tool.project_map] : []),
           ...(cfg.semantic?.enabled ? [tool.verify_test] : []),
           tool.glob,

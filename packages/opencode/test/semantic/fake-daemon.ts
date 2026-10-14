@@ -1,12 +1,14 @@
 // Minimal fake semantic daemon for tests. Implements the frozen JSON-RPC
 // protocol over a unix socket / Windows named pipe.
 //
-// Usage: bun fake-daemon.ts [--indexing | --indexing-forever] [--read-view-error=indexing|notfound] [--blast-radius-error=indexing|symbol] [--edit-batch-error=anchor|lock] [--verify-test=success|failure|unrecognized] [--project-map=structure|dependencies|hot] <project_dir> <socket_path>
+// Usage: bun fake-daemon.ts [--indexing | --indexing-forever] [--read-view-error=indexing|notfound] [--blast-radius-error=indexing|symbol] [--edit-batch-error=anchor|lock] [--edit-transaction-error=anchor|lock|journal] [--verify-test=success|failure|unrecognized] [--project-map=structure|dependencies|hot] <project_dir> <socket_path>
 import net from "node:net"
 import {
   SAMPLE_BLAST_RESULT,
   SAMPLE_EDIT_BATCH_FAILURE,
   SAMPLE_EDIT_BATCH_SUCCESS,
+  SAMPLE_EDIT_TRANSACTION_FAILURE,
+  SAMPLE_EDIT_TRANSACTION_SUCCESS,
   SAMPLE_PROJECT_MAP_DEPENDENCIES,
   SAMPLE_PROJECT_MAP_HOT,
   SAMPLE_PROJECT_MAP_STRUCTURE,
@@ -31,6 +33,7 @@ const mode = {
   readViewError: flags.find((flag) => flag.startsWith("--read-view-error="))?.split("=")[1],
   blastRadiusError: flags.find((flag) => flag.startsWith("--blast-radius-error="))?.split("=")[1],
   editBatchError: flags.find((flag) => flag.startsWith("--edit-batch-error="))?.split("=")[1],
+  editTransactionError: flags.find((flag) => flag.startsWith("--edit-transaction-error="))?.split("=")[1],
   verifyTest: flags.find((flag) => flag.startsWith("--verify-test="))?.split("=")[1],
   projectMap: flags.find((flag) => flag.startsWith("--project-map="))?.split("=")[1],
 }
@@ -150,6 +153,34 @@ async function handle(socket: net.Socket, message: any) {
         return
       }
       respond(socket, message.id, SAMPLE_EDIT_BATCH_SUCCESS)
+      return
+    case "edit_transaction":
+      if (mode.editTransactionError === "anchor") {
+        respond(socket, message.id, SAMPLE_EDIT_TRANSACTION_FAILURE)
+        return
+      }
+      if (mode.editTransactionError === "journal") {
+        // -32018 是 RPC 级错误（只读门），不属于结果联合。
+        respondError(socket, message.id, -32018, "JOURNAL_RECOVERY_FAILED")
+        return
+      }
+      if (mode.editTransactionError === "lock") {
+        // 回显请求里的 lock_timeout_ms，让工具测试能验证参数已透传到守护进程。
+        respond(socket, message.id, {
+          applied: false,
+          error: {
+            code: -32017,
+            message: "LOCK_TIMEOUT",
+            detail: {
+              file: "src/core/engine.ts",
+              waited_ms: message.params?.options?.lock_timeout_ms ?? 30000,
+            },
+            hint: "文件正被其他写者占用。可稍后重试，或先 read_view 获取最新版本",
+          },
+        })
+        return
+      }
+      respond(socket, message.id, SAMPLE_EDIT_TRANSACTION_SUCCESS)
       return
     case "verify_test":
       if (mode.verifyTest === "failure") {

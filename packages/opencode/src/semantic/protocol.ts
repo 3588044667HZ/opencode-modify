@@ -8,6 +8,7 @@ export const ErrorCode = {
   indexing: -32000,
   fileNotFound: -32001,
   symbolNotFound: -32002,
+  journalRecoveryFailed: -32018,
   internalError: -32603,
 } as const
 
@@ -104,6 +105,9 @@ export function describeError(error: SemanticError): string {
     }
     if (error.code === ErrorCode.symbolNotFound) {
       return `semantic engine could not resolve symbol (it may not exist or be indexed): ${error.message}`
+    }
+    if (error.code === ErrorCode.journalRecoveryFailed) {
+      return "semantic writes are disabled: journal recovery failed (human intervention required)"
     }
     return `semantic engine error (${error.code}): ${error.message}`
   }
@@ -373,6 +377,108 @@ export const EditBatchResult = Schema.Union([EditBatchSuccess, EditBatchFailure]
   parseOptions: { onExcessProperty: "error" },
 })
 export type EditBatchResult = typeof EditBatchResult.Type
+
+export const EditTransactionErrorCode = {
+  anchorNotFound: -32010,
+  anchorNotUnique: -32011,
+  versionMismatch: -32012,
+  pathProtected: -32013,
+  contentImpure: -32014,
+  writeFailed: -32015,
+  changeConflict: -32016,
+  lockTimeout: -32017,
+  duplicateFile: -32019,
+} as const
+
+export type EditTransactionErrorCode = (typeof EditTransactionErrorCode)[keyof typeof EditTransactionErrorCode]
+
+// -32018 (JOURNAL_RECOVERY_FAILED) 只作为 JSON-RPC 错误返回（只读门），不属于结果联合。
+const EditTransactionErrorCodes = [
+  EditTransactionErrorCode.anchorNotFound,
+  EditTransactionErrorCode.anchorNotUnique,
+  EditTransactionErrorCode.versionMismatch,
+  EditTransactionErrorCode.pathProtected,
+  EditTransactionErrorCode.contentImpure,
+  EditTransactionErrorCode.writeFailed,
+  EditTransactionErrorCode.changeConflict,
+  EditTransactionErrorCode.lockTimeout,
+  EditTransactionErrorCode.duplicateFile,
+] as const
+
+export interface EditTransactionFileChange {
+  readonly file: string
+  readonly baseVersion: string
+  readonly changes: ReadonlyArray<EditBatchChange>
+}
+
+export interface EditTransactionRequest {
+  readonly changes: ReadonlyArray<EditTransactionFileChange>
+  // 并发锁可选项：客户端原样透传，由守护进程校验与执行。
+  readonly options?: { readonly lock_timeout_ms?: number }
+}
+
+const EditTransactionDiagnostics = Schema.Struct({
+  errors: Schema.Int,
+  warnings: Schema.Int,
+}).annotate({ identifier: "EditTransactionDiagnostics", parseOptions: { onExcessProperty: "error" } })
+
+export const EditTransactionFile = Schema.Struct({
+  file: Schema.String,
+  old_version: Schema.String,
+  new_version: Schema.String,
+  changes_applied: Schema.Int,
+  line_changes: optional(Schema.Array(EditBatchLineChange)),
+}).annotate({ identifier: "EditTransactionFile", parseOptions: { onExcessProperty: "error" } })
+export type EditTransactionFile = typeof EditTransactionFile.Type
+
+// 与 blast_radius 相同的严格性：顶层与嵌套都必须拒绝多余字段。
+export const EditTransactionSuccess = Schema.Struct({
+  applied: Schema.Literal(true),
+  files_changed: Schema.Int,
+  changes_applied: Schema.Int,
+  changes_total: Schema.Int,
+  files: Schema.Array(EditTransactionFile),
+  diagnostics_delta: Schema.Record(Schema.String, EditTransactionDiagnostics),
+  diagnostics_after: Schema.Record(Schema.String, EditTransactionDiagnostics),
+}).annotate({ identifier: "EditTransactionSuccess", parseOptions: { onExcessProperty: "error" } })
+export type EditTransactionSuccess = typeof EditTransactionSuccess.Type
+
+export const EditTransactionDetail = Schema.Struct({
+  file: optional(Schema.String),
+  path: optional(Schema.String),
+  change_index: optional(Schema.Int),
+  changes_total: optional(Schema.Int),
+  oldString: optional(Schema.String),
+  match_count: optional(Schema.Int),
+  locations: optional(Schema.Array(Schema.Int)),
+  current_version: optional(Schema.String),
+  content: optional(Schema.String),
+  marker: optional(Schema.String),
+  conflict_with_index: optional(Schema.Int),
+  waited_ms: optional(Schema.Int),
+  reason: optional(Schema.String),
+}).annotate({ identifier: "EditTransactionDetail", parseOptions: { onExcessProperty: "error" } })
+export type EditTransactionDetail = typeof EditTransactionDetail.Type
+
+export const EditTransactionError = Schema.Struct({
+  code: Schema.Literals(EditTransactionErrorCodes),
+  message: Schema.String,
+  detail: optional(EditTransactionDetail),
+  hint: optional(Schema.String),
+}).annotate({ identifier: "EditTransactionError", parseOptions: { onExcessProperty: "error" } })
+export type EditTransactionError = typeof EditTransactionError.Type
+
+export const EditTransactionFailure = Schema.Struct({
+  applied: Schema.Literal(false),
+  error: EditTransactionError,
+}).annotate({ identifier: "EditTransactionFailure", parseOptions: { onExcessProperty: "error" } })
+export type EditTransactionFailure = typeof EditTransactionFailure.Type
+
+export const EditTransactionResult = Schema.Union([EditTransactionSuccess, EditTransactionFailure]).annotate({
+  identifier: "EditTransactionResult",
+  parseOptions: { onExcessProperty: "error" },
+})
+export type EditTransactionResult = typeof EditTransactionResult.Type
 
 export const VerifyTestSummary = Schema.Struct({
   passed: Schema.Int,
