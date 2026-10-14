@@ -1,0 +1,11 @@
+<idea-plugin>
+  <id>opencode.semantic</id>
+  <name>OpenCode Semantic Server</name>
+  <description>Headless semantic engine daemon exposing JSON-RPC over a Unix domain socket (ping / subscribe / read_view / shutdown).</description>
+  <vendor>opencode</vendor>
+  <depends>com.intellij.modules.platform</depends>
+  <depends>com.intellij.modules.java</depends>
+  <extensions defaultExtensionNs="com.intellij">
+    <appStarter id="semantic-server" implementation="opencode.semantic.SemanticServerStarter"/>
+  </extensions>
+</idea-plugin>
