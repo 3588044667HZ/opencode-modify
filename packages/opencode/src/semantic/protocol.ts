@@ -268,6 +268,106 @@ export interface BlastRadiusRequest {
   readonly scope?: string
 }
 
+export const EditBatchErrorCode = {
+  anchorNotFound: -32010,
+  anchorNotUnique: -32011,
+  versionMismatch: -32012,
+  pathProtected: -32013,
+  contentImpure: -32014,
+  writeFailed: -32015,
+  changeConflict: -32016,
+} as const
+
+export type EditBatchErrorCode = (typeof EditBatchErrorCode)[keyof typeof EditBatchErrorCode]
+
+const EditBatchErrorCodes = [
+  EditBatchErrorCode.anchorNotFound,
+  EditBatchErrorCode.anchorNotUnique,
+  EditBatchErrorCode.versionMismatch,
+  EditBatchErrorCode.pathProtected,
+  EditBatchErrorCode.contentImpure,
+  EditBatchErrorCode.writeFailed,
+  EditBatchErrorCode.changeConflict,
+] as const
+
+export const EditBatchChange = Schema.Struct({
+  oldString: Schema.String,
+  newString: Schema.String,
+  description: optional(Schema.String),
+})
+export type EditBatchChange = typeof EditBatchChange.Type
+
+export interface EditBatchRequest {
+  readonly file: string
+  readonly changes: ReadonlyArray<EditBatchChange>
+  readonly baseVersion: string
+}
+
+export const EditBatchLineActions = ["inserted", "modified", "deleted"] as const
+export type EditBatchLineAction = (typeof EditBatchLineActions)[number]
+
+export const EditBatchLineChange = Schema.Struct({
+  line: Schema.Int,
+  action: Schema.Literals(EditBatchLineActions),
+})
+export type EditBatchLineChange = typeof EditBatchLineChange.Type
+
+export const EditBatchDiagnostics = Schema.Struct({
+  errors: Schema.Int,
+  warnings: Schema.Int,
+})
+export type EditBatchDiagnostics = typeof EditBatchDiagnostics.Type
+
+export const EditBatchSuccess = Schema.Struct({
+  file: Schema.String,
+  applied: Schema.Literal(true),
+  changes_applied: Schema.Int,
+  changes_total: Schema.Int,
+  old_version: Schema.String,
+  new_version: Schema.String,
+  diagnostics_delta: EditBatchDiagnostics,
+  diagnostics_after: EditBatchDiagnostics,
+  line_changes: Schema.Array(EditBatchLineChange),
+}).annotate({ identifier: "EditBatchSuccess", parseOptions: { onExcessProperty: "error" } })
+export type EditBatchSuccess = typeof EditBatchSuccess.Type
+
+export const EditBatchDetail = Schema.Struct({
+  change_index: optional(Schema.Int),
+  oldString: optional(Schema.String),
+  match_count: optional(Schema.Int),
+  locations: optional(Schema.Array(Schema.Int)),
+  current_version: optional(Schema.String),
+  content: optional(Schema.String),
+  path: optional(Schema.String),
+  marker: optional(Schema.String),
+  conflict_with_index: optional(Schema.Int),
+  reason: optional(Schema.String),
+}).annotate({ identifier: "EditBatchDetail", parseOptions: { onExcessProperty: "error" } })
+export type EditBatchDetail = typeof EditBatchDetail.Type
+
+export const EditBatchError = Schema.Struct({
+  code: Schema.Literals(EditBatchErrorCodes),
+  message: Schema.String,
+  detail: optional(EditBatchDetail),
+  hint: optional(Schema.String),
+}).annotate({ identifier: "EditBatchError", parseOptions: { onExcessProperty: "error" } })
+export type EditBatchError = typeof EditBatchError.Type
+
+export const EditBatchFailure = Schema.Struct({
+  applied: Schema.Literal(false),
+  file: optional(Schema.String),
+  changes_total: Schema.Int,
+  error: EditBatchError,
+}).annotate({ identifier: "EditBatchFailure", parseOptions: { onExcessProperty: "error" } })
+export type EditBatchFailure = typeof EditBatchFailure.Type
+
+// 与 blast_radius 相同的严格性：discriminated union 也必须拒绝多余字段。
+export const EditBatchResult = Schema.Union([EditBatchSuccess, EditBatchFailure]).annotate({
+  identifier: "EditBatchResult",
+  parseOptions: { onExcessProperty: "error" },
+})
+export type EditBatchResult = typeof EditBatchResult.Type
+
 export function decodeOption<S extends Schema.Codec<unknown, unknown>>(schema: S, value: unknown) {
   return Option.getOrUndefined(Schema.decodeUnknownOption(schema)(value)) as S["Type"] | undefined
 }

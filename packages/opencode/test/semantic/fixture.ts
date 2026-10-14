@@ -77,3 +77,53 @@ export const SAMPLE_BLAST_RENDER = [
   "  tests: 1 [test_engine.py::test_load]",
   "  risk: low",
 ].join("\n")
+
+// Fixed edit_batch responses used by the fake daemon. Crafted so renderEditBatch
+// output is byte-identical to the samples in LLM-IDE-SPEC/edit-batch.md.
+export const SAMPLE_EDIT_BATCH_SUCCESS: Protocol.EditBatchSuccess = {
+  file: "engine.ts",
+  applied: true,
+  changes_applied: 3,
+  changes_total: 3,
+  old_version: "a3f9c2",
+  new_version: "b7e1d4",
+  diagnostics_delta: { errors: -2, warnings: 0 },
+  diagnostics_after: { errors: 0, warnings: 0 },
+  line_changes: [
+    { line: 42, action: "modified" },
+    { line: 43, action: "modified" },
+    { line: 44, action: "modified" },
+    { line: 67, action: "modified" },
+    { line: 89, action: "inserted" },
+  ],
+}
+
+export const SAMPLE_EDIT_BATCH_SUCCESS_RENDER = [
+  "edit_batch applied 3/3 changes",
+  "  engine.ts: L42-44 (modified), L67 (modified), L89 (inserted)",
+  "  diagnostics: 2 err → 0 err",
+  "  version: a3f9c2 → b7e1d4",
+].join("\n")
+
+export const SAMPLE_EDIT_BATCH_FAILURE: Protocol.EditBatchFailure = {
+  applied: false,
+  file: "engine.ts",
+  changes_total: 3,
+  error: {
+    code: -32011,
+    message: "ANCHOR_NOT_UNIQUE",
+    detail: {
+      change_index: 1,
+      oldString: "return json.load(data)",
+      match_count: 3,
+      locations: [42, 67, 89],
+    },
+    hint: "提供更多上下文使锚点唯一，或调用 map() 获取直接操作工具",
+  },
+}
+
+export const SAMPLE_EDIT_BATCH_FAILURE_RENDER = [
+  "edit_batch FAILED: change 2/3 anchor not unique",
+  '  engine.ts: "return json.load(data)" matches 3 locations [L42, L67, L89]',
+  "  hint: 提供更多上下文使锚点唯一，或调用 map() 获取直接操作工具",
+].join("\n")

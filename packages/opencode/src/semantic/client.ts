@@ -6,6 +6,7 @@ export interface Client {
   readonly subscribe: () => Promise<void>
   readonly readView: (input: Protocol.ReadViewRequest) => Promise<Protocol.ReadViewResult>
   readonly blastRadius: (input: Protocol.BlastRadiusRequest) => Promise<Protocol.BlastRadiusResult>
+  readonly editBatch: (input: Protocol.EditBatchRequest) => Promise<Protocol.EditBatchResult>
   readonly shutdown: () => Promise<void>
   readonly onIndexing: (listener: (notification: Protocol.IndexingNotification) => void) => () => void
   readonly onClose: (listener: (error?: Error) => void) => () => void
@@ -122,6 +123,11 @@ export async function connect(path: string, options?: ClientOptions): Promise<Cl
     blastRadius: async (input) => {
       const decoded = Protocol.decodeOption(Protocol.BlastRadiusResult, await request("blast_radius", input))
       if (decoded === undefined) throw decodeFailure("blast_radius")
+      return decoded
+    },
+    editBatch: async (input) => {
+      const decoded = Protocol.decodeOption(Protocol.EditBatchResult, await request("edit_batch", input))
+      if (decoded === undefined) throw decodeFailure("edit_batch")
       return decoded
     },
     shutdown: async () => {

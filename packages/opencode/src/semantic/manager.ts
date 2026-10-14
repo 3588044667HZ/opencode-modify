@@ -30,6 +30,7 @@ export interface Interface {
   readonly status: () => Effect.Effect<StatusInfo>
   readonly readView: (input: Protocol.ReadViewRequest) => Effect.Effect<Protocol.ReadViewResult, Protocol.SemanticError>
   readonly blastRadius: (input: Protocol.BlastRadiusRequest) => Effect.Effect<Protocol.BlastRadiusResult, Protocol.SemanticError>
+  readonly editBatch: (input: Protocol.EditBatchRequest) => Effect.Effect<Protocol.EditBatchResult, Protocol.SemanticError>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Semantic") {}
@@ -214,7 +215,30 @@ const layer = Layer.effect(
       return yield* Effect.tryPromise({ try: () => client.blastRadius(input), catch: Protocol.toSemanticError })
     })
 
-    return Service.of({ init, status, readView, blastRadius })
+    const editBatch = Effect.fn("Semantic.editBatch")(function* (input: Protocol.EditBatchRequest) {
+      const s = yield* InstanceState.get(state)
+      if (s.status === "disabled") {
+        return yield* new Protocol.UnavailableError({
+          message: "semantic engine is disabled; set `semantic.enabled` in the opencode config to use edit_batch",
+        })
+      }
+      if (s.status === "failed") {
+        return yield* new Protocol.UnavailableError({
+          message: `semantic engine failed: ${s.error ?? "unknown error"}`,
+          progress: s.progress,
+        })
+      }
+      const client = s.client
+      if (s.status !== "ready" || !client) {
+        return yield* new Protocol.UnavailableError({
+          message: `semantic engine is not ready yet (status: ${s.status})`,
+          progress: s.progress,
+        })
+      }
+      return yield* Effect.tryPromise({ try: () => client.editBatch(input), catch: Protocol.toSemanticError })
+    })
+
+    return Service.of({ init, status, readView, blastRadius, editBatch })
   }),
 )
 

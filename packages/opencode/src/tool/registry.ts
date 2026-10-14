@@ -13,6 +13,7 @@ import { GrepTool } from "./grep"
 import { ReadTool } from "./read"
 import { ReadViewTool } from "./read-view"
 import { BlastRadiusTool } from "./blast-radius"
+import { EditBatchTool } from "./edit-batch"
 import { TaskTool } from "./task"
 import { DispatchTool } from "./dispatch"
 import { TeamTool } from "./team"
@@ -120,6 +121,7 @@ const layer = Layer.effect(
     const read = yield* ReadTool
     const readview = yield* ReadViewTool
     const blastradius = yield* BlastRadiusTool
+    const editbatch = yield* EditBatchTool
     const question = yield* QuestionTool
     const todo = yield* TodoWriteTool
     const lsptool = yield* LspTool
@@ -231,6 +233,7 @@ const layer = Layer.effect(
           read: Tool.init(read),
           read_view: Tool.init(readview),
           blast_radius: Tool.init(blastradius),
+          edit_batch: Tool.init(editbatch),
           glob: Tool.init(globtool),
           grep: Tool.init(greptool),
           edit: Tool.init(edit),
@@ -261,6 +264,7 @@ const layer = Layer.effect(
             tool.read,
             ...(cfg.semantic?.enabled ? [tool.read_view] : []),
             ...(cfg.semantic?.enabled ? [tool.blast_radius] : []),
+            ...(cfg.semantic?.enabled ? [tool.edit_batch] : []),
             tool.glob,
             tool.grep,
             tool.edit,

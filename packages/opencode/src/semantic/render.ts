@@ -1,4 +1,4 @@
-import type * as Protocol from "./protocol"
+import { Protocol } from "./protocol"
 
 // Annotations (diagnostics and anchors) start at a fixed column so multiple
 // rows line up; longer code lines fall back to a single separating space.
@@ -96,4 +96,84 @@ function calleesLine(result: Protocol.BlastRadiusResult): string {
 function testsLine(result: Protocol.BlastRadiusResult): string {
   const tests = result.tests_affected.map((test) => `${test.file}::${test.name}`)
   return `  tests: ${tests.length} [${tests.join(", ")}]`
+}
+
+export function renderEditBatch(result: Protocol.EditBatchResult): string {
+  if (result.applied) return editBatchSuccess(result)
+  return editBatchFailure(result)
+}
+
+function editBatchSuccess(result: Protocol.EditBatchSuccess): string {
+  // 渲染层只展示 errors；before 由 after - delta 反推，避免额外请求一次快照。
+  const beforeErrors = result.diagnostics_after.errors - result.diagnostics_delta.errors
+  return [
+    `edit_batch applied ${result.changes_applied}/${result.changes_total} changes`,
+    `  ${result.file}: ${formatLineChanges(result.line_changes)}`,
+    `  diagnostics: ${beforeErrors} err → ${result.diagnostics_after.errors} err`,
+    `  version: ${result.old_version} → ${result.new_version}`,
+  ].join("\n")
+}
+
+function formatLineChanges(changes: ReadonlyArray<Protocol.EditBatchLineChange>): string {
+  const groups: Array<{ from: number; to: number; action: Protocol.EditBatchLineAction }> = []
+  for (const change of changes) {
+    const last = groups.at(-1)
+    // 相邻且同 action 的连续行号合并为一个区间，其余保持单行输出。
+    if (last && last.action === change.action && change.line === last.to + 1) {
+      last.to = change.line
+      continue
+    }
+    groups.push({ from: change.line, to: change.line, action: change.action })
+  }
+  return groups
+    .map((group) =>
+      group.from === group.to ? `L${group.from} (${group.action})` : `L${group.from}-${group.to} (${group.action})`,
+    )
+    .join(", ")
+}
+
+function editBatchFailure(result: Protocol.EditBatchFailure): string {
+  const error = result.error
+  const human = HumanFailure[error.code] ?? error.message
+  const changeIndex = error.detail?.change_index
+  const headline =
+    changeIndex === undefined ? human : `change ${changeIndex + 1}/${result.changes_total} ${human}`
+  const lines = [`edit_batch FAILED: ${headline}`, `  ${result.file ?? "?"}: ${editBatchDetailLine(result)}`]
+  if (error.hint !== undefined) lines.push(`  hint: ${error.hint}`)
+  return lines.join("\n")
+}
+
+const HumanFailure: Record<number, string | undefined> = {
+  [Protocol.EditBatchErrorCode.anchorNotFound]: "anchor not found",
+  [Protocol.EditBatchErrorCode.anchorNotUnique]: "anchor not unique",
+  [Protocol.EditBatchErrorCode.versionMismatch]: "version mismatch",
+  [Protocol.EditBatchErrorCode.pathProtected]: "path protected",
+  [Protocol.EditBatchErrorCode.contentImpure]: "content impure",
+  [Protocol.EditBatchErrorCode.writeFailed]: "write failed",
+  [Protocol.EditBatchErrorCode.changeConflict]: "change conflict",
+}
+
+function editBatchDetailLine(result: Protocol.EditBatchFailure): string {
+  const error = result.error
+  const detail = error.detail
+  switch (error.code) {
+    case Protocol.EditBatchErrorCode.anchorNotUnique: {
+      const locations = (detail?.locations ?? []).map((line) => `L${line}`).join(", ")
+      return `"${detail?.oldString ?? "?"}" matches ${detail?.match_count ?? "?"} locations [${locations}]`
+    }
+    case Protocol.EditBatchErrorCode.anchorNotFound:
+      return `"${detail?.oldString ?? "?"}" not found`
+    case Protocol.EditBatchErrorCode.versionMismatch:
+      return `version mismatch (current ${detail?.current_version ?? "?"})`
+    case Protocol.EditBatchErrorCode.pathProtected:
+      return "path protected"
+    case Protocol.EditBatchErrorCode.contentImpure:
+      return `change ${(detail?.change_index ?? 0) + 1} contains render-layer metasyntax (${detail?.marker ?? "?"})`
+    case Protocol.EditBatchErrorCode.writeFailed:
+      return `write failed (${detail?.reason ?? "?"})`
+    case Protocol.EditBatchErrorCode.changeConflict:
+      return `change ${(detail?.change_index ?? 0) + 1} overlaps change ${(detail?.conflict_with_index ?? 0) + 1}`
+    default:
+      return error.message
+  }
 }
