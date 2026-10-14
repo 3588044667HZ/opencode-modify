@@ -24,6 +24,7 @@ const EDIT_DIR = path.join(SERVER_DIR, "fixtures", "edit_batch")
 const EDIT_TARGET = path.join(FIXTURE_DIR, "tasks", "EditableSample.java")
 const EDIT_REL = "src/main/java/demo/tasks/EditableSample.java"
 const VERIFY_DIR = path.join(SERVER_DIR, "fixtures", "verify_test")
+const MAP_DIR = path.join(SERVER_DIR, "fixtures", "project_map")
 
 const clientModule = await import(pathToFileURL(path.join(ROOT, "packages/opencode/src/semantic/client.ts")).href)
 const transportModule = await import(pathToFileURL(path.join(ROOT, "packages/opencode/src/semantic/transport.ts")).href)
@@ -110,6 +111,22 @@ type VerifyTestResult = {
   framework: string | null
   timeout?: boolean
   total_failures?: number
+}
+
+type ProjectMapStructureResult = {
+  project: { root: string; total_files: number; total_modules: number }
+  modules: Array<{ name: string; path: string; files: string[]; is_entry: boolean; hot: boolean }>
+  entry_points: Array<{ file: string; line: number; symbol: string; kind: string }>
+  root_files: string[]
+  building?: boolean
+  progress?: number
+}
+type ProjectMapDependenciesResult = {
+  project: { root: string; total_files: number }
+  dependencies: Array<{ from: string; to: string; count: number }>
+  cycles: string[][]
+  building?: boolean
+  progress?: number
 }
 
 const checks: Array<{ name: string; ok: boolean; detail: string }> = []
@@ -1007,6 +1024,133 @@ try {
     missingCwdCode = (error as { code?: number }).code
   }
   check("[24] 不存在 cwd → RPC -32001", missingCwdCode === -32001, `code=${missingCwdCode}`)
+
+  // ---- 用例 25-28：project_map 契约（fixtures + 依赖/环 + hot 空 + 并发/缓存） ----
+  const mapInput = (await Bun.file(path.join(MAP_DIR, "input.json")).json()) as { view?: string; scope?: string }
+  const mapGolden = (await Bun.file(path.join(MAP_DIR, "output.json")).json()) as ProjectMapStructureResult
+  check(
+    "[25] 客户端严格解码 fixtures/project_map/output.json",
+    strictDecode(protocol.ProjectMapResult, mapGolden) !== undefined,
+    `modules=${mapGolden.modules.length} total_modules=${mapGolden.project.total_modules}`,
+  )
+  const mapReady = async <T,>(input: { view?: string; scope?: string }): Promise<T> => {
+    for (let i = 0; i < 120; i++) {
+      const result = (await typed.projectMap(input)) as Record<string, unknown> & { building?: boolean }
+      if (result.building !== true) return result as T
+      await sleep(250)
+    }
+    throw new Error("project_map 构建超时（30s）")
+  }
+  try {
+    const structure = await mapReady<ProjectMapStructureResult>(mapInput)
+    const normalized = { ...structure, project: { ...structure.project, root: "<root>" } }
+    check(
+      "[25] structure 与 output.json 深度一致（root 归一）",
+      JSON.stringify(canonical(normalized)) === JSON.stringify(canonical(mapGolden)),
+      `modules=${structure.modules.length} entries=${structure.entry_points.length}`,
+      { actual: structure, expected: mapGolden },
+    )
+    check(
+      "[25] 入口点含 main（≥2 个）",
+      structure.entry_points.filter((entry) => entry.kind === "main").length >= 2,
+      `entry_points=${clip(JSON.stringify(structure.entry_points), 240)}`,
+    )
+    check(
+      "[25] 模块含 demo/api 与 demo/tasks",
+      structure.modules.some((module) => module.path.endsWith("demo/api")) &&
+        structure.modules.some((module) => module.path.endsWith("demo/tasks")),
+      `modules=${clip(structure.modules.map((module) => module.path).join(", "), 240)}`,
+    )
+  } catch (error) {
+    check("[25] structure 与 output.json 深度一致（root 归一）", false, `${(error as Error).name}: ${(error as Error).message}`)
+  }
+
+  try {
+    const deps = await mapReady<ProjectMapDependenciesResult>({ view: "dependencies" })
+    check(
+      "[26] 依赖含 demo/api → demo/tasks",
+      deps.dependencies.some((edge) => edge.from.endsWith("demo/api") && edge.to.endsWith("demo/tasks")),
+      `deps=${clip(JSON.stringify(deps.dependencies), 260)}`,
+    )
+    check(
+      "[26] cycles 含 demo/cyclea ↔ demo/cycleb",
+      deps.cycles.some(
+        (cycle) =>
+          cycle.length >= 2 &&
+          cycle.some((modulePath) => modulePath.endsWith("demo/cyclea")) &&
+          cycle.some((modulePath) => modulePath.endsWith("demo/cycleb")),
+      ),
+      `cycles=${clip(JSON.stringify(deps.cycles), 200)}`,
+    )
+  } catch (error) {
+    check("[26] 依赖含 demo/api → demo/tasks", false, `${(error as Error).name}: ${(error as Error).message}`)
+  }
+
+  try {
+    const hot = await mapReady<{ hot_files: unknown[]; hot_modules: unknown[] }>({ view: "hot" })
+    check(
+      "[27] hot 视图 v1 为空（spec 作者选择 A）",
+      hot.hot_files.length === 0 && hot.hot_modules.length === 0,
+      `files=${hot.hot_files.length} modules=${hot.hot_modules.length}`,
+    )
+  } catch (error) {
+    check("[27] hot 视图 v1 为空（spec 作者选择 A）", false, `${(error as Error).name}: ${(error as Error).message}`)
+  }
+
+  try {
+    await mapReady<unknown>({ view: "dependencies" })
+    const parallelStarted = Date.now()
+    const results = await Promise.all(Array.from({ length: 10 }, () => typed.projectMap({ view: "dependencies" })))
+    const parallelElapsed = Date.now() - parallelStarted
+    const serialized = results.map((result) => JSON.stringify(canonical(result)))
+    check(
+      "[28] 10 个并发 project_map 结果一致",
+      serialized.every((item) => item === serialized[0]),
+      `elapsed=${parallelElapsed}ms`,
+    )
+    const cacheStarted = Date.now()
+    await typed.projectMap({ view: "structure" })
+    const cachedMs = Date.now() - cacheStarted
+    check("[28] 缓存命中：structure 二次调用 < 500ms", cachedMs < 500, `${cachedMs}ms`)
+  } catch (error) {
+    check("[28] 10 个并发 project_map 结果一致", false, `${(error as Error).name}: ${(error as Error).message}`)
+  }
+
+  // ---- 用例 29：结构变更缓存失效 + >20 模块截断（运行期生成/清理） ----
+  const modsRoot = path.join(SERVER_DIR, "sample-project", "mods")
+  try {
+    for (let i = 1; i <= 21; i++) {
+      const dir = path.join(modsRoot, `e2e_${String(i).padStart(2, "0")}`)
+      fs.mkdirSync(dir, { recursive: true })
+      fs.writeFileSync(path.join(dir, "Probe.java"), `class Probe${i} {}\n`)
+    }
+    const baseTotal = mapGolden.project.total_modules
+    const truncated = await mapReady<ProjectMapStructureResult>({ view: "structure" })
+    check(
+      "[29] 新增 21 个模块 → 截断展示 20、total_modules=base+21",
+      truncated.modules.length === 20 &&
+        truncated.project.total_modules === baseTotal + 21 &&
+        truncated.modules.every(
+          (module, index) => index === 0 || truncated.modules[index - 1].path <= module.path,
+        ),
+      `modules=${truncated.modules.length} total=${truncated.project.total_modules} base=${baseTotal}`,
+    )
+    fs.rmSync(modsRoot, { recursive: true, force: true })
+    let restoredTotal: number | undefined
+    for (let i = 0; i < 60; i++) {
+      const current = await mapReady<ProjectMapStructureResult>({ view: "structure" })
+      if (current.project.total_modules === baseTotal) {
+        restoredTotal = current.project.total_modules
+        break
+      }
+      await sleep(500)
+    }
+    check("[29] 删除后缓存失效恢复 total_modules=base", restoredTotal === baseTotal, `total=${restoredTotal} base=${baseTotal}`)
+  } catch (error) {
+    check("[29] 新增 21 个模块 → 截断展示 20、total_modules=base+21", false, `${(error as Error).name}: ${(error as Error).message}`)
+  } finally {
+    fs.rmSync(modsRoot, { recursive: true, force: true })
+  }
 
   // ---- 用例 9：shutdown + 连接失败 ----
   const shutdown = await rpc2.call("shutdown", undefined, 15_000)

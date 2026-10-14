@@ -1,0 +1,96 @@
+{
+  "project": {
+    "root": "<root>",
+    "total_files": 15,
+    "total_modules": 7
+  },
+  "modules": [
+    {
+      "name": "demo",
+      "path": "src/main/java/demo",
+      "files": [
+        "Broken.java",
+        "Greeter.java",
+        "Main.java"
+      ],
+      "is_entry": true,
+      "hot": false
+    },
+    {
+      "name": "api",
+      "path": "src/main/java/demo/api",
+      "files": [
+        "ApiRoutes.java"
+      ],
+      "is_entry": false,
+      "hot": false
+    },
+    {
+      "name": "cyclea",
+      "path": "src/main/java/demo/cyclea",
+      "files": [
+        "A.java"
+      ],
+      "is_entry": false,
+      "hot": false
+    },
+    {
+      "name": "cycleb",
+      "path": "src/main/java/demo/cycleb",
+      "files": [
+        "B.java"
+      ],
+      "is_entry": false,
+      "hot": false
+    },
+    {
+      "name": "tasks",
+      "path": "src/main/java/demo/tasks",
+      "files": [
+        "EditableSample.java",
+        "ManyCallers.java",
+        "TaskEngine.java",
+        "TaskEngineTest.java",
+        "TaskRunner.java",
+        "TaskWorker.java"
+      ],
+      "is_entry": true,
+      "hot": false
+    },
+    {
+      "name": "tests",
+      "path": "tests",
+      "files": [
+        "test_sample.py"
+      ],
+      "is_entry": false,
+      "hot": false
+    },
+    {
+      "name": "tests_many",
+      "path": "tests_many",
+      "files": [
+        "test_many.py"
+      ],
+      "is_entry": false,
+      "hot": false
+    }
+  ],
+  "entry_points": [
+    {
+      "file": "src/main/java/demo/Main.java",
+      "line": 6,
+      "symbol": "main",
+      "kind": "main"
+    },
+    {
+      "file": "src/main/java/demo/tasks/TaskRunner.java",
+      "line": 4,
+      "symbol": "main",
+      "kind": "main"
+    }
+  ],
+  "root_files": [
+    "sample-project.iml"
+  ]
+}

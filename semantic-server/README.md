@@ -2,7 +2,7 @@
 
 按 `LLM-IDE-SPEC/`（main / intellij-headless / jsonrpc-channel / adapter-layer）实现的 IntelliJ
 无头语义守护：JSON-RPC 2.0 over AF_UNIX（NDJSON），提供 `ping` / `subscribe` / `read_view` /
-`blast_radius` / `edit_batch` / `verify_test` / `shutdown`。
+`blast_radius` / `edit_batch` / `verify_test` / `project_map` / `shutdown`。
 Java 实现，无 Kotlin，可在无 Gradle、无网络的条件下用本地 IDEA 平台 jar 直接构建。
 
 ## 目录
@@ -18,6 +18,7 @@ semantic-server/
 │   ├── BlastRadiusService.java      # blast_radius 聚合：定义/引用分类/入口/测试/callees/风险 + 缓存
 │   ├── EditBatchService.java        # edit_batch：版本戳/路径保护/纯度/锚点/重叠 + 原子写 + 诊断增量
 │   ├── VerifyTestService.java       # verify_test：shell 透传/超时杀进程树/输出截断 + 六框架薄解析
+│   ├── ProjectMapService.java       # project_map：项目级地图（模块/入口/依赖/环 + 项目级缓存/异步构建）
 │   └── Log.java
 ├── src/main/resources/META-INF/plugin.xml   # appStarter EP + 最小依赖
 ├── script/build-local.sh            # javac + jar 打包 + 安装到 .sandbox/plugins
@@ -27,10 +28,12 @@ semantic-server/
 ├── script/blast-probe.ts            # Bun 探针：blast_radius（fixtures 生成/缓存/scope 证据）
 ├── script/edit-probe.ts             # Bun 探针：edit_batch（模板块 copy/版本注入/fixtures 生成/raw NDJSON）
 ├── script/verify-probe.ts           # Bun 探针：verify_test（raw NDJSON/超时/cwd 错误/fixtures 归一）
+├── script/map-probe.ts              # Bun 探针：project_map（building 轮询/并发比较/fixtures 归一）
 ├── script/protocol-conformance.ts   # 跨实现协议一致性测试（真实守护 ↔ OC 客户端）
 ├── fixtures/blast_radius/           # 协议 fixtures：input.json + output.json（真实守护响应）
 ├── fixtures/edit_batch/             # 协议 fixtures：template.java + input.json + output.json（版本归一）
 ├── fixtures/verify_test/            # 协议 fixtures：input.json + output.json（duration/输出归一）
+├── fixtures/project_map/            # 协议 fixtures：input.json + output.json（project.root 归一）
 ├── sample-project/                  # 跨文件调用样例（Main/Greeter + 故意报错的 Broken，含 .idea/iml；tests/ 1 过 1 败、tests_many/ 21 败，verify_test 用）
 ├── build.gradle.kts / settings.gradle.kts   # org.jetbrains.intellij.platform 2.2.1 + local IDEA 平台
 ├── .gradle-home/                    # Gradle 依赖仓库（项目本地，gitignore）
@@ -395,6 +398,99 @@ bun script/verify-probe.ts .tmp/verify.sock --normalize --out fixtures/verify_te
 - 捕获上限 5 万行（超出丢弃最旧行；footer/失败列表在末尾，优先保留）；
 - 失败列表顺序 = pytest 短摘要（`-rf`）顺序；
 - 测试进程自身产生的缓存目录（`__pycache__`/`.pytest_cache`）由测试工具管理，不在本服务控制范围。
+
+## project_map（项目级只读地图）
+
+`project_map(params)`：`{"view"?: "structure"|"dependencies"|"hot"（缺省 structure）, "scope"?: string}`。
+项目级、只读、跨 agent 共享；项目级缓存 + `ReentrantReadWriteLock`，首次查询启动后台构建线程并
+立即返回 `building:true, progress:0`（数组为空、project 计数为 0），构建中后续查询返回进度，
+完成后返回不带 `building` 的缓存结果。`root` 为项目绝对路径；所有项目相对路径以 `/` 分隔；
+modules / 根文件 / 依赖边 / 入口点均升序。错误：索引未就绪 `-32000`（同 read_view，
+`data.progress` 重试）；未知 view / 参数类型错 `-32603`。
+
+三种视图（严格字段；三形均可附 `building:true` + `progress`）：
+
+- structure：`{project:{root,total_files,total_modules}, modules:[{name,path,files,is_entry,hot}],
+  entry_points:[{file,line,symbol,kind}], root_files:[string]}`
+- dependencies：`{project:{root,total_files}, dependencies:[{from,to,count}], cycles:[[modulePath...]]}`
+- hot：`{project:{root,total_files}, hot_files:[], hot_modules:[]}`（v1 恒空，作者选 A）
+
+模块划分：多 IntelliJ 模块项目用模块；单模块项目（sample-project）降级为目录约定——每个
+直接包含文件的目录是一个模块（隐藏目录与 `.git/.idea/.venv/venv/env/node_modules/build/out/
+target/__pycache__/.pytest_cache/.mypy_cache/dist` 排除；目录符号链接不跟随），`name=` 路径末段、
+`path=` 项目相对目录；`files` 只含该目录直接子文件（不递归、升序；显示上限 200，`total_files`
+计全量）；项目根常规文件（不含隐藏）列入 `root_files`；`total_files = 模块文件数 + root_files 数`；
+模块数 >20 时只返回前 20（升序），`total_modules` 仍为全量。
+
+入口点：Java `public static void main(String[])` → `kind:"main"`；方法注解 simple name 匹配
+`Get/Post/Put/Delete/Patch/RequestMapping/Path`（忽略大小写）→ `kind:"route"`；`is_entry` =
+模块含 ≥1 入口。
+
+依赖：对每个模块内 `.java` 文件取 `PsiImportStatement`（含 static/on-demand），import 目标按
+“最长项目包前缀”映射到属主模块（包名从各文件 `package` 声明收集；JDK/外部自动忽略，不做
+resolve）；`from≠to`；`count=` import 语句数（同一文件多行同一目标计多）；边按 from/to 升序。
+`cycles` 用迭代版 Tarjan SCC 找 size>1 强连通分量，成员按模块 path 升序；根目录 `.java` 文件的
+import 不计（无来源模块）。
+
+缓存与失效：项目级缓存由 `ReentrantReadWriteLock` 保护；无头沙箱禁用了原生文件监听
+（日志 `Native file watcher is disabled`），因此每个 ready 查询用磁盘指纹做被动检测——已扫描
+目录的“相关目录项集合”变化（新增/删除/移动/重命名）→ 全量失效；已记录文件 mtime 变化 → 仅
+dependencies 失效（structure/hot 保留缓存并立即命中；重建依赖前按需 refresh VFS 让 PSI 看到
+新内容）。规格“文件内容修改不失效”对 structure 生效；无法廉价区分 import 变化，内容修改一律
+重建 dependencies（偏差）。scope（`module:<name或path>`）只过滤展示、不缓存；无前缀/未知前缀
+忽略；未匹配到模块时返回空列表（不报错）。scope 下 structure 只列出该模块（含其入口点，
+root_files 空），project 计数仍为全量；dependencies 只返回涉及该模块的边（cycles 保留全量）；
+hot 忽略 scope。构建在后台线程 `ReadAction.computeBlocking` 内扫描 VFS/PSI；`project.root` 取
+CLI 项目路径的绝对规范化形式。
+
+探针：`bun script/map-probe.ts [socket] [--view ...] [--scope s] [--out file] [--normalize-root]
+[--wait-ready] [--parallel N] [--raw] [--params-json '{...}'] [--fail-fast] [--timeout secs]
+[--no-wait] [--shutdown]`；`--wait-ready` 对 `building:true` 轮询到 ready；`--parallel N` 开 N 条
+连接并发同一请求并比较结果；`--fail-fast` 跳过就绪等待且不重试（用于采集 -32000 原始帧）。
+
+fixtures：`fixtures/project_map/input.json`（`{"view":"structure"}`）+ `output.json`（真实 ready
+结果，`project.root` 归一为 `"<root>"`，其余原样美化）。生成命令：
+
+```bash
+bash script/build-local.sh
+bash script/run-local.sh sample-project .tmp/map.sock --idle-seconds 1800
+bun script/map-probe.ts .tmp/map.sock --normalize-root --wait-ready --out fixtures/project_map/output.json
+```
+
+验收证据（真实守护 + sample-project，raw NDJSON）：
+
+- structure：7 模块（demo[3]/api/cyclea/cycleb/tasks[6]/tests/tests_many）、root_files
+  `["sample-project.iml"]`、total_files 15、total_modules 7；入口 2 个 main（Main.java:6、
+  TaskRunner.java:4）；失效后首查返回 `building:true, progress:0`（计数 0、数组空）；
+- dependencies：3 条边（`demo.api→demo.tasks`、`demo.cyclea↔demo.cycleb`，值为模块 path，形如
+  `src/main/java/demo/api`），cycles `[[…/demo/cyclea, …/demo/cycleb]]`；
+- hot：`hot_files:[]、hot_modules:[]`；
+- 并发：`--parallel 10 --wait-ready`（structure 与 dependencies）→ 均为 `all_equal=true errors=0`
+  （40–84ms）；mods 删除后的 rebuild 并发中 building 阶段也一致收敛到同一结果；
+- 缓存：首次（失效后）构建日志 `build done in 530ms`、`540ms`（mods 场景 223ms）之后连续查询
+  均为 `cache hit` 且探针耗时 5–10ms；dependencies 重建日志 761ms（人工加 import 后 4 条边）→
+  还原后 183ms（3 条边），期间 structure 始终 `cache hit`；
+- 失效 a) 内容修改：直接写盘给 cyclea/A.java 增加 `import demo.tasks.TaskEngine` → 日志
+  `dependencies dirty (content changed: 1 files)` + `cache hit view=structure`；dependencies
+  查询重建出新边 `cyclea→tasks (1)`；还原后回到 3 条边；
+- 失效 b) 结构变化：新增 `mods/m01..m21`（各 1 个 .java）→ `invalidated (structure changed at .)`
+  → 全量重建 `modules=28 files=36`，返回 20 个模块（m01..m20），total_modules 28、total_files 36；
+  删除 mods 后恢复 7/15；
+- 路由：临时 `RouteApi.java`（`@Get/@Path`）→ entry `…/RouteApi.java:19 listUsers (route)`
+  （验证后已删除）；
+- 错误：冷启动 `--fail-fast` → `{"code":-32000,"message":"indexing","data":{"progress":0.02}}`；
+  `view:"bogus"` / `view:123` / `scope:123` → -32603；未知前缀 scope 忽略（全项目）。
+
+偏差与注记：
+
+- spec 的 Python/JS/Go 入口规则与 `register/route/app.get` 调用识别未实现（本机 Java PSI 场景），
+  路由只按注解识别（`RequestMapping`/`Path` 精确名；Spring `@GetMapping` 等派生注解不计）；
+- `dependencies.from/to` 与 `cycles` 使用模块 `path`（spec 样例口径），而非 name；
+- scope 过滤按上文的展示口径（spec 只写了 `module:core`）；未匹配模块返回空而非错误；
+- 内容修改仅失效 dependencies（无法廉价区分 import 变化；spec 的“符号增删失效 structure”未单独实现）；
+- 无原生监听，被动失效检测成本 O(已扫描目录数 + 文件数) 次磁盘元数据读取（目录项 + stat），
+  大项目每次 ready 查询有固定开销；
+- `files` 上限 200 仅影响展示，`total_files` 为全量；`hot` 恒空（作者选择 A）。
 
 ## 启动方式尝试记录
 
