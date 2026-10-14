@@ -1,7 +1,7 @@
 // Minimal fake semantic daemon for tests. Implements the frozen JSON-RPC
 // protocol over a unix socket / Windows named pipe.
 //
-// Usage: bun fake-daemon.ts [--indexing | --indexing-forever] [--read-view-error=indexing|notfound] [--blast-radius-error=indexing|symbol] [--edit-batch-error=anchor] [--verify-test=success|failure|unrecognized] [--project-map=structure|dependencies|hot] <project_dir> <socket_path>
+// Usage: bun fake-daemon.ts [--indexing | --indexing-forever] [--read-view-error=indexing|notfound] [--blast-radius-error=indexing|symbol] [--edit-batch-error=anchor|lock] [--verify-test=success|failure|unrecognized] [--project-map=structure|dependencies|hot] <project_dir> <socket_path>
 import net from "node:net"
 import {
   SAMPLE_BLAST_RESULT,
@@ -129,6 +129,24 @@ async function handle(socket: net.Socket, message: any) {
     case "edit_batch":
       if (mode.editBatchError === "anchor") {
         respond(socket, message.id, SAMPLE_EDIT_BATCH_FAILURE)
+        return
+      }
+      if (mode.editBatchError === "lock") {
+        // 回显请求里的 lock_timeout_ms，让工具测试能验证参数已透传到守护进程。
+        respond(socket, message.id, {
+          applied: false,
+          file: "engine.ts",
+          changes_total: Array.isArray(message.params?.changes) ? message.params.changes.length : 0,
+          error: {
+            code: -32017,
+            message: "LOCK_TIMEOUT",
+            detail: {
+              file: "engine.ts",
+              waited_ms: message.params?.options?.lock_timeout_ms ?? 30000,
+            },
+            hint: "文件正被其他写者占用。可稍后重试，或先 read_view 获取最新版本",
+          },
+        })
         return
       }
       respond(socket, message.id, SAMPLE_EDIT_BATCH_SUCCESS)

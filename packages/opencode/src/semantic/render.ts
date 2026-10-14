@@ -138,7 +138,9 @@ function editBatchFailure(result: Protocol.EditBatchFailure): string {
   const changeIndex = error.detail?.change_index
   const headline =
     changeIndex === undefined ? human : `change ${changeIndex + 1}/${result.changes_total} ${human}`
-  const lines = [`edit_batch FAILED: ${headline}`, `  ${result.file ?? "?"}: ${editBatchDetailLine(result)}`]
+  // LOCK_TIMEOUT 的 file 优先取 detail.file（守护进程按锁目标文件回报，result.file 可能缺省）。
+  const detailFile = error.code === Protocol.EditBatchErrorCode.lockTimeout ? error.detail?.file : undefined
+  const lines = [`edit_batch FAILED: ${headline}`, `  ${detailFile ?? result.file ?? "?"}: ${editBatchDetailLine(result)}`]
   if (error.hint !== undefined) lines.push(`  hint: ${error.hint}`)
   return lines.join("\n")
 }
@@ -151,6 +153,7 @@ const HumanFailure: Record<number, string | undefined> = {
   [Protocol.EditBatchErrorCode.contentImpure]: "content impure",
   [Protocol.EditBatchErrorCode.writeFailed]: "write failed",
   [Protocol.EditBatchErrorCode.changeConflict]: "change conflict",
+  [Protocol.EditBatchErrorCode.lockTimeout]: "lock timeout",
 }
 
 function editBatchDetailLine(result: Protocol.EditBatchFailure): string {
@@ -173,6 +176,8 @@ function editBatchDetailLine(result: Protocol.EditBatchFailure): string {
       return `write failed (${detail?.reason ?? "?"})`
     case Protocol.EditBatchErrorCode.changeConflict:
       return `change ${(detail?.change_index ?? 0) + 1} overlaps change ${(detail?.conflict_with_index ?? 0) + 1}`
+    case Protocol.EditBatchErrorCode.lockTimeout:
+      return `lock timeout after ${detail?.waited_ms ?? "?"}ms`
     default:
       return error.message
   }

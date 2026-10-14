@@ -7,6 +7,7 @@ import { Protocol } from "@/semantic/protocol"
 import { InstanceState } from "@/effect/instance-state"
 import { assertExternalDirectoryEffect } from "./external-directory"
 import { FSUtil } from "@opencode-ai/core/fs-util"
+import { PositiveInt } from "@opencode-ai/schema/schema"
 
 const DESCRIPTION = `Apply multiple text changes to a single file atomically through the semantic engine.
 
@@ -21,6 +22,13 @@ export const Parameters = Schema.Struct({
   baseVersion: Schema.String.annotate({
     description: "The version stamp of the file from read_view (used to detect concurrent modifications)",
   }),
+  options: Schema.optional(
+    Schema.Struct({
+      lock_timeout_ms: Schema.optional(PositiveInt).annotate({
+        description: "How long to wait for the per-file write lock before failing with LOCK_TIMEOUT (defaults to 30000)",
+      }),
+    }),
+  ).annotate({ description: "Concurrency options: lock_timeout_ms for the per-file write lock" }),
 })
 
 type Metadata = {
@@ -63,6 +71,7 @@ export const EditBatchTool = Tool.define(
               file: filepath,
               changes: args.changes,
               baseVersion: args.baseVersion,
+              ...(args.options === undefined ? {} : { options: args.options }),
             })
             .pipe(
               Effect.map((result) => ({ ok: true as const, result })),

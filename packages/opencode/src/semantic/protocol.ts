@@ -276,6 +276,7 @@ export const EditBatchErrorCode = {
   contentImpure: -32014,
   writeFailed: -32015,
   changeConflict: -32016,
+  lockTimeout: -32017,
 } as const
 
 export type EditBatchErrorCode = (typeof EditBatchErrorCode)[keyof typeof EditBatchErrorCode]
@@ -288,6 +289,7 @@ const EditBatchErrorCodes = [
   EditBatchErrorCode.contentImpure,
   EditBatchErrorCode.writeFailed,
   EditBatchErrorCode.changeConflict,
+  EditBatchErrorCode.lockTimeout,
 ] as const
 
 export const EditBatchChange = Schema.Struct({
@@ -301,6 +303,8 @@ export interface EditBatchRequest {
   readonly file: string
   readonly changes: ReadonlyArray<EditBatchChange>
   readonly baseVersion: string
+  // 并发锁可选项：客户端原样透传，由守护进程校验与执行。
+  readonly options?: { readonly lock_timeout_ms?: number }
 }
 
 export const EditBatchLineActions = ["inserted", "modified", "deleted"] as const
@@ -342,6 +346,8 @@ export const EditBatchDetail = Schema.Struct({
   marker: optional(Schema.String),
   conflict_with_index: optional(Schema.Int),
   reason: optional(Schema.String),
+  file: optional(Schema.String),
+  waited_ms: optional(Schema.Int),
 }).annotate({ identifier: "EditBatchDetail", parseOptions: { onExcessProperty: "error" } })
 export type EditBatchDetail = typeof EditBatchDetail.Type
 

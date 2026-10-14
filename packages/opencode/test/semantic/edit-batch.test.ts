@@ -148,6 +148,50 @@ describe("semantic edit_batch render", () => {
 
     expect(renderEditBatch(result).split("\n")[1]).toBe('  ?: "x" not found')
   })
+
+  test("renders a lock timeout byte for byte", () => {
+    const result = failure(
+      Protocol.EditBatchErrorCode.lockTimeout,
+      { file: "engine.ts", waited_ms: 30000 },
+      "文件正被其他写者占用。可稍后重试，或先 read_view 获取最新版本",
+    )
+    expect(renderEditBatch(result)).toBe(
+      [
+        "edit_batch FAILED: lock timeout",
+        "  engine.ts: lock timeout after 30000ms",
+        "  hint: 文件正被其他写者占用。可稍后重试，或先 read_view 获取最新版本",
+      ].join("\n"),
+    )
+  })
+
+  test("prefers detail.file then result.file then ? for lock timeouts", () => {
+    const withDetailFile = failure(Protocol.EditBatchErrorCode.lockTimeout, {
+      file: "src/qux.ts",
+      waited_ms: 30000,
+    })
+    expect(renderEditBatch(withDetailFile).split("\n")[1]).toBe("  src/qux.ts: lock timeout after 30000ms")
+
+    const withoutDetailFile = failure(Protocol.EditBatchErrorCode.lockTimeout, { waited_ms: 30000 })
+    expect(renderEditBatch(withoutDetailFile).split("\n")[1]).toBe("  engine.ts: lock timeout after 30000ms")
+
+    const missingBoth: Protocol.EditBatchFailure = {
+      applied: false,
+      changes_total: 1,
+      error: {
+        code: Protocol.EditBatchErrorCode.lockTimeout,
+        message: "LOCK_TIMEOUT",
+        detail: { waited_ms: 7 },
+      },
+    }
+    expect(renderEditBatch(missingBoth)).toBe(
+      ["edit_batch FAILED: lock timeout", "  ?: lock timeout after 7ms"].join("\n"),
+    )
+  })
+
+  test("omits the hint line when a lock timeout has no hint", () => {
+    const result = failure(Protocol.EditBatchErrorCode.lockTimeout, { file: "engine.ts", waited_ms: 30000 })
+    expect(renderEditBatch(result).split("\n")).toHaveLength(2)
+  })
 })
 
 describe("semantic edit_batch decoding", () => {
@@ -165,6 +209,34 @@ describe("semantic edit_batch decoding", () => {
     }
 
     expect(decode(result)).toEqual(result)
+  })
+
+  test("strictly decodes a lock timeout failure with detail and hint", () => {
+    const result: Protocol.EditBatchFailure = {
+      applied: false,
+      file: "engine.ts",
+      changes_total: 3,
+      error: {
+        code: -32017,
+        message: "LOCK_TIMEOUT",
+        detail: { file: "engine.ts", waited_ms: 30000 },
+        hint: "文件正被其他写者占用。可稍后重试，或先 read_view 获取最新版本",
+      },
+    }
+
+    expect(Protocol.EditBatchErrorCode.lockTimeout).toBe(-32017)
+    expect(decode(result)).toEqual(result)
+  })
+
+  test("still rejects error codes outside the frozen range", () => {
+    expect(
+      decode({
+        applied: false,
+        file: "engine.ts",
+        changes_total: 1,
+        error: { code: -32018, message: "UNKNOWN" },
+      }),
+    ).toBeUndefined()
   })
 
   test("rejects excess fields at the top level and in nested objects", () => {

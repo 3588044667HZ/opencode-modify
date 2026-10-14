@@ -1,13 +1,13 @@
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
-import { describe, expect } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Option, Schema } from "effect"
 import path from "path"
 import { Agent } from "../../src/agent/agent"
 import { Semantic } from "@/semantic/manager"
 import { SessionID, MessageID } from "../../src/session/schema"
-import { EditBatchTool } from "../../src/tool/edit-batch"
+import { EditBatchTool, Parameters } from "../../src/tool/edit-batch"
 import { Truncate } from "@/tool/truncate"
 import { Tool } from "@/tool/tool"
 import { provideInstance, testInstanceStoreLayer, tmpdirScoped } from "../fixture/fixture"
@@ -110,6 +110,43 @@ describe("tool.edit_batch", () => {
   )
 
   it.live(
+    "forwards edit_batch options and renders the lock timeout failure",
+    () =>
+      Effect.gen(function* () {
+        const dir = yield* tmpdirScoped({
+          config: { semantic: { enabled: true, command: command("--edit-batch-error=lock") } },
+        })
+
+        const result = yield* run(dir, { ...args, options: { lock_timeout_ms: 12345 } })
+
+        expect(result.output).toBe(
+          [
+            "edit_batch FAILED: lock timeout",
+            "  engine.ts: lock timeout after 12345ms",
+            "  hint: 文件正被其他写者占用。可稍后重试，或先 read_view 获取最新版本",
+          ].join("\n"),
+        )
+        expect(result.metadata).toMatchObject({ applied: false, error_code: -32017 })
+      }),
+    20_000,
+  )
+
+  it.live(
+    "renders the default lock timeout when options are omitted",
+    () =>
+      Effect.gen(function* () {
+        const dir = yield* tmpdirScoped({
+          config: { semantic: { enabled: true, command: command("--edit-batch-error=lock") } },
+        })
+
+        const result = yield* run(dir, args)
+
+        expect(result.output.split("\n")[1]).toBe("  engine.ts: lock timeout after 30000ms")
+      }),
+    20_000,
+  )
+
+  it.live(
     "explains when the semantic engine is unavailable instead of throwing",
     () =>
       Effect.gen(function* () {
@@ -160,4 +197,21 @@ describe("tool.edit_batch", () => {
       }),
     20_000,
   )
+})
+
+describe("tool.edit_batch parameters", () => {
+  const accepts = (input: unknown) => Option.isSome(Schema.decodeUnknownOption(Parameters)(input))
+  const base = { file: "engine.ts", changes: [], baseVersion: "a3f9c2" }
+
+  test("accepts a positive lock_timeout_ms and omitted options", () => {
+    expect(accepts(base)).toBe(true)
+    expect(accepts({ ...base, options: {} })).toBe(true)
+    expect(accepts({ ...base, options: { lock_timeout_ms: 1 } })).toBe(true)
+  })
+
+  test("rejects zero, negative, and fractional lock_timeout_ms", () => {
+    expect(accepts({ ...base, options: { lock_timeout_ms: 0 } })).toBe(false)
+    expect(accepts({ ...base, options: { lock_timeout_ms: -1 } })).toBe(false)
+    expect(accepts({ ...base, options: { lock_timeout_ms: 1.5 } })).toBe(false)
+  })
 })
