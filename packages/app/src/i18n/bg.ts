@@ -1167,4 +1167,9 @@ export const dict = {
   "workspace.reset.archived.many": "{{count}} сесии ще бъдат архивирани.",
   "workspace.reset.note": "Това ще нулира работното пространство, за да съответства на клона по подразбиране.",
   "dialog.usageExceeded.dontShowAgain": "Не показвай отново",
+
+  "semantic.warmup.starting": "Analyzing project...",
+  "semantic.warmup.indexing": "Analyzing project... {{progress}}% ({{current}})",
+  "semantic.warmup.failed.title": "Semantic engine failed to start",
+  "semantic.warmup.failed.description": "Indexing is unavailable. Queued requests continue without semantic context.",
 }

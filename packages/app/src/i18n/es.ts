@@ -1262,4 +1262,9 @@ export const dict = {
   "error.childStore.persistedProjectIconCreateFailed": "Error al crear icono de proyecto persistente",
   "error.childStore.storeCreateFailed": "Error al crear almacén",
   "terminal.connectionLost.abnormalClose": "WebSocket cerrado anormalmente: {{code}}",
+
+  "semantic.warmup.starting": "Analyzing project...",
+  "semantic.warmup.indexing": "Analyzing project... {{progress}}% ({{current}})",
+  "semantic.warmup.failed.title": "Semantic engine failed to start",
+  "semantic.warmup.failed.description": "Indexing is unavailable. Queued requests continue without semantic context.",
 }

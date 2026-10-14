@@ -1165,4 +1165,9 @@ export const dict = {
   "help.tabs.persistence": "Kun avaat sovelluksen uudelleen, välilehtesi ovat yhä avoinna.",
   "help.tabs.worktrees":
     "Uusi ulkoasu ei vielä tue Git-työpuita, mutta tuki on tulossa pian. Jos haluat jatkaa aiemman ulkoasun käyttöä, voit vaihtaa ulkoasua asetuksissa. Huomaa kuitenkin, että uudesta ulkoasusta tulee pysyvä muutaman viikon kuluttua.",
+
+  "semantic.warmup.starting": "Analyzing project...",
+  "semantic.warmup.indexing": "Analyzing project... {{progress}}% ({{current}})",
+  "semantic.warmup.failed.title": "Semantic engine failed to start",
+  "semantic.warmup.failed.description": "Indexing is unavailable. Queued requests continue without semantic context.",
 }

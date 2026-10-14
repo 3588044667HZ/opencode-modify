@@ -1127,4 +1127,9 @@ export const dict = {
   "workspace.reset.archived.many": "{{count}} ክፍለ-ጊዜዎች በማህደር ይቀመጣሉ።",
   "workspace.reset.note": "ይህ workspaceን ከነባሪው ቅርንጫፍ ጋር እንዲመሳሰል ዳግም ያስጀምረዋል።",
   "dialog.usageExceeded.dontShowAgain": "እንደገና አታሳይ",
+
+  "semantic.warmup.starting": "Analyzing project...",
+  "semantic.warmup.indexing": "Analyzing project... {{progress}}% ({{current}})",
+  "semantic.warmup.failed.title": "Semantic engine failed to start",
+  "semantic.warmup.failed.description": "Indexing is unavailable. Queued requests continue without semantic context.",
 }

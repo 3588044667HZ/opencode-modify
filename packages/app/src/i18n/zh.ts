@@ -1224,4 +1224,9 @@ export const dict = {
   "error.childStore.persistedProjectIconCreateFailed": "创建持久化项目图标失败",
   "error.childStore.storeCreateFailed": "创建存储失败",
   "terminal.connectionLost.abnormalClose": "WebSocket 异常关闭：{{code}}",
+
+  "semantic.warmup.starting": "正在分析项目...",
+  "semantic.warmup.indexing": "正在分析项目... {{progress}}% ({{current}})",
+  "semantic.warmup.failed.title": "语义引擎启动失败",
+  "semantic.warmup.failed.description": "项目索引不可用，排队中的请求将在无语义上下文中继续执行。",
 } satisfies Partial<Record<Keys, string>>

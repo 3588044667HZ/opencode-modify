@@ -1173,4 +1173,9 @@ export const dict = {
   "desktop.wsl.error.failedPort": "Impossibile ottenere la porta",
   "desktop.picker.error.notSelected": "Il file non è stato selezionato nella finestra di selezione",
   "desktop.picker.error.sizeLimit": "Gli allegati selezionati superano il limite di {{limit}} MB",
+
+  "semantic.warmup.starting": "Analyzing project...",
+  "semantic.warmup.indexing": "Analyzing project... {{progress}}% ({{current}})",
+  "semantic.warmup.failed.title": "Semantic engine failed to start",
+  "semantic.warmup.failed.description": "Indexing is unavailable. Queued requests continue without semantic context.",
 }

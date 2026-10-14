@@ -1153,4 +1153,9 @@ export const dict = {
   "workspace.reset.archived.many": "{{count}} სესია დაარქივდება.",
   "workspace.reset.note": "ეს აღადგენს სამუშაო სივრცეს ნაგულისხმევი ფილიალის შესატყვისად.",
   "dialog.usageExceeded.dontShowAgain": "აღარ მაჩვენო",
+
+  "semantic.warmup.starting": "Analyzing project...",
+  "semantic.warmup.indexing": "Analyzing project... {{progress}}% ({{current}})",
+  "semantic.warmup.failed.title": "Semantic engine failed to start",
+  "semantic.warmup.failed.description": "Indexing is unavailable. Queued requests continue without semantic context.",
 }

@@ -1170,4 +1170,9 @@ export const dict = {
   "workspace.reset.archived.many": "{{count}} θα αρχειοθετηθούν οι περίοδοι σύνδεσης.",
   "workspace.reset.note": "Αυτό θα επαναφέρει τον χώρο εργασίας ώστε να ταιριάζει με τον προεπιλεγμένο κλάδο.",
   "dialog.usageExceeded.dontShowAgain": "Να μην εμφανιστεί ξανά",
+
+  "semantic.warmup.starting": "Analyzing project...",
+  "semantic.warmup.indexing": "Analyzing project... {{progress}}% ({{current}})",
+  "semantic.warmup.failed.title": "Semantic engine failed to start",
+  "semantic.warmup.failed.description": "Indexing is unavailable. Queued requests continue without semantic context.",
 }

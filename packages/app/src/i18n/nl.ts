@@ -1168,4 +1168,9 @@ export const dict = {
   "workspace.reset.archived.many": "{{count}} sessies worden gearchiveerd.",
   "workspace.reset.note":
     "Hierdoor wordt de werkruimte opnieuw ingesteld zodat deze overeenkomt met de standaardbranch.",
+
+  "semantic.warmup.starting": "Analyzing project...",
+  "semantic.warmup.indexing": "Analyzing project... {{progress}}% ({{current}})",
+  "semantic.warmup.failed.title": "Semantic engine failed to start",
+  "semantic.warmup.failed.description": "Indexing is unavailable. Queued requests continue without semantic context.",
 }

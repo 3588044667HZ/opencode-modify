@@ -1174,4 +1174,9 @@ export const dict = {
   "workspace.reset.archived.many": "{{count}} ސެޝަންތައް އަރުޝީފް ކުރެވޭނެއެވެ.",
   "workspace.reset.note": "މިއީ ޑިފޯލްޓް ބްރާންޗާ އެއްގޮތްވާ ގޮތަށް ވޯކްސްޕޭސް ރީސެޓް ކުރާނެ ކަމެކެވެ.",
   "dialog.usageExceeded.dontShowAgain": "އަލުން ނުދައްކާ",
+
+  "semantic.warmup.starting": "Analyzing project...",
+  "semantic.warmup.indexing": "Analyzing project... {{progress}}% ({{current}})",
+  "semantic.warmup.failed.title": "Semantic engine failed to start",
+  "semantic.warmup.failed.description": "Indexing is unavailable. Queued requests continue without semantic context.",
 }

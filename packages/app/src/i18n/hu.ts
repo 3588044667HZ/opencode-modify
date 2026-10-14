@@ -1167,4 +1167,9 @@ export const dict = {
   "workspace.reset.archived.many": "A {{count}} munkamenetek archiválva lesznek.",
   "workspace.reset.note": "Ezzel visszaállítja a munkaterületet, hogy megfeleljen az alapértelmezett ágnak.",
   "dialog.usageExceeded.dontShowAgain": "Ne jelenjen meg újra",
+
+  "semantic.warmup.starting": "Analyzing project...",
+  "semantic.warmup.indexing": "Analyzing project... {{progress}}% ({{current}})",
+  "semantic.warmup.failed.title": "Semantic engine failed to start",
+  "semantic.warmup.failed.description": "Indexing is unavailable. Queued requests continue without semantic context.",
 }

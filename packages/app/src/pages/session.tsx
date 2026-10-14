@@ -52,6 +52,7 @@ import { useNotification } from "@/context/notification"
 import { PromptProvider, usePrompt } from "@/context/prompt"
 import { usePlatform } from "@/context/platform"
 import { SDKProvider, useSDK } from "@/context/sdk"
+import { SemanticProvider, useSemantic } from "@/context/semantic"
 import { useServerSDK } from "@/context/server-sdk"
 import { ServerConnection, serverName, useServer } from "@/context/server"
 import { useSettings } from "@/context/settings"
@@ -322,7 +323,9 @@ function SessionProviders(props: ParentProps) {
     <TerminalProvider>
       <FileProvider>
         <PromptProvider>
-          <CommentsProvider>{props.children}</CommentsProvider>
+          <CommentsProvider>
+            <SemanticProvider>{props.children}</SemanticProvider>
+          </CommentsProvider>
         </PromptProvider>
       </FileProvider>
     </TerminalProvider>
@@ -366,6 +369,7 @@ export default function Page() {
   const serverSDK = useServerSDK()
   const settings = useSettings()
   const platform = usePlatform()
+  const semantic = useSemantic()
   const prompt = usePrompt()
   const comments = useComments()
   const command = useCommand()
@@ -1775,7 +1779,10 @@ export default function Page() {
   const queueEnabled = createMemo(() => {
     const id = params.id
     if (!id) return false
-    return settings.general.followup() === "queue" && busy(id) && !composer.blocked() && !isChildSession()
+    if (composer.blocked() || isChildSession()) return false
+    // 语义引擎预热期间必须先入队，等 indexing 结束后再由下方 effect 自动放行。
+    if (semantic.active()) return true
+    return settings.general.followup() === "queue" && busy(id)
   })
 
   const followupText = (item: FollowupDraft) => {
@@ -1952,6 +1959,8 @@ export default function Page() {
 
     const item = queuedFollowups()[0]
     if (!item) return
+    // 预热期间挂起自动放行；status 变为 ready 或 failed 后本 effect 会重新求值并发送一次。
+    if (semantic.active()) return
     if (followupBusy(sessionID)) return
     if (followup.failed[sessionID] === item.id) return
     if (followup.paused[sessionID]) return

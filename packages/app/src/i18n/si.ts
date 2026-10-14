@@ -1150,4 +1150,9 @@ export const dict: Record<string, string> = {
   "workspace.reset.archived.many": "සැසි {{count}} සංරක්ෂිත වනු ඇත.",
   "workspace.reset.note": "මෙය පෙරනිමි ශාඛාවට ගැලපෙන පරිදි වැඩබිම නැවත සකසනු ඇත.",
   "dialog.usageExceeded.dontShowAgain": "නැවත නොපෙන්වන්න",
+
+  "semantic.warmup.starting": "Analyzing project...",
+  "semantic.warmup.indexing": "Analyzing project... {{progress}}% ({{current}})",
+  "semantic.warmup.failed.title": "Semantic engine failed to start",
+  "semantic.warmup.failed.description": "Indexing is unavailable. Queued requests continue without semantic context.",
 }

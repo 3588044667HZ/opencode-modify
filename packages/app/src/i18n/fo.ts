@@ -1151,4 +1151,9 @@ export const dict = {
   "workspace.reset.archived.many": "{{count}} setur verða arkiveraðar.",
   "workspace.reset.note": "Hetta nullstillar workspace til at passa til forsettu greinina.",
   "dialog.usageExceeded.dontShowAgain": "Vís ikki aftur",
+
+  "semantic.warmup.starting": "Analyzing project...",
+  "semantic.warmup.indexing": "Analyzing project... {{progress}}% ({{current}})",
+  "semantic.warmup.failed.title": "Semantic engine failed to start",
+  "semantic.warmup.failed.description": "Indexing is unavailable. Queued requests continue without semantic context.",
 }

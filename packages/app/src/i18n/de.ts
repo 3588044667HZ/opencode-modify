@@ -1182,4 +1182,9 @@ export const dict = {
   "help.tabs.persistence": "Wenn Sie die App erneut öffnen, sind Ihre Tabs weiterhin geöffnet.",
   "help.tabs.worktrees":
     "Das neue Design unterstützt Git-Worktrees noch nicht. Diese Funktion folgt in Kürze. Wenn Sie das bisherige Layout vorerst weiterverwenden möchten, können Sie in den Einstellungen zwischen den Layouts wechseln. Beachten Sie jedoch, dass das neue Layout in einigen Wochen dauerhaft verwendet wird.",
+
+  "semantic.warmup.starting": "Analyzing project...",
+  "semantic.warmup.indexing": "Analyzing project... {{progress}}% ({{current}})",
+  "semantic.warmup.failed.title": "Semantic engine failed to start",
+  "semantic.warmup.failed.description": "Indexing is unavailable. Queued requests continue without semantic context.",
 } satisfies Partial<Record<Keys, string>>

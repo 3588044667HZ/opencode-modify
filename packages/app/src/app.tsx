@@ -56,6 +56,7 @@ import { ServerConnection, ServerProvider, serverName, useServer } from "@/conte
 import { SettingsProvider, useSettings } from "@/context/settings"
 import { TabsProvider, useTabs, type DraftTab } from "@/context/tabs"
 import { SDKProvider, useSDK } from "@/context/sdk"
+import { SemanticProvider } from "@/context/semantic"
 import { WslServersProvider } from "@/wsl/context"
 import DirectoryLayout, { DirectoryDataProvider } from "@/pages/directory-layout"
 import LegacyLayout from "@/pages/layout"
@@ -391,7 +392,9 @@ function DraftProviders(props: ParentProps) {
   return (
     <FileProvider>
       <PromptProvider>
-        <CommentsProvider>{props.children}</CommentsProvider>
+        <CommentsProvider>
+          <SemanticProvider>{props.children}</SemanticProvider>
+        </CommentsProvider>
       </PromptProvider>
     </FileProvider>
   )

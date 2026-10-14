@@ -1145,4 +1145,9 @@ export const dict = {
   "workspace.reset.archived.many": "ເຊດຊັນ {{count}} ຈະຖືກເກັບໄວ້.",
   "workspace.reset.note": "ນີ້ຈະຣີເຊັດພື້ນທີ່ເຮັດວຽກໃຫ້ກົງກັບສາຂາເລີ່ມຕົ້ນ.",
   "dialog.usageExceeded.dontShowAgain": "ຢ່າສະແດງອີກ",
+
+  "semantic.warmup.starting": "Analyzing project...",
+  "semantic.warmup.indexing": "Analyzing project... {{progress}}% ({{current}})",
+  "semantic.warmup.failed.title": "Semantic engine failed to start",
+  "semantic.warmup.failed.description": "Indexing is unavailable. Queued requests continue without semantic context.",
 }

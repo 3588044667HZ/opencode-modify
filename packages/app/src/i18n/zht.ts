@@ -1220,4 +1220,9 @@ export const dict = {
   "error.childStore.persistedProjectIconCreateFailed": "建立持續性專案圖示失敗",
   "error.childStore.storeCreateFailed": "建立儲存區失敗",
   "terminal.connectionLost.abnormalClose": "WebSocket 異常關閉：{{code}}",
+
+  "semantic.warmup.starting": "Analyzing project...",
+  "semantic.warmup.indexing": "Analyzing project... {{progress}}% ({{current}})",
+  "semantic.warmup.failed.title": "Semantic engine failed to start",
+  "semantic.warmup.failed.description": "Indexing is unavailable. Queued requests continue without semantic context.",
 } satisfies Partial<Record<Keys, string>>

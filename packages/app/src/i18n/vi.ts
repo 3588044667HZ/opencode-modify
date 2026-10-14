@@ -1166,4 +1166,9 @@ export const dict = {
   "workspace.reset.archived.one": "1 phiên sẽ được lưu trữ.",
   "workspace.reset.archived.many": "{{count}} phiên sẽ được lưu trữ.",
   "workspace.reset.note": "Điều này sẽ thiết lập lại không gian làm việc để phù hợp với nhánh mặc định.",
+
+  "semantic.warmup.starting": "Analyzing project...",
+  "semantic.warmup.indexing": "Analyzing project... {{progress}}% ({{current}})",
+  "semantic.warmup.failed.title": "Semantic engine failed to start",
+  "semantic.warmup.failed.description": "Indexing is unavailable. Queued requests continue without semantic context.",
 }

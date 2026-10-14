@@ -1,6 +1,7 @@
 import { Show, type JSX } from "solid-js"
 import { useLanguage } from "@/context/language"
 import { useSettings } from "@/context/settings"
+import { SemanticWarmupBar } from "@/components/semantic-warmup-bar"
 import { SessionPermissionDock } from "@/pages/session/composer/session-permission-dock"
 import { SessionQuestionDock } from "@/pages/session/composer/session-question-dock"
 import { SessionFollowupDock } from "@/pages/session/composer/session-followup-dock"
@@ -36,6 +37,8 @@ export function SessionComposerRegion(props: {
           "md:max-w-200 md:mx-auto 2xl:max-w-[1000px]": controller.centered(),
         }}
       >
+        <SemanticWarmupBar class="mb-2 px-1" />
+
         <Show when={controller.state.questionRequest()} keyed>
           {(request) => (
             <div>

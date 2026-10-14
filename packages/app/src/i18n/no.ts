@@ -1264,4 +1264,9 @@ export const dict = {
   "settings.general.row.pinchZoom.description": "Tillat knipebevegelser på styreflaten og Ctrl-rulling for å zoome",
   "settings.updates.action.downloading": "Laster ned...",
   "settings.updates.action.installing": "Installerer...",
+
+  "semantic.warmup.starting": "Analyzing project...",
+  "semantic.warmup.indexing": "Analyzing project... {{progress}}% ({{current}})",
+  "semantic.warmup.failed.title": "Semantic engine failed to start",
+  "semantic.warmup.failed.description": "Indexing is unavailable. Queued requests continue without semantic context.",
 } satisfies Partial<Record<Keys, string>>

@@ -1159,4 +1159,9 @@ export const dict = {
   "workspace.reset.archived.many": "Tiks arhivētas {{count}} sesijas.",
   "workspace.reset.note": "Darbvieta tiks atiestatīta uz noklusējuma zara stāvokli.",
   "dialog.usageExceeded.dontShowAgain": "Vairs nerādīt",
+
+  "semantic.warmup.starting": "Analyzing project...",
+  "semantic.warmup.indexing": "Analyzing project... {{progress}}% ({{current}})",
+  "semantic.warmup.failed.title": "Semantic engine failed to start",
+  "semantic.warmup.failed.description": "Indexing is unavailable. Queued requests continue without semantic context.",
 }

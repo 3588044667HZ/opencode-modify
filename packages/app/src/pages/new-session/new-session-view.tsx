@@ -9,6 +9,7 @@ import { Portal } from "solid-js/web"
 import createPresence from "solid-presence"
 import { PromptInputV2Composer } from "@/components/prompt-input-v2"
 import { PromptGitStatus, PromptWorkspaceSelector } from "@/components/prompt-workspace-selector"
+import { SemanticWarmupBar } from "@/components/semantic-warmup-bar"
 import {
   PromptProjectAddButton,
   PromptProjectSelector,
@@ -65,6 +66,7 @@ export function NewSessionView(props: {
                   </Show>
                 </div>
               </Show>
+              <SemanticWarmupBar class="-mt-4 w-full justify-center px-1" />
             </div>
           </div>
         </div>
