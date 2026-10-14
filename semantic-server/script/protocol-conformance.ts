@@ -23,6 +23,7 @@ const FIXTURE_OUTPUT = path.join(SERVER_DIR, "fixtures", "blast_radius", "output
 const EDIT_DIR = path.join(SERVER_DIR, "fixtures", "edit_batch")
 const EDIT_TARGET = path.join(FIXTURE_DIR, "tasks", "EditableSample.java")
 const EDIT_REL = "src/main/java/demo/tasks/EditableSample.java"
+const VERIFY_DIR = path.join(SERVER_DIR, "fixtures", "verify_test")
 
 const clientModule = await import(pathToFileURL(path.join(ROOT, "packages/opencode/src/semantic/client.ts")).href)
 const transportModule = await import(pathToFileURL(path.join(ROOT, "packages/opencode/src/semantic/transport.ts")).href)
@@ -95,6 +96,20 @@ type EditBatchResult = {
   diagnostics_after?: { errors: number; warnings: number }
   line_changes?: Array<{ line: number; action: string }>
   error?: { code?: number; message?: string; detail?: Record<string, unknown>; hint?: string }
+}
+
+type VerifyTestResult = {
+  command: string
+  exit_code: number
+  duration_ms: number
+  summary: { passed: number; failed: number; skipped: number; total: number } | null
+  failures: Array<{ test: string; file?: string; line?: number; message?: string }>
+  output_head: string
+  output_tail: string
+  parsed: boolean
+  framework: string | null
+  timeout?: boolean
+  total_failures?: number
 }
 
 const checks: Array<{ name: string; ok: boolean; detail: string }> = []
@@ -865,6 +880,133 @@ try {
       check("[19] edit_batch applied 成功", false, `${(error as Error).name}: ${(error as Error).message}`)
     }
   }
+
+  // ---- 用例 20-24：verify_test 契约（真实 pytest + 降级/超时/截断 + 渲染） ----
+  const verifyInput = (await Bun.file(path.join(VERIFY_DIR, "input.json")).json()) as {
+    command: string
+    options?: { cwd?: string; timeout_ms?: number; env?: Record<string, string> }
+  }
+  const verifyGolden = (await Bun.file(path.join(VERIFY_DIR, "output.json")).json()) as VerifyTestResult
+  check(
+    "[20] 客户端严格解码 fixtures/verify_test/output.json",
+    strictDecode(protocol.VerifyTestResult, verifyGolden) !== undefined,
+    `command=${verifyGolden.command} framework=${verifyGolden.framework}`,
+  )
+  try {
+    const started = Date.now()
+    const actual = (await typed.verifyTest(verifyInput)) as VerifyTestResult
+    const elapsed = Date.now() - started
+    const normalized = { ...actual, duration_ms: -1, output_head: "<output>", output_tail: "<output>" }
+    check(
+      "[20] 真 pytest 运行与 output.json 深度一致（耗时/输出归一）",
+      JSON.stringify(canonical(normalized)) === JSON.stringify(canonical(verifyGolden)),
+      `exit=${actual.exit_code} parsed=${actual.parsed} framework=${actual.framework} summary=${JSON.stringify(actual.summary)}`,
+      { actual, expected: verifyGolden },
+    )
+    check(
+      "[20] parsed=true、framework=pytest、exit≠0 且失败条目完整",
+      actual.parsed === true &&
+        actual.framework === "pytest" &&
+        actual.exit_code !== 0 &&
+        actual.failures.length >= 1 &&
+        actual.failures.every((failure) => typeof failure.test === "string"),
+      `failures=${clip(JSON.stringify(actual.failures))}`,
+    )
+    check("[20] 小项目基准：执行耗时 < 20s", elapsed < 20_000, `${elapsed}ms（含进程启动）`)
+    const headLines = actual.output_head === "" ? 0 : actual.output_head.split("\n").length
+    const tailLines = actual.output_tail === "" ? 0 : actual.output_tail.split("\n").length
+    check("[20] output_head/tail 各 ≤100 行", headLines <= 100 && tailLines <= 100, `head=${headLines} tail=${tailLines}`)
+    const rendered = renderModule.renderVerifyTest(actual)
+    check(
+      "[20] 失败渲染：headline/summary/失败条目/exit",
+      rendered.startsWith(`verify_test ${actual.command} → FAIL (`) &&
+        (actual.summary === null ||
+          rendered.includes(`${actual.summary.passed} passed, ${actual.summary.failed} failed, ${actual.summary.skipped} skipped`)) &&
+        rendered.includes("FAILED ") &&
+        rendered.endsWith(`  exit ${actual.exit_code}`),
+      clip(rendered.replace(/\n/g, " ⏎ "), 260),
+    )
+  } catch (error) {
+    check("[20] 真 pytest 运行与 output.json 深度一致（耗时/输出归一）", false, `${(error as Error).name}: ${(error as Error).message}`)
+  }
+
+  // 用例 21：未知命令 → parsed=false 降级
+  try {
+    const unknown = (await typed.verifyTest({ command: "echo hello" })) as VerifyTestResult
+    check(
+      "[21] 未知命令 parsed=false、framework/summary=null、原始输出保留",
+      unknown.parsed === false &&
+        unknown.framework === null &&
+        unknown.summary === null &&
+        unknown.failures.length === 0 &&
+        (unknown.output_head + unknown.output_tail).includes("hello"),
+      `exit=${unknown.exit_code} parsed=${unknown.parsed} output=${clip(unknown.output_head + unknown.output_tail, 120)}`,
+    )
+  } catch (error) {
+    check("[21] 未知命令 parsed=false、framework/summary=null、原始输出保留", false, `${(error as Error).name}: ${(error as Error).message}`)
+  }
+
+  // 用例 22：超时 → exit -1 + timeout
+  try {
+    const timed = (await typed.verifyTest({
+      command: 'python -c "import time; time.sleep(30)"',
+      options: { timeout_ms: 1500 },
+    })) as VerifyTestResult
+    check(
+      "[22] 超时：exit_code=-1、timeout=true、duration≈1.5s",
+      timed.exit_code === -1 && timed.timeout === true && timed.duration_ms >= 1400 && timed.duration_ms < 15_000,
+      `exit=${timed.exit_code} timeout=${timed.timeout} duration=${timed.duration_ms}`,
+    )
+  } catch (error) {
+    check("[22] 超时：exit_code=-1、timeout=true、duration≈1.5s", false, `${(error as Error).name}: ${(error as Error).message}`)
+  }
+
+  // 用例 23：失败列表截断（21 失败 → 20 + total_failures）
+  try {
+    const many = (await typed.verifyTest({ command: "python -m pytest tests_many" })) as VerifyTestResult
+    check(
+      "[23] 失败截断：failures=20 且 total_failures=21",
+      many.failures.length === 20 && many.total_failures === 21,
+      `failures=${many.failures.length} total=${many.total_failures} summary=${JSON.stringify(many.summary)}`,
+    )
+    const truncatedRendered = renderModule.renderVerifyTest(many)
+    check(
+      "[23] 截断渲染含 more failures 行",
+      truncatedRendered.includes("more failures, total 21"),
+      clip(truncatedRendered.replace(/\n/g, " ⏎ "), 200),
+    )
+  } catch (error) {
+    check("[23] 失败截断：failures=20 且 total_failures=21", false, `${(error as Error).name}: ${(error as Error).message}`)
+  }
+
+  // 用例 24：输出截断 + cwd 错误码
+  try {
+    const noisy = (await typed.verifyTest({ command: 'python -c "for i in range(300): print(i)"' })) as VerifyTestResult
+    const headLines = noisy.output_head.split("\n").filter((line) => line !== "").length
+    const tailLines = noisy.output_tail.split("\n").filter((line) => line !== "").length
+    check(
+      "[24] 300 行输出 → head/tail 各 100 行、parsed=false",
+      noisy.parsed === false && headLines === 100 && tailLines === 100,
+      `head=${headLines} tail=${tailLines} parsed=${noisy.parsed}`,
+    )
+  } catch (error) {
+    check("[24] 300 行输出 → head/tail 各 100 行、parsed=false", false, `${(error as Error).name}: ${(error as Error).message}`)
+  }
+  let protectedCwdCode: number | undefined
+  try {
+    await typed.verifyTest({ command: "echo x", options: { cwd: ".venv" } })
+  } catch (error) {
+    protectedCwdCode = (error as { code?: number }).code
+  }
+  check("[24] 保护 cwd → RPC -32013", protectedCwdCode === -32013, `code=${protectedCwdCode}`)
+
+  let missingCwdCode: number | undefined
+  try {
+    await typed.verifyTest({ command: "echo x", options: { cwd: "no/such/dir" } })
+  } catch (error) {
+    missingCwdCode = (error as { code?: number }).code
+  }
+  check("[24] 不存在 cwd → RPC -32001", missingCwdCode === -32001, `code=${missingCwdCode}`)
 
   // ---- 用例 9：shutdown + 连接失败 ----
   const shutdown = await rpc2.call("shutdown", undefined, 15_000)

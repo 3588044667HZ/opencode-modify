@@ -267,7 +267,8 @@ final class EditBatchService {
 
   // ---- 路径保护 ----
 
-  private static String protectReason(String basePath, Path path) {
+  /** 包级共享（verify_test 的 cwd 复用同一套保护段/后缀）；返回命中的段或后缀，未命中 null。 */
+  static String protectReason(String basePath, Path path) {
     Path relative = path;
     if (basePath != null) {
       Path root = Paths.get(basePath).toAbsolutePath().normalize();

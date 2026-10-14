@@ -83,6 +83,7 @@ public final class SemanticServerStarter extends ModernApplicationStarter {
     ReadViewService readViewService = new ReadViewService();
     BlastRadiusService blastRadiusService = new BlastRadiusService();
     EditBatchService editBatchService = new EditBatchService();
+    VerifyTestService verifyTestService = new VerifyTestService();
 
     JsonRpcServer[] serverRef = new JsonRpcServer[1];
     JsonRpcServer.Handler handler =
@@ -120,6 +121,13 @@ public final class SemanticServerStarter extends ModernApplicationStarter {
                 throw new JsonRpcServer.RpcException(-32000, "indexing", monitor.errorData());
               }
               return editBatchService.editBatch(project, projectPath.toString(), params);
+            }
+            case "verify_test": {
+              Project project = monitor.getProject();
+              if (project == null || monitor.isIndexing() || DumbService.isDumb(project)) {
+                throw new JsonRpcServer.RpcException(-32000, "indexing", monitor.errorData());
+              }
+              return verifyTestService.verifyTest(projectPath.toString(), params);
             }
             case "shutdown": {
               JsonRpcServer server = serverRef[0];

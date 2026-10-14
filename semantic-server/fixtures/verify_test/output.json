@@ -1,0 +1,23 @@
+{
+  "command": "python -m pytest tests",
+  "exit_code": 1,
+  "duration_ms": -1,
+  "summary": {
+    "passed": 1,
+    "failed": 1,
+    "skipped": 0,
+    "total": 2
+  },
+  "failures": [
+    {
+      "test": "tests/test_sample.py::test_fail",
+      "file": "tests/test_sample.py",
+      "line": 6,
+      "message": "assert (1 + 1) == 3"
+    }
+  ],
+  "output_head": "<output>",
+  "output_tail": "<output>",
+  "parsed": true,
+  "framework": "pytest"
+}

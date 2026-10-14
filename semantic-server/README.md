@@ -2,7 +2,7 @@
 
 按 `LLM-IDE-SPEC/`（main / intellij-headless / jsonrpc-channel / adapter-layer）实现的 IntelliJ
 无头语义守护：JSON-RPC 2.0 over AF_UNIX（NDJSON），提供 `ping` / `subscribe` / `read_view` /
-`blast_radius` / `edit_batch` / `shutdown`。
+`blast_radius` / `edit_batch` / `verify_test` / `shutdown`。
 Java 实现，无 Kotlin，可在无 Gradle、无网络的条件下用本地 IDEA 平台 jar 直接构建。
 
 ## 目录
@@ -17,6 +17,7 @@ semantic-server/
 │   ├── ReadViewService.java         # read_view 聚合：PSI/VFS/引用 resolve/诊断
 │   ├── BlastRadiusService.java      # blast_radius 聚合：定义/引用分类/入口/测试/callees/风险 + 缓存
 │   ├── EditBatchService.java        # edit_batch：版本戳/路径保护/纯度/锚点/重叠 + 原子写 + 诊断增量
+│   ├── VerifyTestService.java       # verify_test：shell 透传/超时杀进程树/输出截断 + 六框架薄解析
 │   └── Log.java
 ├── src/main/resources/META-INF/plugin.xml   # appStarter EP + 最小依赖
 ├── script/build-local.sh            # javac + jar 打包 + 安装到 .sandbox/plugins
@@ -25,10 +26,12 @@ semantic-server/
 ├── script/probe.ts                  # Bun 探针：ping/subscribe/read_view/shutdown
 ├── script/blast-probe.ts            # Bun 探针：blast_radius（fixtures 生成/缓存/scope 证据）
 ├── script/edit-probe.ts             # Bun 探针：edit_batch（模板块 copy/版本注入/fixtures 生成/raw NDJSON）
+├── script/verify-probe.ts           # Bun 探针：verify_test（raw NDJSON/超时/cwd 错误/fixtures 归一）
 ├── script/protocol-conformance.ts   # 跨实现协议一致性测试（真实守护 ↔ OC 客户端）
 ├── fixtures/blast_radius/           # 协议 fixtures：input.json + output.json（真实守护响应）
 ├── fixtures/edit_batch/             # 协议 fixtures：template.java + input.json + output.json（版本归一）
-├── sample-project/                  # 跨文件调用样例（Main/Greeter + 故意报错的 Broken，含 .idea/iml）
+├── fixtures/verify_test/            # 协议 fixtures：input.json + output.json（duration/输出归一）
+├── sample-project/                  # 跨文件调用样例（Main/Greeter + 故意报错的 Broken，含 .idea/iml；tests/ 1 过 1 败、tests_many/ 21 败，verify_test 用）
 ├── build.gradle.kts / settings.gradle.kts   # org.jetbrains.intellij.platform 2.2.1 + local IDEA 平台
 ├── .gradle-home/                    # Gradle 依赖仓库（项目本地，gitignore）
 └── README.md
@@ -144,10 +147,12 @@ bun script/probe.ts [socket_path] [--file path] [--symbol Name] [--early-read] [
 bun run semantic-server/script/protocol-conformance.ts
 ```
 
-覆盖 10 类用例 / 62 条断言：ping 与索引期解码、subscribe 推送、索引未就绪 -32000、
+覆盖 24 类用例 / 111 条断言：ping 与索引期解码、subscribe 推送、索引未就绪 -32000、
 entry 的 size.lines/覆盖/诊断/锚点对齐（含与磁盘逐行比对）、error 级诊断（`Broken.java`）、
--32001、definition 跨文件、shutdown 后 socket 关闭、原始帧 id 回显/顶层字段精确/严格解码。
-当前状态：**CONFORMANCE PASS 62/62**。
+-32001、definition 跨文件、edit_batch、verify_test（真 pytest 与 fixture 归一后深度一致、
+未知命令降级、超时杀进程、失败/输出截断、cwd -32013/-32001、渲染逐字节）、shutdown 后
+socket 关闭、原始帧 id 回显/顶层字段精确/严格解码。
+当前状态：**CONFORMANCE PASS 111/111**。
 
 ## blast_radius（符号影响面）
 
@@ -309,6 +314,87 @@ version、注入 baseVersion 后发送；`--raw` 打印原始 NDJSON 请求/响�
 - 路径保护按“相对项目根的路径段”判定（项目根目录名本身不参与），后缀按文件名判定；
 - 写入是 NIO 原子写（非平台保存），不触发平台 formatter/保存钩子；无自动格式化、无内容
   规范化、无撤销（与 spec 约束一致）。
+
+## verify_test（运行测试命令 + 薄解析）
+
+`verify_test(params)`：`{"command": string, "options"?: {"cwd"?: string, "timeout_ms"?: number,
+"env"?: {string: string}}}`。命令原样透传给 shell；`cwd` 缺省项目根；`timeout_ms` 缺省 300000
+（0 = 不限时）；`env` 在继承环境上叠加。
+
+结果字段（冻结协议）：
+
+- `command / exit_code / duration_ms / parsed / framework`；
+- `summary: {passed, failed, skipped, total} | null`——go 拿不到计数时为 null（`parsed` 仍 true）；
+- `failures: [{test, file?, line?, message?}]`——超过 20 条只返回前 20，并出现 `total_failures`
+  （未截断时无该字段）；
+- `output_head` / `output_tail`：stdout+stderr 合并、去尾部空行；总行 ≤100 时 head=全文、tail=""；
+  否则 head=前 100 行、tail=后 100 行（中段省略）；
+- `timeout: true` 仅超时出现：杀掉进程树、`exit_code: -1`、`summary: null`、`parsed: false`。
+
+shell 选择：`SEMANTIC_SHELL` 环境变量可覆盖（值是 shell 可执行文件，按 `-c` 传命令）；Windows
+优先 Git bash（PATH 扫描 + `%ProgramFiles%`/`%LOCALAPPDATA%\\Programs` 下的 `Git/bin|usr/bin`），
+以 `bash -s` + stdin 送脚本（见偏差）；找不到降级 `cmd.exe /d /s /c`；POSIX 用 `/bin/sh -c`。
+命令文本字节原样交给 shell，不做包装或改写。
+
+RPC 错误：`cwd` 命中保护列表（与 edit_batch 同一套保护段/后缀）→ `-32013`，**先于存在性判断**；
+`cwd` 不存在或非目录 → `-32001`；参数非法（缺/空 command、负/小数 timeout_ms、cwd/env 类型错）
+→ `-32603`；索引未就绪 → `-32000`（与其他方法相同的就绪门槛，按 `data.progress` 重试）。
+
+解析规则（顺序 pytest → jest/vitest → go → cargo → mocha，命中即停）：
+
+- **pytest**：footer `===== 1 failed, 1 passed in 0.30s =====` 取计数；`FAILED path::test - msg`
+  （`ERROR` 同样计入失败）取失败条目；文件取 node id 前缀，行号/回退消息用失败块头
+  `____ test_fail ____` 之后的 `path:line: ...` 行关联；映射 errors→failed、xfailed→skipped、
+  xpassed→passed；
+- **jest/vitest**：`Tests:`（jest）/ `Tests`（vitest）汇总行取计数，`✕`/`×` 行取失败名；
+- **go**：`--- FAIL: Test` / `ok|FAIL pkg` 识别（无计数 → summary=null）；
+- **cargo**：`test result: FAILED. N passed; M failed; K ignored` 取计数（ignored→skipped），
+  `test name ... FAILED` 取失败；
+- **mocha**：`N passing/failing/pending` 取计数，`N) name` 取失败；
+- 未识别：`parsed: false`、`summary/framework` 为 null，模型直接看原始输出。
+
+fixtures：`fixtures/verify_test/input.json`（`{"command":"python -m pytest tests"}`）+
+`output.json`（真实守护响应；归一约定：`duration_ms → -1`、`output_head/output_tail → "<output>"`，
+其余（含 failures 的 file/line/message）原样）。生成命令：
+
+```bash
+bash script/build-local.sh
+bash script/run-local.sh sample-project .tmp/verify.sock --idle-seconds 1800
+bun script/verify-probe.ts .tmp/verify.sock --normalize --out fixtures/verify_test/output.json
+```
+
+探针：`bun script/verify-probe.ts [socket] [--params file | --params-json '{...}']
+[--command cmd] [--cwd dir] [--timeout-ms n] [--out file] [--normalize] [--raw] [--no-wait]
+[--timeout secs] [--shutdown]`。
+
+验收证据（真实守护 + sample-project，raw NDJSON）：
+
+- 失败：`python -m pytest tests` → exit 1、summary `{1,1,0,2}`，failures
+  `[{test:"tests/test_sample.py::test_fail", file, line:6, message:"assert (1 + 1) == 3"}]`，
+  parsed true、framework pytest；
+- 成功：`python -m pytest tests/test_sample.py::test_pass` → exit 0、`{1,0,0,1}`、failures []；
+- 截断：`python -m pytest tests_many` → 21 failed、failures 20 条（test_fail_01..20）+
+  `total_failures: 21`，output_head/output_tail 各 100 行；
+- 未知命令：`./custom-test.sh` → exit 127、parsed false、framework null、原始 bash 报错；
+- 超时：`sleep 5` 或 `python -c "..."` + `timeout_ms` → exit -1、`timeout: true`、
+  ~超时长、进程树已杀（无残留进程）；
+- 长输出：`python -c "for i in range(300): print(i)"` → parsed false、head/tail 各 100 行（中段省略）；
+- cwd：`.venv`（不存在）→ -32013（保护先于存在性）；`no-such-dir` → -32001；`tests`（合法）
+  → 生效（rootdir、node id 相对 cwd）；空 command、负/小数 timeout → -32603；
+- 就绪门槛与重试：冷启动 `--no-wait` 直发 → `{"code":-32000,"message":"indexing",
+  "data":{"progress":…}}`，探针轮询至 ready 后成功。
+
+本机限制与偏差：
+
+- 本机只装了 pytest（9.1.1，`python -m pytest`）；jest/vitest/go/cargo/mocha 未安装，
+  解析器按样例输出实现、未做真实链路验证；
+- Windows 的 Git bash 用 `-s`（stdin 送脚本）而不是 `-c`：JVM 把含内嵌双引号的 `-c` 参数
+  交给 msys2 时引号会被吞掉（已用最小 Java 程序复现，与 verify_test 自身无关），stdin 传字节
+  与命令原文完全一致（`python -c "..."` 已实测 + conformance 用例 22/24 覆盖）；`SEMANTIC_SHELL`
+  覆盖与 cmd 降级仍按 `-c` 传参；
+- 捕获上限 5 万行（超出丢弃最旧行；footer/失败列表在末尾，优先保留）；
+- 失败列表顺序 = pytest 短摘要（`-rf`）顺序；
+- 测试进程自身产生的缓存目录（`__pycache__`/`.pytest_cache`）由测试工具管理，不在本服务控制范围。
 
 ## 启动方式尝试记录
 

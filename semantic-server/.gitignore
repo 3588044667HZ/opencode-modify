@@ -6,3 +6,5 @@ build/
 .gradle-home/
 .intellijPlatform/
 sample-project/src/main/java/demo/tasks/EditableSample.java
+.pytest_cache/
+__pycache__/
