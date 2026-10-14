@@ -1,0 +1,14 @@
+{
+  "applied": false,
+  "file": "src/main/java/demo/tasks/EditableSample.java",
+  "changes_total": 2,
+  "error": {
+    "code": -32017,
+    "message": "LOCK_TIMEOUT",
+    "detail": {
+      "file": "src/main/java/demo/tasks/EditableSample.java",
+      "waited_ms": 30000
+    },
+    "hint": "文件正被其他写者占用。可稍后重试，或先 read_view 获取最新版本"
+  }
+}

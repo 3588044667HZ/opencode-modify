@@ -16,7 +16,7 @@ semantic-server/
 │   ├── IndexMonitor.java            # DumbService 轮询 → notifications/indexing（阶段近似进度）
 │   ├── ReadViewService.java         # read_view 聚合：PSI/VFS/引用 resolve/诊断
 │   ├── BlastRadiusService.java      # blast_radius 聚合：定义/引用分类/入口/测试/callees/风险 + 缓存
-│   ├── EditBatchService.java        # edit_batch：版本戳/路径保护/纯度/锚点/重叠 + 原子写 + 诊断增量
+│   ├── EditBatchService.java        # edit_batch：文件级公平锁/版本戳/路径保护/纯度/锚点/重叠 + 原子写 + 诊断增量
 │   ├── VerifyTestService.java       # verify_test：shell 透传/超时杀进程树/输出截断 + 六框架薄解析
 │   ├── ProjectMapService.java       # project_map：项目级地图（模块/入口/依赖/环 + 项目级缓存/异步构建）
 │   └── Log.java
@@ -26,12 +26,12 @@ semantic-server/
 ├── script/run-local.sh              # 用本地 IDEA 平台 + JBR 启动守护（镜像 bin/idea.bat）
 ├── script/probe.ts                  # Bun 探针：ping/subscribe/read_view/shutdown
 ├── script/blast-probe.ts            # Bun 探针：blast_radius（fixtures 生成/缓存/scope 证据）
-├── script/edit-probe.ts             # Bun 探针：edit_batch（模板块 copy/版本注入/fixtures 生成/raw NDJSON）
+├── script/edit-probe.ts             # Bun 探针：edit_batch（模板块 copy/版本注入/并发 N 路/锁超时/fixtures 生成/raw NDJSON）
 ├── script/verify-probe.ts           # Bun 探针：verify_test（raw NDJSON/超时/cwd 错误/fixtures 归一）
 ├── script/map-probe.ts              # Bun 探针：project_map（building 轮询/并发比较/fixtures 归一）
 ├── script/protocol-conformance.ts   # 跨实现协议一致性测试（真实守护 ↔ OC 客户端）
 ├── fixtures/blast_radius/           # 协议 fixtures：input.json + output.json（真实守护响应）
-├── fixtures/edit_batch/             # 协议 fixtures：template.java + input.json + output.json（版本归一）
+├── fixtures/edit_batch/             # 协议 fixtures：template.java + input.json + output.json（版本归一）+ lock_timeout.json（手写）
 ├── fixtures/verify_test/            # 协议 fixtures：input.json + output.json（duration/输出归一）
 ├── fixtures/project_map/            # 协议 fixtures：input.json + output.json（project.root 归一）
 ├── sample-project/                  # 跨文件调用样例（Main/Greeter + 故意报错的 Broken，含 .idea/iml；tests/ 1 过 1 败、tests_many/ 21 败，verify_test 用）
@@ -219,8 +219,10 @@ scope 非字符串 → `-32603`）。
 ## edit_batch（单文件多区域原子编辑）
 
 `edit_batch(params)`：`{"file": string, "changes": [{"oldString": string, "newString": string,
-"description"?: string}], "baseVersion": string}`。单文件、文本锚点、全成功或全失败的原子编辑；
-写路径基础设施（版本戳校验、路径保护、纯度校验、原子写）在此首次落地。
+"description"?: string}], "baseVersion": string, "options"?: {"lock_timeout_ms"?: number}}`。
+单文件、文本锚点、全成功或全失败的原子编辑；写路径基础设施（文件级互斥锁、版本戳校验、路径保护、
+纯度校验、原子写）在此首次落地。`options.lock_timeout_ms` 为可选文件锁等待上限（毫秒，缺省
+30000；出现时必须 ≥1，否则 RPC -32603）。
 
 成功结果：
 
@@ -248,19 +250,22 @@ scope 非字符串 → `-32603`）。
 | -32014 | `CONTENT_IMPURE` | `newString` 含渲染层元语 | change_index, marker |
 | -32015 | `WRITE_FAILED` | 临时文件写入/rename 失败 | reason |
 | -32016 | `CHANGE_CONFLICT` | 两个 change 的锚点区间相交（spec 要求拒绝但未定义码，本实现新增） | change_index, conflict_with_index |
+| -32017 | `LOCK_TIMEOUT` | 等待文件锁超过 `options.lock_timeout_ms`（缺省 30s） | file, waited_ms |
 
 -32011 的 hint 为 spec 原文；其余为同风格中文短提示。文件不存在仍是 RPC 错误 `-32001`
 （与 read_view 一致）；参数缺失/类型错/空 changes/空 oldString 是 RPC `-32603`。
 
 处理顺序（冻结）：
 
-① 参数校验（-32603）→ ② 路径保护（保护段 `.venv/ venv/ env/ node_modules/ .git/ dist/ build/
-target/ out/ __pycache__/ .pytest_cache/ .mypy_cache/`，后缀 `*.lock *.min.js *.min.css`；命中即
--32013，**先于存在性检查**）→ ③ 文件不存在 → RPC -32001 → ④ 读内容 + 当前版本（先按 mtime
-差异 refresh VFS）→ ⑤ `baseVersion` 不匹配 → -32012（返回 current_version + content）→ ⑥ 纯度
-（`[err:`、`→ def@`、`L\d+ \[`、`pos: L\d+`）→ ⑦ 锚点恰好出现 1 次（非重叠计数；0 → -32010，
->1 → -32011）→ ⑧ 两锚点区间相交 → -32016（相邻不算）→ ⑨ 从后往前内存应用 → ⑩ 诊断 before
-计数 → ⑪ 原子写 → ⑫ VFS refresh + 新版本 → ⑬ 诊断 after、delta、line_changes。
+① 参数校验（-32603，含 `options.lock_timeout_ms` ≥ 1 校验）→ ② 路径保护（保护段 `.venv/ venv/
+env/ node_modules/ .git/ dist/ build/ target/ out/ __pycache__/ .pytest_cache/ .mypy_cache/`，
+后缀 `*.lock *.min.js *.min.css`；命中即 -32013，**先于存在性检查**）→ ③ 文件不存在 → RPC
+-32001 → ④ **规范化绝对路径后获取文件互斥锁**（公平队列，超时 `lock_timeout_ms`；超时 → -32017）
+→ 锁内：读内容 + 当前版本（先按 mtime 差异 refresh VFS）→ ⑤ `baseVersion` 不匹配 → -32012
+（返回 current_version + content）→ ⑥ 纯度（`[err:`、`→ def@`、`L\d+ \[`、`pos: L\d+`）→ ⑦ 锚点
+恰好出现 1 次（非重叠计数；0 → -32010，>1 → -32011）→ ⑧ 两锚点区间相交 → -32016（相邻不算）
+→ ⑨ 从后往前内存应用 → ⑩ 诊断 before 计数 → ⑪ 原子写 → ⑫ VFS refresh + 新版本 → ⑬ 诊断
+after、delta、line_changes → `finally` 释放锁。
 
 原子写：同目录 `<file>.tmp` → `FileChannel.force(true)` fsync → `Files.move(ATOMIC_MOVE,
 REPLACE_EXISTING)` 覆盖；任何失败清理 .tmp 并返回 -32015（本机 Windows 实测
@@ -273,9 +278,77 @@ PSI/诊断基于新内容重算；诊断计数复用 ReadViewService 的 `collec
 静态缓存自动失效（无需显式通知）——实测连续查询 `cache hit`（modCount=16）后编辑一次，
 再查询为 `cache miss (computed)`（modCount=20）。
 
+### 并发写保护（文件级公平锁 + 锁内版本校验 = 串行等价）
+
+多 agent 并发编辑同一文件时保证串行等价——不会出现"两个写者基于同一版本，后写覆盖先写"的
+静默覆盖。机制：
+
+- **锁**：`ConcurrentHashMap<String, ReentrantLock>`（fair=true，FIFO），key 为与 `resolvePath`
+  同口径规范化后的绝对路径（`./x`、`x`、反斜杠均归一为同一把锁）；锁保留在 map（避免频繁
+  创建），仅写路径加锁；等待 >1s 记录 WARN，等待超时（缺省 30s，`options.lock_timeout_ms`
+  可配）返回 -32017。
+- **锁内校验**：获得锁后才读内容、取当前版本、校验 `baseVersion`，随后应用并原子写——读+
+  校验+写之间没有窗口期。只有锁没有校验会串行写错版本；只有校验没有锁存在窗口期；两者
+  缺一不可。
+- **FIFO / 无死锁**：公平队列按到达顺序授予，避免饥饿；edit_batch 只锁单个文件，不会出现
+  "A 持 X 等 Y、B 持 Y 等 X"。锁不跨文件、不跨进程、不持久化。
+- **顺序**：参数校验、路径保护、存在性检查都在锁外（失败快速返回，不占锁）；从读内容+版本
+  校验开始的全部步骤在锁内；`finally` 无条件释放。
+- **平台写路径执行门（无头环境适配）**：无头守护里多个 manual highlight（`runMainPasses` →
+  `ExternalToolPass`）会形成平台锁环——manual pass 持读许可空等外部注解任务、后台注解任务
+  等读许可、VFS refresh 等写意图，实测每个等待者要空等 `ExternalToolPass` 的 60s 超时才返回
+  （thread dump 实证；并发 `read_view` 同样会空等 30s+）。因此"读内容 → 校验 → 写 → VFS
+  refresh → 诊断"这段由进程内一把公平门串行执行。文件锁与锁内版本校验语义完全不变（同文件
+  仍按 FIFO 排队，-32017 仍只由文件锁等待产生）；影响是不同文件的并发编辑会依次完成。
+- **-32017 失败结果**（仍为 JSON-RPC 成功响应，`result.applied=false`）：
+
+```json
+{"applied":false,"file":"src/main/java/demo/tasks/EditableSample.java","changes_total":2,
+ "error":{"code":-32017,"message":"LOCK_TIMEOUT",
+          "detail":{"file":"src/main/java/demo/tasks/EditableSample.java","waited_ms":30000},
+          "hint":"文件正被其他写者占用。可稍后重试，或先 read_view 获取最新版本"}}
+```
+
+- **读不加锁**：`read_view` / `blast_radius` / `project_map` / `verify_test` 不获取写锁，可能
+  读到旧版本，但返回的版本戳标注了这一点。
+- **崩溃后锁消失**：锁只存在守护进程内存中，进程退出/被 kill 即全部消失，重启后同一文件可
+  正常写入（没有需要清理的残留状态）。
+- **回显口径**：`detail.file` 回显请求的 `file` 值（与其它失败码一致）；`./x` 与 `x` 两个并发
+  请求锁是同一把，各自 `detail.file` 回显自己的请求写法。
+- **fixture**：`fixtures/edit_batch/lock_timeout.json` 为按冻结形状手写的 -32017 样例（顶层
+  `file` + `changes_total`，`detail.waited_ms` 固定 30000，hint 为 spec 原文），由协议一致性
+  测试做客户端严格解码 + 渲染逐字节校验。
+
+并发验收证据（真实守护 + 独立 socket raw 探针 + 真实 OC 客户端复刻）：
+
+- 同版本 10 路并发：先读版本 v，10 个独立连接同时提交 `baseVersion=v` → 恰好 1 个
+  `applied:true`、9 个 -32012，磁盘内容只生效一次（实测 summary `applied=1
+  codes={"-32012":9}`，elapsed 342..347ms）；
+- 不同文件 10 路并行：10 个文件各自读版本后并发编辑 → 10/10 `applied:true`，无 -32017
+  （实测真实客户端 elapsed≈3.4s，依次完成，见上方执行门说明）；
+- LOCK_TIMEOUT 现场：持锁请求发出后立即（~50ms 内）另一独立连接带 `options.lock_timeout_ms=1`
+  → -32017，`detail={file,waited_ms}`、hint 为 spec 原文，持锁者随后 `applied:true`（实测
+  首次即命中：`waited_ms:1`，daemon 日志 `lock contended ... waiting up to 1ms`）；
+- 路径规范化：`path` 与 `./path` 两种写法并发 → 同一把锁，恰好 1 成功（另一个 -32012）；
+- 顺序无等待：同一文件连续两次（第二次用新版本、新锚点）均成功，单次 ~330ms（版本链
+  13b→147→156）；
+- 崩溃后不泄漏：编辑成功 → `taskkill /F` 杀 java 进程（PID 实测）→ 重启守护 → 同一文件再编辑
+  成功（value 3→4，杀进程，value 4→5）；
+- 夹具：`lock_timeout.json` 经真实客户端 `EditBatchResult` 严格解码通过，`renderEditBatch`
+  逐字节等于预期（`edit_batch FAILED: lock timeout / ...: lock timeout after 30000ms / hint`）。
+
+偏差：
+
+- 真实"持锁中 kill"无法在探针层确定性编排（单次写操作窗口 <数秒），采用的等价验证是
+  "编辑成功后 kill → 重启 → 再编辑成功"——锁在内存、进程死亡即消失，不持久化，结论一致；
+- 平台写路径执行门是无头环境的让步：并发不同文件时写路径按序执行（不再交叉），以便绕开
+  IntelliJ manual highlight / VFS 写意图的 60s 平台锁环；文件级锁语义（FIFO、-32017 只来自
+  文件锁等待、锁内版本校验）不受影响。
+
 fixtures：`fixtures/edit_batch/template.java`（固定模板）＋ `input.json`（**故意不含
 baseVersion**，由探针/契约测试经 read_view 注入）＋ `output.json`（真实守护响应；其中
-`old_version`/`new_version` 两个值替换为字串 `"<version>"`，其余原样美化缩进）。生成命令：
+`old_version`/`new_version` 两个值替换为字串 `"<version>"`，其余原样美化缩进）＋
+`lock_timeout.json`（**手写**的 -32017 样例，非守护生成）。生成命令：
 
 ```bash
 bash script/build-local.sh
@@ -283,10 +356,15 @@ bash script/run-local.sh sample-project .tmp/edit.sock --idle-seconds 600
 bun script/edit-probe.ts .tmp/edit.sock --normalize-versions --out fixtures/edit_batch/output.json
 ```
 
-探针：`bun script/edit-probe.ts [socket] [--params file | --params-json '{...}']
-[--base-version v] [--out file] [--normalize-versions] [--raw] [--copy|--no-copy] [--no-inject]
-[--no-wait] [--timeout secs] [--shutdown] [--cleanup]`；默认 copy template → 目标、read_view 取
-version、注入 baseVersion 后发送；`--raw` 打印原始 NDJSON 请求/响应帧。
+探针：`bun script/edit-probe.ts [socket] [--params file | --params-json '{...}'] [--file path]
+[--changes-json '[{...}]'] [--lock-timeout-ms n] [--parallel n] [--base-version v] [--out file]
+[--normalize-versions] [--raw] [--copy|--no-copy] [--no-inject] [--no-wait] [--timeout secs]
+[--shutdown] [--cleanup]`；默认 copy template → 目标、read_view 取 version、注入 baseVersion 后
+发送；`--file/--changes-json/--lock-timeout-ms` 为免 params 文件的薄覆盖（后两者分别覆盖
+`changes` 与 `options.lock_timeout_ms`，0/负数会原样发出以验证 -32603）；`--parallel N` 开 N 个
+独立 socket，所有 worker 先并发取版本（或共用 `--base-version`），就绪后同时发送同一请求，
+请求 JSON 中的 `{i}` 替换为 worker 序号（1 起，便于一次对 N 个不同文件并发），逐路打印
+`applied`/错误码/耗时并输出 summary；`--raw` 打印原始 NDJSON 请求/响应帧。
 
 验收证据（真实守护 + sample-project；成功用例的 target 是生成物，跑完已删除）：
 

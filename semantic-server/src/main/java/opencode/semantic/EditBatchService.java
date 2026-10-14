@@ -27,18 +27,23 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
  * edit_batch：单文件多区域原子编辑（写路径基础设施首次落地）。
  *
- * 冻结协议处理顺序：参数校验（RPC -32603）→ 路径保护（-32013，先于存在性）→ 存在性（RPC -32001）
- * → 读内容+当前版本 → 版本戳校验（-32012）→ 纯度校验（-32014）→ 锚点唯一（-32010/-32011）
- * → 重叠拒绝（-32016）→ 从后往前内存应用 → 诊断 before 计数
- * → 原子写（同目录 <file>.tmp + fsync + ATOMIC_MOVE）→ VFS refresh + Document 重载
- * → 诊断 after/增量与 line_changes。
- * -32010..-32016 仍返回 JSON-RPC 成功响应，result.applied=false。
+ * 冻结协议处理顺序：参数校验（RPC -32603，含 options.lock_timeout_ms ≥ 1）→ 路径保护（-32013，
+ * 先于存在性）→ 存在性（RPC -32001）→ 规范化绝对路径后获取文件互斥锁（公平队列，超时
+ * lock_timeout_ms，缺省 30s；超时 -32017）→ 锁内：读内容+当前版本 → 版本戳校验（-32012）
+ * → 纯度校验（-32014）→ 锚点唯一（-32010/-32011）→ 重叠拒绝（-32016）→ 从后往前内存应用
+ * → 诊断 before 计数 → 原子写（同目录 <file>.tmp + fsync + ATOMIC_MOVE）→ VFS refresh +
+ * Document 重载 → 诊断 after/增量与 line_changes → finally 释放锁。
+ * 读内容与版本校验必须在锁内，否则校验与写入之间存在窗口期。
+ * -32010..-32017 仍返回 JSON-RPC 成功响应，result.applied=false。
  */
 final class EditBatchService {
   private static final int ANCHOR_NOT_FOUND = -32010;
@@ -48,6 +53,28 @@ final class EditBatchService {
   private static final int CONTENT_IMPURE = -32014;
   private static final int WRITE_FAILED = -32015;
   private static final int CHANGE_CONFLICT = -32016;
+  private static final int LOCK_TIMEOUT = -32017;
+
+  /** options.lock_timeout_ms 缺省值（spec：edit_batch 通常 <100ms，30s 意味着异常）。 */
+  private static final long DEFAULT_LOCK_TIMEOUT_MS = 30_000L;
+
+  /** 锁等待超过该时长记 WARN，便于诊断写者卡住/系统负载异常。 */
+  private static final long LOCK_WAIT_WARN_MS = 1_000L;
+
+  /** 文件锁表：key 为规范化绝对路径；锁保留在 map 中（避免频繁创建），进程退出即消失。 */
+  private static final ConcurrentHashMap<String, ReentrantLock> FILE_LOCKS = new ConcurrentHashMap<>();
+
+  /**
+   * 写路径执行门：无头环境下多个 manual highlight（ExternalToolPass 空等外部注解任务）与
+   * VFS 写意图会形成平台锁环，每个等待者要空等 60s 超时才返回（线程 dump 实证）；因此把
+   * 平台重段（读内容后的校验/写/refresh/诊断）在进程内串行执行。文件锁及其锁内校验语义
+   * 不变（同文件仍按 FIFO 串行、权威版本校验仍在锁内）；此门只是规避平台并发缺陷。
+   */
+  private static final ReentrantLock EXECUTION_GATE = new ReentrantLock(true);
+
+  /** spec 原文 hint（-32017 专属）。 */
+  private static final String HINT_LOCK_TIMEOUT =
+      "文件正被其他写者占用。可稍后重试，或先 read_view 获取最新版本";
 
   /** 保护段：任一路径段命中即拒绝（相对项目根计算，项目名本身不参与）。 */
   private static final Set<String> PROTECTED_SEGMENTS =
@@ -66,10 +93,11 @@ final class EditBatchService {
 
   JsonObject editBatch(Project project, String basePath, JsonObject params)
       throws JsonRpcServer.RpcException {
-    // ① 参数校验（缺失/类型错/空 changes/空 oldString 一律 RPC -32603）
+    // ① 参数校验（缺失/类型错/空 changes/空 oldString/非法 options 一律 RPC -32603）
     String file = requireString(params, "file");
     String baseVersion = requireString(params, "baseVersion");
     List<Change> changes = readChanges(params);
+    long lockTimeoutMs = readLockTimeoutMs(params);
 
     // ② 路径保护先于存在性检查
     Path path = ReadViewService.resolvePath(basePath, file);
@@ -87,8 +115,41 @@ final class EditBatchService {
       throw new JsonRpcServer.RpcException(-32001, "file not found", null);
     }
 
+    // ④ 文件级互斥锁：key 与 resolvePath 同口径规范化（./x、x、反斜杠归一），公平队列 FIFO。
+    // 锁只保护写路径后半段；读路径（read_view 等）不加锁。
+    String lockKey = path.toAbsolutePath().normalize().toString();
+    ReentrantLock lock = FILE_LOCKS.computeIfAbsent(lockKey, key -> new ReentrantLock(true));
+    if (lock.isLocked()) {
+      Log.warn("edit_batch lock contended file=" + file + " waiting up to " + lockTimeoutMs + "ms");
+    }
+    long waitStarted = System.nanoTime();
+    boolean acquired = false;
     try {
-      return execute(project, path, virtualFile, file, changes, baseVersion);
+      acquired = lock.tryLock(lockTimeoutMs, TimeUnit.MILLISECONDS);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
+    long waitedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - waitStarted);
+    if (!acquired) {
+      Log.warn("edit_batch rejected file=" + file + " code=" + LOCK_TIMEOUT
+          + " waited_ms=" + waitedMs);
+      JsonObject detail = new JsonObject();
+      detail.addProperty("file", file);
+      detail.addProperty("waited_ms", waitedMs);
+      return failure(file, changes.size(), LOCK_TIMEOUT, "LOCK_TIMEOUT", detail, HINT_LOCK_TIMEOUT);
+    }
+    if (waitedMs > LOCK_WAIT_WARN_MS) {
+      Log.warn("edit_batch lock acquired file=" + file + " waited_ms=" + waitedMs);
+    }
+
+    try {
+      // ⑤ 锁内执行：读内容+版本 → 校验 → 应用 → 原子写 → refresh → 新版本+诊断
+      EXECUTION_GATE.lock();
+      try {
+        return execute(project, path, virtualFile, file, changes, baseVersion);
+      } finally {
+        EXECUTION_GATE.unlock();
+      }
     } catch (JsonRpcServer.RpcException e) {
       throw e;
     } catch (IndexNotReadyException e) {
@@ -97,6 +158,8 @@ final class EditBatchService {
     } catch (Throwable t) {
       Log.error("edit_batch failed", t);
       throw new JsonRpcServer.RpcException(-32603, "internal error", null);
+    } finally {
+      lock.unlock();
     }
   }
 
@@ -104,13 +167,13 @@ final class EditBatchService {
       Project project, Path path, VirtualFile virtualFile, String file,
       List<Change> changes, String baseVersion)
       throws JsonRpcServer.RpcException {
-    // ④ 读内容 + 当前版本（读前按 mtime 差异刷新 VFS，避免拿到陈旧 stamp）
+    // ⑤ 读内容 + 当前版本（读前按 mtime 差异刷新 VFS，避免拿到陈旧 stamp；必须在锁内）
     refreshIfStale(virtualFile);
     String content = readContent(path);
     syncDocument(project, virtualFile, content);
     String oldVersion = ReadViewService.versionOf(virtualFile);
 
-    // ⑤ 版本戳校验
+    // ⑥ 版本戳校验（锁内）
     if (!baseVersion.equals(oldVersion)) {
       Log.info("edit_batch rejected file=" + file + " code=" + VERSION_MISMATCH);
       JsonObject detail = new JsonObject();
@@ -120,7 +183,7 @@ final class EditBatchService {
           "文件已变化：用返回的 current_version 与 content 重新读取后再提交");
     }
 
-    // ⑥ 纯度校验
+    // ⑦ 纯度校验
     for (Change change : changes) {
       Matcher matcher = IMPURE_PATTERN.matcher(change.newString);
       if (matcher.find()) {
@@ -134,7 +197,7 @@ final class EditBatchService {
       }
     }
 
-    // ⑦ 锚点必须恰好出现一次
+    // ⑧ 锚点必须恰好出现一次
     for (Change change : changes) {
       List<Integer> matches = matchOffsets(content, change.oldString);
       if (matches.isEmpty()) {
@@ -163,7 +226,7 @@ final class EditBatchService {
       change.end = change.start + change.oldString.length();
     }
 
-    // ⑧ 重叠检测（两个锚点区间相交即拒绝）
+    // ⑨ 重叠检测（两个锚点区间相交即拒绝）
     for (int i = 0; i < changes.size(); i++) {
       for (int j = i + 1; j < changes.size(); j++) {
         Change earlier = changes.get(i);
@@ -180,13 +243,13 @@ final class EditBatchService {
       }
     }
 
-    // ⑨ 从后往前内存应用 + ⑩ 诊断 before 计数（此时盘上仍是旧内容）
+    // ⑩ 从后往前内存应用 + ⑪ 诊断 before 计数（此时盘上仍是旧内容）
     String newContent = applyChanges(content, changes);
     int[] before = ReadAction.computeBlocking(
         (ThrowableComputable<int[], RuntimeException>)
             () -> ReadViewService.diagnosticCounts(project, virtualFile));
 
-    // ⑪ 原子写
+    // ⑫ 原子写
     try {
       atomicWrite(path, newContent);
     } catch (IOException e) {
@@ -197,12 +260,12 @@ final class EditBatchService {
           "磁盘写入失败：检查文件权限、磁盘空间或文件占用后重试");
     }
 
-    // ⑫ VFS refresh + Document 重载 + 新版本
+    // ⑬ VFS refresh + Document 重载 + 新版本
     virtualFile.refresh(false, false);
     syncDocument(project, virtualFile, newContent);
     String newVersion = ReadViewService.versionOf(virtualFile);
 
-    // ⑬ 诊断 after 与增量、line_changes
+    // ⑭ 诊断 after 与增量、line_changes
     int[] after = ReadAction.computeBlocking(
         (ThrowableComputable<int[], RuntimeException>)
             () -> ReadViewService.diagnosticCounts(project, virtualFile));
@@ -251,6 +314,22 @@ final class EditBatchService {
       changes.add(new Change(i, oldString, newString));
     }
     return changes;
+  }
+
+  /** options 可选；缺失取缺省 30s；出现时必须是 ≥1 的有限数值，否则 -32603。 */
+  private static long readLockTimeoutMs(JsonObject params) throws JsonRpcServer.RpcException {
+    JsonElement options = params.get("options");
+    if (options == null || options.isJsonNull()) return DEFAULT_LOCK_TIMEOUT_MS;
+    if (!options.isJsonObject()) throw invalidParams("options");
+    JsonElement element = options.getAsJsonObject().get("lock_timeout_ms");
+    if (element == null || element.isJsonNull()) return DEFAULT_LOCK_TIMEOUT_MS;
+    if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isNumber()) {
+      throw invalidParams("options.lock_timeout_ms");
+    }
+    double value = element.getAsDouble();
+    if (!Double.isFinite(value) || value < 1) throw invalidParams("options.lock_timeout_ms");
+    // 超大数值截到 long 上限，避免转换溢出
+    return (long) Math.min(value, (double) Long.MAX_VALUE);
   }
 
   private static String requireString(JsonObject params, String name) throws JsonRpcServer.RpcException {

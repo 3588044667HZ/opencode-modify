@@ -1034,12 +1034,16 @@ try {
     `modules=${mapGolden.modules.length} total_modules=${mapGolden.project.total_modules}`,
   )
   const mapReady = async <T,>(input: { view?: string; scope?: string }): Promise<T> => {
-    for (let i = 0; i < 120; i++) {
-      const result = (await typed.projectMap(input)) as Record<string, unknown> & { building?: boolean }
-      if (result.building !== true) return result as T
+    for (let i = 0; i < 240; i++) {
+      try {
+        const result = (await typed.projectMap(input)) as Record<string, unknown> & { building?: boolean }
+        if (result.building !== true) return result as T
+      } catch (error) {
+        if ((error as { code?: number }).code !== -32000) throw error
+      }
       await sleep(250)
     }
-    throw new Error("project_map 构建超时（30s）")
+    throw new Error("project_map 构建超时（60s）")
   }
   try {
     const structure = await mapReady<ProjectMapStructureResult>(mapInput)
@@ -1150,6 +1154,210 @@ try {
     check("[29] 新增 21 个模块 → 截断展示 20、total_modules=base+21", false, `${(error as Error).name}: ${(error as Error).message}`)
   } finally {
     fs.rmSync(modsRoot, { recursive: true, force: true })
+  }
+
+  // ---- 用例 30-35：edit_batch 并发锁（同版本竞争/并行/超时/路径归一/顺序/夹具） ----
+  const concurrencyCleanup: string[] = []
+  const concurrencyTemplate = (className: string) => `class ${className} {\n  int value = 0;\n}\n`
+  const concurrencyChange = { oldString: "int value = 0;", newString: "int value = 1;" }
+  const openClient = () => clientModule.connect(SOCKET, { connect_timeout_ms: 10_000, request_timeout_ms: 120_000 })
+  const prepareFile = async (name: string): Promise<{ rel: string; abs: string; version: string }> => {
+    const rel = `src/main/java/demo/tasks/${name}.java`
+    const abs = path.join(FIXTURE_DIR, "tasks", `${name}.java`)
+    fs.writeFileSync(abs, concurrencyTemplate(name))
+    concurrencyCleanup.push(abs)
+    for (let attempt = 0; attempt < 40; attempt++) {
+      try {
+        const snapshot = (await typed.readView({ file: rel, view: "entry" })) as ReadViewResult
+        return { rel, abs, version: snapshot.version }
+      } catch (error) {
+        if ((error as { code?: number }).code === -32000) {
+          await sleep(500)
+          continue
+        }
+        throw error
+      }
+    }
+    throw new Error(`prepareFile: 语义引擎未就绪（-32000 重试超限）: ${name}`)
+  }
+  const editOnce = (
+    client: Awaited<ReturnType<typeof clientModule.connect>>,
+    rel: string,
+    version: string,
+    options?: { lock_timeout_ms?: number },
+    change: { oldString: string; newString: string } = concurrencyChange,
+  ) =>
+    client
+      .editBatch({
+        file: rel,
+        changes: [change],
+        baseVersion: version,
+        ...(options === undefined ? {} : { options }),
+      })
+      .then((result: EditBatchResult) => ({ ok: true as const, result }))
+      .catch((error: { code?: number; message?: string }) => ({ ok: false as const, error }))
+  const waitForSemanticReady = async (deadlineMs = 60_000): Promise<boolean> => {
+    const deadline = Date.now() + deadlineMs
+    while (Date.now() < deadline) {
+      try {
+        const ping = await typed.ping()
+        if (!ping.indexing) return true
+      } catch {
+        // transient ping failures are retried
+      }
+      await sleep(500)
+    }
+    return false
+  }
+  try {
+    check("[30] 前置：语义引擎 ready（[29] 目录变更后）", await waitForSemanticReady(), "ping ready")
+    // [30] 同版本 10 路并发（独立连接）
+    const race = await prepareFile("EditRace")
+    const raceClients = await Promise.all(Array.from({ length: 10 }, () => openClient()))
+    try {
+      const raceResults = await Promise.all(raceClients.map((client) => editOnce(client, race.rel, race.version)))
+      const raceSuccesses = raceResults.filter((item) => item.ok && item.result.applied === true)
+      const raceFailures = raceResults.filter((item) => item.ok && item.result.applied === false)
+      const raceCodes = raceFailures.map((item) => (item.ok ? item.result.error?.code : undefined))
+      check("[30] 同版本 10 路并发恰好 1 成功", raceSuccesses.length === 1, `success=${raceSuccesses.length} failCodes=${JSON.stringify(raceCodes)}`)
+      check(
+        "[30] 其余均为 -32012/-32017（无静默覆盖）",
+        raceFailures.length === 9 && raceCodes.every((code) => code === -32012 || code === -32017),
+        `codes=${JSON.stringify(raceCodes)}`,
+      )
+      const raceDisk = fs.readFileSync(race.abs, "utf8")
+      check("[30] 磁盘内容只生效一次", raceDisk.includes("int value = 1;") && !raceDisk.includes("int value = 0;"), clip(raceDisk))
+    } finally {
+      for (const client of raceClients) client.close()
+    }
+
+    // [31] 不同文件并行 10 路
+    const parallelFiles: Array<{ rel: string; abs: string; version: string }> = []
+    for (let i = 1; i <= 10; i++) parallelFiles.push(await prepareFile(`EditPar${String(i).padStart(2, "0")}`))
+    const parallelClients = await Promise.all(Array.from({ length: 10 }, () => openClient()))
+    try {
+      const parallelStarted = Date.now()
+      const parallelResults = await Promise.all(parallelFiles.map((file, index) => editOnce(parallelClients[index], file.rel, file.version)))
+      const parallelElapsed = Date.now() - parallelStarted
+      check(
+        "[31] 不同文件 10 路并行全部成功",
+        parallelResults.every((item) => item.ok && item.result.applied === true),
+        `success=${parallelResults.filter((item) => item.ok && item.result.applied === true).length}/10 elapsed=${parallelElapsed}ms`,
+      )
+    } finally {
+      for (const client of parallelClients) client.close()
+    }
+
+    // [32] LOCK_TIMEOUT 现场 + 渲染
+    let lockTimeoutResult: EditBatchResult | undefined
+    for (let attempt = 0; attempt < 3 && lockTimeoutResult === undefined; attempt++) {
+      const locked = await prepareFile("EditLock")
+      const holder = await openClient()
+      const waiter = await openClient()
+      try {
+        const holderPromise = editOnce(holder, locked.rel, locked.version)
+        await sleep(30)
+        const waiterOutcome = await editOnce(waiter, locked.rel, locked.version, { lock_timeout_ms: 1 })
+        const holderOutcome = await holderPromise
+        if (waiterOutcome.ok && waiterOutcome.result.applied === false && waiterOutcome.result.error?.code === -32017) {
+          lockTimeoutResult = waiterOutcome.result
+          check(
+            "[32] LOCK_TIMEOUT detail/hint 完整",
+            (waiterOutcome.result.error?.detail as { waited_ms?: unknown } | undefined)?.waited_ms !== undefined &&
+              (waiterOutcome.result.error?.detail as { file?: unknown } | undefined)?.file !== undefined &&
+              waiterOutcome.result.error?.hint === "文件正被其他写者占用。可稍后重试，或先 read_view 获取最新版本",
+            `error=${clip(JSON.stringify(waiterOutcome.result.error))}`,
+          )
+          check(
+            "[32] 持锁者仍成功写入",
+            holderOutcome.ok && holderOutcome.result.applied === true,
+            `holder=${holderOutcome.ok ? JSON.stringify(holderOutcome.result.error ?? "applied") : JSON.stringify(holderOutcome.error)}`,
+          )
+        }
+      } finally {
+        holder.close()
+        waiter.close()
+      }
+    }
+    check(
+      "[32] 触发真实 LOCK_TIMEOUT（-32017）",
+      lockTimeoutResult !== undefined,
+      lockTimeoutResult === undefined ? "3 轮均未命中（记录偏差）" : "命中",
+    )
+    if (lockTimeoutResult !== undefined) {
+      const lockRendered = renderModule.renderEditBatch(lockTimeoutResult)
+      check(
+        "[32] LOCK_TIMEOUT 渲染（headline/detail/hint）",
+        lockRendered.startsWith("edit_batch FAILED: lock timeout\n") &&
+          lockRendered.includes(" lock timeout after ") &&
+          lockRendered.includes("  hint: 文件正被其他写者占用。可稍后重试，或先 read_view 获取最新版本"),
+        clip(lockRendered.replace(/\n/g, " ⏎ "), 240),
+      )
+    }
+
+    // [33] 路径规范化：`path` 与 `./path` 并发 → 同一锁
+    const normalized = await prepareFile("EditNorm")
+    const normClients = await Promise.all([openClient(), openClient()])
+    try {
+      const normResults = await Promise.all([
+        editOnce(normClients[0], normalized.rel, normalized.version),
+        editOnce(normClients[1], `./${normalized.rel}`, normalized.version),
+      ])
+      const normSuccesses = normResults.filter((item) => item.ok && item.result.applied === true)
+      check(
+        "[33] `./path` 与 `path` 视为同一文件（恰好 1 成功）",
+        normSuccesses.length === 1,
+        `success=${normSuccesses.length}`,
+      )
+    } finally {
+      for (const client of normClients) client.close()
+    }
+
+    // [34] 顺序同文件两次 → 无锁等待
+    const sequential = await prepareFile("EditSeq")
+    const seqClient = await openClient()
+    try {
+      const seqStart = Date.now()
+      const first = await editOnce(seqClient, sequential.rel, sequential.version)
+      const second =
+        first.ok && first.result.applied === true
+          ? await editOnce(
+              seqClient,
+              sequential.rel,
+              first.result.new_version ?? "",
+              undefined,
+              { oldString: "int value = 1;", newString: "int value = 2;" },
+            )
+          : undefined
+      const seqElapsed = Date.now() - seqStart
+      check(
+        "[34] 同 agent 顺序两次编辑均成功且无等待",
+        first.ok && first.result.applied === true && second !== undefined && second.ok && second.result.applied === true,
+        `elapsed=${seqElapsed}ms`,
+      )
+    } finally {
+      seqClient.close()
+    }
+
+    // [35] 夹具 lock_timeout.json 契约
+    const lockFixture = (await Bun.file(path.join(EDIT_DIR, "lock_timeout.json")).json()) as EditBatchResult
+    check(
+      "[35] 客户端严格解码 fixtures/edit_batch/lock_timeout.json",
+      strictDecode(protocol.EditBatchResult, lockFixture) !== undefined,
+      `code=${lockFixture.error?.code}`,
+    )
+    const fixtureFile = (lockFixture.error?.detail as { file?: string } | undefined)?.file ?? lockFixture.file ?? "?"
+    const fixtureWaited = (lockFixture.error?.detail as { waited_ms?: number } | undefined)?.waited_ms
+    const fixtureExpected = [
+      "edit_batch FAILED: lock timeout",
+      `  ${fixtureFile}: lock timeout after ${fixtureWaited}ms`,
+      ...(lockFixture.error?.hint === undefined ? [] : [`  hint: ${lockFixture.error.hint}`]),
+    ].join("\n")
+    check("[35] 夹具渲染一致", renderModule.renderEditBatch(lockFixture) === fixtureExpected, clip(fixtureExpected.replace(/\n/g, " ⏎ "), 240))
+  } catch (error) {
+    check("[30] 同版本 10 路并发恰好 1 成功", false, `${(error as Error).name}: ${(error as Error).message}`)
+  } finally {
+    for (const file of concurrencyCleanup) fs.rmSync(file, { force: true })
   }
 
   // ---- 用例 9：shutdown + 连接失败 ----
