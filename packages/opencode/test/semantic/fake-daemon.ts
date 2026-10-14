@@ -1,12 +1,15 @@
 // Minimal fake semantic daemon for tests. Implements the frozen JSON-RPC
 // protocol over a unix socket / Windows named pipe.
 //
-// Usage: bun fake-daemon.ts [--indexing | --indexing-forever] [--read-view-error=indexing|notfound] [--blast-radius-error=indexing|symbol] [--edit-batch-error=anchor] [--verify-test=success|failure|unrecognized] <project_dir> <socket_path>
+// Usage: bun fake-daemon.ts [--indexing | --indexing-forever] [--read-view-error=indexing|notfound] [--blast-radius-error=indexing|symbol] [--edit-batch-error=anchor] [--verify-test=success|failure|unrecognized] [--project-map=structure|dependencies|hot] <project_dir> <socket_path>
 import net from "node:net"
 import {
   SAMPLE_BLAST_RESULT,
   SAMPLE_EDIT_BATCH_FAILURE,
   SAMPLE_EDIT_BATCH_SUCCESS,
+  SAMPLE_PROJECT_MAP_DEPENDENCIES,
+  SAMPLE_PROJECT_MAP_HOT,
+  SAMPLE_PROJECT_MAP_STRUCTURE,
   SAMPLE_RESULT,
   SAMPLE_VERIFY_FAILURE,
   SAMPLE_VERIFY_SUCCESS,
@@ -29,6 +32,7 @@ const mode = {
   blastRadiusError: flags.find((flag) => flag.startsWith("--blast-radius-error="))?.split("=")[1],
   editBatchError: flags.find((flag) => flag.startsWith("--edit-batch-error="))?.split("=")[1],
   verifyTest: flags.find((flag) => flag.startsWith("--verify-test="))?.split("=")[1],
+  projectMap: flags.find((flag) => flag.startsWith("--project-map="))?.split("=")[1],
 }
 
 const state = {
@@ -139,6 +143,17 @@ async function handle(socket: net.Socket, message: any) {
         return
       }
       respond(socket, message.id, SAMPLE_VERIFY_SUCCESS)
+      return
+    case "project_map":
+      respond(
+        socket,
+        message.id,
+        mode.projectMap === "dependencies"
+          ? SAMPLE_PROJECT_MAP_DEPENDENCIES
+          : mode.projectMap === "hot"
+            ? SAMPLE_PROJECT_MAP_HOT
+            : SAMPLE_PROJECT_MAP_STRUCTURE,
+      )
       return
     case "shutdown":
       respond(socket, message.id, { ok: true })

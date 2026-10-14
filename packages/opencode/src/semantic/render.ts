@@ -222,3 +222,72 @@ function verifyOutput(tail: string): string[] {
   for (const line of tail.split("\n").slice(-VERIFY_OUTPUT_LINES)) lines.push(`    ${line}`)
   return lines
 }
+
+const PROJECT_MAP_MODULE_LIMIT = 20
+
+export function renderProjectMap(result: Protocol.ProjectMapResult): string {
+  if (result.building === true) return `project_map building ${Math.round((result.progress ?? 0) * 100)}%`
+  if ("modules" in result) return projectMapStructure(result)
+  if ("dependencies" in result) return projectMapDependencies(result)
+  return projectMapHot(result)
+}
+
+function projectMapStructure(result: Protocol.ProjectMapStructure): string {
+  // 对齐宽度按实际列出的模块计算，被截断的隐藏模块不参与。
+  const modules = result.modules.slice(0, PROJECT_MAP_MODULE_LIMIT)
+  const width = Math.max(...modules.map((module) => module.path.length + 1), "root:".length) + 5
+  const lines = [`project: ${result.project.total_modules} modules, ${result.project.total_files} files`]
+  for (const module of modules) {
+    const hot = module.hot ? "  hot" : ""
+    lines.push(`  ${`${module.path}/`.padEnd(width)}[${module.files.join(", ")}]${hot}`)
+  }
+  if (result.modules.length > PROJECT_MAP_MODULE_LIMIT) {
+    lines.push(`  (+${result.project.total_modules - PROJECT_MAP_MODULE_LIMIT} more modules)`)
+  }
+  lines.push(`  ${"root:".padEnd(width)}[${result.root_files.join(", ")}]`)
+  lines.push("")
+  if (result.entry_points.length === 0) {
+    lines.push("entry: none")
+  } else {
+    const entries = result.entry_points.map((entry) => `${entry.file}:${entry.symbol} (${entry.kind})`)
+    lines.push(`entry: ${entries.join(", ")}`)
+  }
+  return lines.join("\n")
+}
+
+function projectMapDependencies(result: Protocol.ProjectMapDependencies): string {
+  const lines = ["dependencies:"]
+  const byFrom = new Map<string, Array<(typeof result.dependencies)[number]>>()
+  for (const dependency of result.dependencies) {
+    const targets = byFrom.get(dependency.from) ?? []
+    targets.push(dependency)
+    byFrom.set(dependency.from, targets)
+  }
+  for (const from of [...byFrom.keys()].sort()) {
+    const targets = [...(byFrom.get(from) ?? [])].sort((a, b) => b.count - a.count || a.to.localeCompare(b.to))
+    lines.push(`  ${from} → ${targets.map((target) => `${target.to} (${target.count})`).join(", ")}`)
+  }
+  if (byFrom.size === 0) lines.push("  (none)")
+  lines.push(result.cycles.length === 0 ? "  cycles: none" : `  cycles: ${result.cycles.map(cycleText).join("; ")}`)
+  return lines.join("\n")
+}
+
+function cycleText(cycle: ReadonlyArray<string>): string {
+  if (cycle.length === 0) return ""
+  return `${cycle.join(" → ")} → ${cycle[0]}`
+}
+
+function projectMapHot(result: Protocol.ProjectMapHot): string {
+  if (result.hot_files.length === 0 && result.hot_modules.length === 0) {
+    return "project_map hot: empty (no access stats yet)"
+  }
+  // 对齐取所列 hot_files 最长路径 + 2，未复刻 spec 样例的逐行差异。
+  const width = result.hot_files.reduce((max, file) => Math.max(max, file.file.length), 0) + 2
+  const lines = ["hot files:"]
+  for (const file of result.hot_files) {
+    const edits = file.edit_count > 0 ? `, ${file.edit_count} edits` : ""
+    lines.push(`  ${file.file.padEnd(width)}${file.read_count} reads${edits}`)
+  }
+  lines.push(result.hot_modules.length === 0 ? "hot modules: none" : `hot modules: ${result.hot_modules.join(", ")}`)
+  return lines.join("\n")
+}

@@ -7,6 +7,7 @@ export interface Client {
   readonly readView: (input: Protocol.ReadViewRequest) => Promise<Protocol.ReadViewResult>
   readonly blastRadius: (input: Protocol.BlastRadiusRequest) => Promise<Protocol.BlastRadiusResult>
   readonly editBatch: (input: Protocol.EditBatchRequest) => Promise<Protocol.EditBatchResult>
+  readonly projectMap: (input: Protocol.ProjectMapRequest) => Promise<Protocol.ProjectMapResult>
   readonly verifyTest: (input: Protocol.VerifyTestRequest) => Promise<Protocol.VerifyTestResult>
   readonly shutdown: () => Promise<void>
   readonly onIndexing: (listener: (notification: Protocol.IndexingNotification) => void) => () => void
@@ -129,6 +130,11 @@ export async function connect(path: string, options?: ClientOptions): Promise<Cl
     editBatch: async (input) => {
       const decoded = Protocol.decodeOption(Protocol.EditBatchResult, await request("edit_batch", input))
       if (decoded === undefined) throw decodeFailure("edit_batch")
+      return decoded
+    },
+    projectMap: async (input) => {
+      const decoded = Protocol.decodeOption(Protocol.ProjectMapResult, await request("project_map", input))
+      if (decoded === undefined) throw decodeFailure("project_map")
       return decoded
     },
     verifyTest: async (input) => {

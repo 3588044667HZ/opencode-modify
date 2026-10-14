@@ -413,6 +413,91 @@ export const VerifyTestResult = Schema.Struct({
 }).annotate({ identifier: "VerifyTestResult", parseOptions: { onExcessProperty: "error" } })
 export type VerifyTestResult = typeof VerifyTestResult.Type
 
+export const ProjectMapViews = ["structure", "dependencies", "hot"] as const
+export type ProjectMapView = (typeof ProjectMapViews)[number]
+
+export interface ProjectMapRequest {
+  readonly view?: ProjectMapView
+  readonly scope?: string
+}
+
+// 三种 view 都可能处于构建中：各数组为空、project 计数为 0，并由 building/progress 标记。
+const projectMapBuilding = {
+  building: optional(Schema.Literal(true)),
+  progress: optional(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 }))),
+}
+
+const ProjectMapProject = Schema.Struct({
+  root: Schema.String,
+  total_files: Schema.Int,
+}).annotate({ identifier: "ProjectMapProject", parseOptions: { onExcessProperty: "error" } })
+
+const ProjectMapModule = Schema.Struct({
+  name: Schema.String,
+  path: Schema.String,
+  files: Schema.Array(Schema.String),
+  is_entry: Schema.Boolean,
+  hot: Schema.Boolean,
+}).annotate({ identifier: "ProjectMapModule", parseOptions: { onExcessProperty: "error" } })
+
+const ProjectMapEntryPoint = Schema.Struct({
+  file: Schema.String,
+  line: Schema.Int,
+  symbol: Schema.String,
+  kind: Schema.String,
+}).annotate({ identifier: "ProjectMapEntryPoint", parseOptions: { onExcessProperty: "error" } })
+
+// Strict decoding: the frozen project_map contract must not silently accept
+// fields the daemon is not supposed to send.
+export const ProjectMapStructure = Schema.Struct({
+  ...projectMapBuilding,
+  project: Schema.Struct({
+    root: Schema.String,
+    total_files: Schema.Int,
+    total_modules: Schema.Int,
+  }).annotate({ identifier: "ProjectMapStructureProject", parseOptions: { onExcessProperty: "error" } }),
+  modules: Schema.Array(ProjectMapModule),
+  entry_points: Schema.Array(ProjectMapEntryPoint),
+  root_files: Schema.Array(Schema.String),
+}).annotate({ identifier: "ProjectMapStructure", parseOptions: { onExcessProperty: "error" } })
+export type ProjectMapStructure = typeof ProjectMapStructure.Type
+
+const ProjectMapDependency = Schema.Struct({
+  from: Schema.String,
+  to: Schema.String,
+  count: Schema.Int,
+}).annotate({ identifier: "ProjectMapDependency", parseOptions: { onExcessProperty: "error" } })
+
+export const ProjectMapDependencies = Schema.Struct({
+  ...projectMapBuilding,
+  project: ProjectMapProject,
+  dependencies: Schema.Array(ProjectMapDependency),
+  cycles: Schema.Array(Schema.Array(Schema.String)),
+}).annotate({ identifier: "ProjectMapDependencies", parseOptions: { onExcessProperty: "error" } })
+export type ProjectMapDependencies = typeof ProjectMapDependencies.Type
+
+const ProjectMapHotFile = Schema.Struct({
+  file: Schema.String,
+  read_count: Schema.Int,
+  edit_count: Schema.Int,
+  last_access: Schema.String,
+}).annotate({ identifier: "ProjectMapHotFile", parseOptions: { onExcessProperty: "error" } })
+
+export const ProjectMapHot = Schema.Struct({
+  ...projectMapBuilding,
+  project: ProjectMapProject,
+  hot_files: Schema.Array(ProjectMapHotFile),
+  hot_modules: Schema.Array(Schema.String),
+}).annotate({ identifier: "ProjectMapHot", parseOptions: { onExcessProperty: "error" } })
+export type ProjectMapHot = typeof ProjectMapHot.Type
+
+// 分支靠必需键区分：modules / dependencies / hot_files。
+export const ProjectMapResult = Schema.Union([ProjectMapStructure, ProjectMapDependencies, ProjectMapHot]).annotate({
+  identifier: "ProjectMapResult",
+  parseOptions: { onExcessProperty: "error" },
+})
+export type ProjectMapResult = typeof ProjectMapResult.Type
+
 export function decodeOption<S extends Schema.Codec<unknown, unknown>>(schema: S, value: unknown) {
   return Option.getOrUndefined(Schema.decodeUnknownOption(schema)(value)) as S["Type"] | undefined
 }

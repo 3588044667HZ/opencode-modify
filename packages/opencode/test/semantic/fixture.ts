@@ -202,3 +202,87 @@ export const SAMPLE_VERIFY_UNRECOGNIZED_RENDER = [
   "  output (last 20 lines):",
   "    ...",
 ].join("\n")
+
+// Fixed project_map responses used by the fake daemon. The structure and
+// dependencies fixtures render byte-identically to the samples in
+// LLM-IDE-SPEC/project-map.md; the hot fixture uses the frozen client
+// alignment (max file length + 2) instead of the uneven spec sample columns.
+export const SAMPLE_PROJECT_MAP_STRUCTURE: Protocol.ProjectMapStructure = {
+  project: { root: "/path/to/project", total_files: 47, total_modules: 6 },
+  modules: [
+    {
+      name: "core",
+      path: "src/core",
+      files: ["engine.py", "config.py", "types.py"],
+      is_entry: false,
+      hot: true,
+    },
+    { name: "api", path: "src/api", files: ["routes.py", "handlers.py"], is_entry: false, hot: false },
+    { name: "utils", path: "src/utils", files: ["log.py", "io.py"], is_entry: false, hot: false },
+    { name: "tests", path: "tests", files: ["test_engine.py", "test_api.py"], is_entry: false, hot: false },
+  ],
+  entry_points: [
+    { file: "main.py", line: 1, symbol: "main", kind: "main" },
+    { file: "src/api/routes.py", line: 24, symbol: "register", kind: "route" },
+  ],
+  root_files: ["main.py", "README.md", "TODO.md"],
+}
+
+export const SAMPLE_PROJECT_MAP_STRUCTURE_RENDER = [
+  "project: 6 modules, 47 files",
+  "  src/core/      [engine.py, config.py, types.py]  hot",
+  "  src/api/       [routes.py, handlers.py]",
+  "  src/utils/     [log.py, io.py]",
+  "  tests/         [test_engine.py, test_api.py]",
+  "  root:          [main.py, README.md, TODO.md]",
+  "",
+  "entry: main.py:main (main), src/api/routes.py:register (route)",
+].join("\n")
+
+export const SAMPLE_PROJECT_MAP_DEPENDENCIES: Protocol.ProjectMapDependencies = {
+  project: { root: "/path/to/project", total_files: 47 },
+  dependencies: [
+    { from: "src/api", to: "src/core", count: 12 },
+    { from: "src/core", to: "src/utils", count: 5 },
+    { from: "tests", to: "src/core", count: 8 },
+    { from: "tests", to: "src/api", count: 3 },
+  ],
+  cycles: [],
+}
+
+export const SAMPLE_PROJECT_MAP_DEPENDENCIES_RENDER = [
+  "dependencies:",
+  "  src/api → src/core (12)",
+  "  src/core → src/utils (5)",
+  "  tests → src/core (8), src/api (3)",
+  "  cycles: none",
+].join("\n")
+
+export const SAMPLE_PROJECT_MAP_HOT: Protocol.ProjectMapHot = {
+  project: { root: "/path/to/project", total_files: 47 },
+  hot_files: [
+    { file: "src/core/engine.py", read_count: 47, edit_count: 12, last_access: "<timestamp>" },
+    { file: "TODO.md", read_count: 23, edit_count: 0, last_access: "<timestamp>" },
+    { file: "src/api/routes.py", read_count: 18, edit_count: 4, last_access: "<timestamp>" },
+  ],
+  hot_modules: ["core", "api"],
+}
+
+export const SAMPLE_PROJECT_MAP_HOT_RENDER = [
+  "hot files:",
+  "  src/core/engine.py  47 reads, 12 edits",
+  "  TODO.md             23 reads",
+  "  src/api/routes.py   18 reads, 4 edits",
+  "hot modules: core, api",
+].join("\n")
+
+export const SAMPLE_PROJECT_MAP_BUILDING: Protocol.ProjectMapStructure = {
+  project: { root: "/path/to/project", total_files: 0, total_modules: 0 },
+  modules: [],
+  entry_points: [],
+  root_files: [],
+  building: true,
+  progress: 0.42,
+}
+
+export const SAMPLE_PROJECT_MAP_BUILDING_RENDER = "project_map building 42%"
