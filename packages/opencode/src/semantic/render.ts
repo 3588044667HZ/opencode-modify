@@ -177,3 +177,48 @@ function editBatchDetailLine(result: Protocol.EditBatchFailure): string {
       return error.message
   }
 }
+
+const VERIFY_OUTPUT_LINES = 20
+
+export function renderVerifyTest(result: Protocol.VerifyTestResult): string {
+  const seconds = (result.duration_ms / 1000).toFixed(1)
+  const lines: string[] = []
+
+  if (result.timeout === true) {
+    lines.push(`verify_test ${result.command} → TIMEOUT (${seconds}s)`)
+    lines.push("  exit -1")
+    lines.push(...verifyOutput(result.output_tail))
+    return lines.join("\n")
+  }
+
+  const passed = result.exit_code === 0
+  const headline = `verify_test ${result.command} → ${passed ? "PASS" : "FAIL"} (${seconds}s${result.parsed ? "" : ", 未识别框架"})`
+  lines.push(headline)
+  if (result.summary !== null) {
+    lines.push(`  ${result.summary.passed} passed, ${result.summary.failed} failed, ${result.summary.skipped} skipped`)
+  }
+  if (!passed) {
+    for (const failure of result.failures) {
+      lines.push(`  FAILED ${failure.test}${failure.line === undefined ? "" : ` (L${failure.line})`}`)
+      if (failure.message !== undefined) {
+        for (const line of failure.message.split("\n")) lines.push(`    ${line}`)
+      }
+    }
+    if (result.total_failures !== undefined) {
+      lines.push(`  (+${result.total_failures - result.failures.length} more failures, total ${result.total_failures})`)
+    }
+  }
+  lines.push(`  exit ${result.exit_code}`)
+  if (!result.parsed) lines.push(...verifyOutput(result.output_tail))
+  return lines.join("\n")
+}
+
+function verifyOutput(tail: string): string[] {
+  const lines = ["  output (last 20 lines):"]
+  if (tail === "") {
+    lines.push("    (无输出)")
+    return lines
+  }
+  for (const line of tail.split("\n").slice(-VERIFY_OUTPUT_LINES)) lines.push(`    ${line}`)
+  return lines
+}

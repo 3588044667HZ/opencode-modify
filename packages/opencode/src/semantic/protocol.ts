@@ -1,5 +1,5 @@
 import { Option, Schema } from "effect"
-import { optional } from "@opencode-ai/schema/schema"
+import { NonNegativeInt, optional } from "@opencode-ai/schema/schema"
 
 export const Views = ["entry", "sequential", "continue", "definition"] as const
 export type View = (typeof Views)[number]
@@ -367,6 +367,51 @@ export const EditBatchResult = Schema.Union([EditBatchSuccess, EditBatchFailure]
   parseOptions: { onExcessProperty: "error" },
 })
 export type EditBatchResult = typeof EditBatchResult.Type
+
+export const VerifyTestSummary = Schema.Struct({
+  passed: Schema.Int,
+  failed: Schema.Int,
+  skipped: Schema.Int,
+  total: Schema.Int,
+}).annotate({ identifier: "VerifyTestSummary", parseOptions: { onExcessProperty: "error" } })
+export type VerifyTestSummary = typeof VerifyTestSummary.Type
+
+export const VerifyTestFailure = Schema.Struct({
+  test: Schema.String,
+  file: optional(Schema.String),
+  line: optional(Schema.Int),
+  message: optional(Schema.String),
+}).annotate({ identifier: "VerifyTestFailure", parseOptions: { onExcessProperty: "error" } })
+export type VerifyTestFailure = typeof VerifyTestFailure.Type
+
+export const VerifyTestOptions = Schema.Struct({
+  cwd: optional(Schema.String),
+  timeout_ms: optional(NonNegativeInt),
+  env: optional(Schema.Record(Schema.String, Schema.String)),
+}).annotate({ identifier: "VerifyTestOptions", parseOptions: { onExcessProperty: "error" } })
+export type VerifyTestOptions = typeof VerifyTestOptions.Type
+
+export interface VerifyTestRequest {
+  readonly command: string
+  readonly options?: VerifyTestOptions
+}
+
+// Strict decoding: the frozen verify_test contract must not silently accept
+// fields the daemon is not supposed to send.
+export const VerifyTestResult = Schema.Struct({
+  command: Schema.String,
+  exit_code: Schema.Int,
+  duration_ms: Schema.Number,
+  summary: Schema.NullOr(VerifyTestSummary),
+  failures: Schema.Array(VerifyTestFailure),
+  output_head: Schema.String,
+  output_tail: Schema.String,
+  parsed: Schema.Boolean,
+  framework: Schema.NullOr(Schema.String),
+  timeout: optional(Schema.Boolean),
+  total_failures: optional(Schema.Int),
+}).annotate({ identifier: "VerifyTestResult", parseOptions: { onExcessProperty: "error" } })
+export type VerifyTestResult = typeof VerifyTestResult.Type
 
 export function decodeOption<S extends Schema.Codec<unknown, unknown>>(schema: S, value: unknown) {
   return Option.getOrUndefined(Schema.decodeUnknownOption(schema)(value)) as S["Type"] | undefined

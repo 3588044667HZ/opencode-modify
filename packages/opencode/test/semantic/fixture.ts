@@ -127,3 +127,78 @@ export const SAMPLE_EDIT_BATCH_FAILURE_RENDER = [
   '  engine.ts: "return json.load(data)" matches 3 locations [L42, L67, L89]',
   "  hint: 提供更多上下文使锚点唯一，或调用 map() 获取直接操作工具",
 ].join("\n")
+
+// Fixed verify_test responses used by the fake daemon. Crafted so
+// renderVerifyTest output is byte-identical to the samples in
+// LLM-IDE-SPEC/verify-test.md.
+export const SAMPLE_VERIFY_SUCCESS: Protocol.VerifyTestResult = {
+  command: "pytest",
+  exit_code: 0,
+  duration_ms: 12400,
+  summary: { passed: 42, failed: 0, skipped: 3, total: 45 },
+  failures: [],
+  output_head: "collected 45 items",
+  output_tail: "45 passed in 12.4s",
+  parsed: true,
+  framework: "pytest",
+}
+
+export const SAMPLE_VERIFY_SUCCESS_RENDER = [
+  "verify_test pytest → PASS (12.4s)",
+  "  42 passed, 0 failed, 3 skipped",
+  "  exit 0",
+].join("\n")
+
+export const SAMPLE_VERIFY_FAILURE: Protocol.VerifyTestResult = {
+  command: "pytest",
+  exit_code: 1,
+  duration_ms: 12400,
+  summary: { passed: 40, failed: 2, skipped: 3, total: 45 },
+  failures: [
+    {
+      test: "test_engine.py::test_load_invalid_path",
+      file: "test_engine.py",
+      line: 42,
+      message: "AssertionError: expected ValueError, got None",
+    },
+    {
+      test: "test_api.py::test_timeout",
+      file: "test_api.py",
+      line: 88,
+      message: "TimeoutError: request took 5.2s, limit 3s",
+    },
+  ],
+  output_head: "collected 45 items",
+  output_tail: "2 failed, 40 passed, 3 skipped in 12.4s",
+  parsed: true,
+  framework: "pytest",
+}
+
+export const SAMPLE_VERIFY_FAILURE_RENDER = [
+  "verify_test pytest → FAIL (12.4s)",
+  "  40 passed, 2 failed, 3 skipped",
+  "  FAILED test_engine.py::test_load_invalid_path (L42)",
+  "    AssertionError: expected ValueError, got None",
+  "  FAILED test_api.py::test_timeout (L88)",
+  "    TimeoutError: request took 5.2s, limit 3s",
+  "  exit 1",
+].join("\n")
+
+export const SAMPLE_VERIFY_UNRECOGNIZED: Protocol.VerifyTestResult = {
+  command: "./custom-test.sh",
+  exit_code: 1,
+  duration_ms: 3000,
+  summary: null,
+  failures: [],
+  output_head: "custom test output",
+  output_tail: "...",
+  parsed: false,
+  framework: null,
+}
+
+export const SAMPLE_VERIFY_UNRECOGNIZED_RENDER = [
+  "verify_test ./custom-test.sh → FAIL (3.0s, 未识别框架)",
+  "  exit 1",
+  "  output (last 20 lines):",
+  "    ...",
+].join("\n")

@@ -1,9 +1,17 @@
 // Minimal fake semantic daemon for tests. Implements the frozen JSON-RPC
 // protocol over a unix socket / Windows named pipe.
 //
-// Usage: bun fake-daemon.ts [--indexing | --indexing-forever] [--read-view-error=indexing|notfound] [--blast-radius-error=indexing|symbol] [--edit-batch-error=anchor] <project_dir> <socket_path>
+// Usage: bun fake-daemon.ts [--indexing | --indexing-forever] [--read-view-error=indexing|notfound] [--blast-radius-error=indexing|symbol] [--edit-batch-error=anchor] [--verify-test=success|failure|unrecognized] <project_dir> <socket_path>
 import net from "node:net"
-import { SAMPLE_BLAST_RESULT, SAMPLE_EDIT_BATCH_FAILURE, SAMPLE_EDIT_BATCH_SUCCESS, SAMPLE_RESULT } from "./fixture"
+import {
+  SAMPLE_BLAST_RESULT,
+  SAMPLE_EDIT_BATCH_FAILURE,
+  SAMPLE_EDIT_BATCH_SUCCESS,
+  SAMPLE_RESULT,
+  SAMPLE_VERIFY_FAILURE,
+  SAMPLE_VERIFY_SUCCESS,
+  SAMPLE_VERIFY_UNRECOGNIZED,
+} from "./fixture"
 
 const argv = process.argv.slice(2)
 const flags = argv.filter((arg) => arg.startsWith("--"))
@@ -20,6 +28,7 @@ const mode = {
   readViewError: flags.find((flag) => flag.startsWith("--read-view-error="))?.split("=")[1],
   blastRadiusError: flags.find((flag) => flag.startsWith("--blast-radius-error="))?.split("=")[1],
   editBatchError: flags.find((flag) => flag.startsWith("--edit-batch-error="))?.split("=")[1],
+  verifyTest: flags.find((flag) => flag.startsWith("--verify-test="))?.split("=")[1],
 }
 
 const state = {
@@ -119,6 +128,17 @@ async function handle(socket: net.Socket, message: any) {
         return
       }
       respond(socket, message.id, SAMPLE_EDIT_BATCH_SUCCESS)
+      return
+    case "verify_test":
+      if (mode.verifyTest === "failure") {
+        respond(socket, message.id, SAMPLE_VERIFY_FAILURE)
+        return
+      }
+      if (mode.verifyTest === "unrecognized") {
+        respond(socket, message.id, SAMPLE_VERIFY_UNRECOGNIZED)
+        return
+      }
+      respond(socket, message.id, SAMPLE_VERIFY_SUCCESS)
       return
     case "shutdown":
       respond(socket, message.id, { ok: true })
