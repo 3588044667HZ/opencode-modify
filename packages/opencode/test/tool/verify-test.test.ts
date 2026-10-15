@@ -39,6 +39,8 @@ const ctx = {
 const waitReady = Effect.gen(function* () {
   const semantic = yield* Semantic.Service
   yield* semantic.init()
+  // 惰性拉起：首个语义请求触发后台 spawn（期间返回 UnavailableError），就绪后正常服务。
+  yield* semantic.readView({ file: "engine.ts", view: "entry" }).pipe(Effect.catch(() => Effect.void))
   yield* pollWithTimeout(
     Effect.gen(function* () {
       const current = yield* semantic.status()

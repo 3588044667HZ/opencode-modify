@@ -24,7 +24,6 @@ const layer = Layer.effect(
     const config = yield* Config.Service
     const format = yield* Format.Service
     const lsp = yield* LSP.Service
-    const semantic = yield* Semantic.Service
     const plugin = yield* Plugin.Service
     const project = yield* Project.Service
     const shareNext = yield* ShareNext.Service
@@ -40,8 +39,10 @@ const layer = Layer.effect(
       yield* plugin.init()
       // Each service self-manages its own slow work via Effect.forkScoped against
       // its per-instance state scope. We just await materialization here.
+      // Semantic 是例外：守护不在 bootstrap 中启动（init 不 spawn），
+      // 改由首个语义请求惰性拉起并在全局串行闸门下冷启动，避免恢复大量会话时并发启守护。
       yield* Effect.forEach(
-        [lsp, semantic, shareNext, format, vcs, snapshot, project],
+        [lsp, shareNext, format, vcs, snapshot, project],
         (s) => s.init().pipe(Effect.catchCause((cause) => Effect.logWarning("init failed", { cause }))),
         { concurrency: "unbounded", discard: true },
       ).pipe(Effect.withSpan("InstanceBootstrap.init"))

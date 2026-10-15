@@ -15,7 +15,9 @@ export const ErrorCode = {
 export const Defaults = {
   connectTimeoutMs: 5_000,
   requestTimeoutMs: 15_000,
-  socketReadyTimeoutMs: 60_000,
+  // 冷沙箱首启（JVM 冷启动 + 首次索引）可能远超 60s；守护启动改为按需惰性后
+  // 不再并发抢占资源，放宽到 180s 避免误判启动失败。
+  socketReadyTimeoutMs: 180_000,
   socketRetryIntervalMs: 200,
   indexPollIntervalMs: 1_000,
 } as const

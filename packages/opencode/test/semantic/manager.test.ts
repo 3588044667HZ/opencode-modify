@@ -8,7 +8,7 @@ import os from "os"
 import path from "path"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import * as Client from "@/semantic/client"
-import { Semantic, socketPathFor } from "@/semantic/manager"
+import { RetryPolicy, Semantic, socketPathFor } from "@/semantic/manager"
 import * as Protocol from "@/semantic/protocol"
 import { awaitWithTimeout, pollWithTimeout, testEffect } from "../lib/effect"
 import {
@@ -20,6 +20,7 @@ import {
 import { SAMPLE_RESULT } from "./fixture"
 
 const fakeDaemon = path.join(import.meta.dir, "fake-daemon.ts")
+const slowDaemon = path.join(import.meta.dir, "slow-daemon.ts")
 const command = (...flags: string[]) => [process.execPath, fakeDaemon, ...flags]
 
 const semanticLayer = () => LayerNode.compile(LayerNode.group([Semantic.node, EventV2Bridge.node]))
@@ -69,6 +70,18 @@ const pollReady = (semantic: Semantic.Interface) =>
     "15 seconds",
   )
 
+// 惰性拉起：首次公开请求会触发后台 spawn，该请求本身立即以 UnavailableError 返回。
+const triggerSpawn = (semantic: Semantic.Interface) =>
+  semantic.readView({ file: "engine.ts", view: "entry" }).pipe(Effect.catch(() => Effect.void))
+
+const countLines = (file: string) =>
+  Effect.promise(() =>
+    fs.readFile(file, "utf8").then(
+      (text) => text.trim().split("\n").filter(Boolean).length,
+      () => 0,
+    ),
+  )
+
 describe("semantic manager", () => {
   it.instance("reports disabled when semantic is not enabled", () =>
     Effect.gen(function* () {
@@ -110,8 +123,42 @@ describe("semantic manager", () => {
     20_000,
   )
 
+  it.live(
+    "materializes an idle state on init without spawning the configured command",
+    () =>
+      Effect.gen(function* () {
+        const socketDir = yield* tmpdirScoped()
+        const marker = path.join(socketDir, "spawned.marker")
+        const dir = yield* tmpdirScoped({
+          config: {
+            semantic: {
+              enabled: true,
+              socket_dir: socketDir,
+              // 一旦被执行的 command 会写 marker 并退出 3；marker 不存在即证明 init 没有 spawn。
+              command: [
+                process.execPath,
+                "-e",
+                `require("fs").writeFileSync(${JSON.stringify(marker)}, "x"); process.exit(3)`,
+              ],
+            },
+          },
+        })
+
+        yield* Effect.gen(function* () {
+          const semantic = yield* Semantic.Service
+          yield* semantic.init()
+          expect((yield* semantic.status()).status).toBe("idle")
+          // 给潜在的错误 spawn 留出真实时间。
+          yield* Effect.sleep("500 millis")
+          expect(yield* Effect.promise(() => exists(marker))).toBe(false)
+          expect((yield* semantic.status()).status).toBe("idle")
+        }).pipe(provideInstance(dir))
+      }).pipe(withInstanceStores),
+    20_000,
+  )
+
   it.instance(
-    "spawns the daemon, publishes transitions, and answers read_view",
+    "first readView lazily spawns the daemon and eventually answers",
     () =>
       Effect.gen(function* () {
         const semantic = yield* Semantic.Service
@@ -124,15 +171,15 @@ describe("semantic manager", () => {
         yield* Effect.addFinalizer(() => unsubscribe)
 
         yield* semantic.init()
-        const status = yield* pollWithTimeout(
-          Effect.gen(function* () {
-            const current = yield* semantic.status()
-            return current.status === "ready" ? current : undefined
-          }),
-          "semantic engine never became ready",
-          "15 seconds",
-        )
+        expect((yield* semantic.status()).status).toBe("idle")
+        expect(statuses).toEqual([])
 
+        // 首次请求触发惰性拉起：本请求立即返回 starting，warmup 在后台继续。
+        const error = yield* semantic.readView({ file: "engine.ts", view: "entry" }).pipe(Effect.flip)
+        if (!(error instanceof Protocol.UnavailableError)) throw new Error(`unexpected error: ${String(error)}`)
+        expect(error.message).toContain("not ready")
+
+        const status = yield* pollReady(semantic)
         expect(status.progress).toBe(1)
         expect(statuses[0]).toBe("starting")
         expect(statuses).toContain("indexing")
@@ -146,11 +193,12 @@ describe("semantic manager", () => {
   )
 
   it.instance(
-    "reports progress while indexing",
+    "reports progress while indexing after the lazy spawn",
     () =>
       Effect.gen(function* () {
         const semantic = yield* Semantic.Service
         yield* semantic.init()
+        yield* triggerSpawn(semantic)
         yield* pollWithTimeout(
           Effect.gen(function* () {
             const current = yield* semantic.status()
@@ -175,6 +223,7 @@ describe("semantic manager", () => {
       Effect.gen(function* () {
         const semantic = yield* Semantic.Service
         yield* semantic.init()
+        yield* triggerSpawn(semantic)
         const status = yield* pollWithTimeout(
           Effect.gen(function* () {
             const current = yield* semantic.status()
@@ -191,6 +240,12 @@ describe("semantic manager", () => {
       }),
     { config: { semantic: { enabled: true, command: [process.execPath, "-e", "process.exit(3)"] } } },
     20_000,
+  )
+
+  it.live("uses a 180s socket ready timeout for cold daemon starts", () =>
+    Effect.sync(() => {
+      expect(Protocol.Defaults.socketReadyTimeoutMs).toBe(180_000)
+    }),
   )
 })
 
@@ -241,6 +296,8 @@ describe("semantic manager socket reuse", () => {
         yield* Effect.gen(function* () {
           const semantic = yield* Semantic.Service
           yield* semantic.init()
+          expect((yield* semantic.status()).status).toBe("idle")
+          yield* triggerSpawn(semantic)
           const status = yield* pollReady(semantic)
           expect(status.progress).toBe(1)
           expect(yield* semantic.readView({ file: "engine.ts", view: "entry" })).toEqual(SAMPLE_RESULT)
@@ -267,6 +324,7 @@ describe("semantic manager socket reuse", () => {
         yield* Effect.gen(function* () {
           const semantic = yield* Semantic.Service
           yield* semantic.init()
+          yield* triggerSpawn(semantic)
           yield* pollReady(semantic)
           expect(yield* semantic.readView({ file: "engine.ts", view: "entry" })).toEqual(SAMPLE_RESULT)
         }).pipe(provideInstance(dir))
@@ -300,6 +358,7 @@ describe("semantic manager socket reuse", () => {
         yield* Effect.gen(function* () {
           const semantic = yield* Semantic.Service
           yield* semantic.init()
+          yield* triggerSpawn(semantic)
           yield* pollReady(semantic)
           yield* disposeAllInstancesEffect
         }).pipe(provideInstance(dir))
@@ -330,6 +389,7 @@ describe("semantic manager socket reuse", () => {
         yield* Effect.gen(function* () {
           const semantic = yield* Semantic.Service
           yield* semantic.init()
+          yield* triggerSpawn(semantic)
           yield* pollReady(semantic)
           yield* disposeAllInstancesEffect
         }).pipe(provideInstance(dir))
@@ -342,5 +402,125 @@ describe("semantic manager socket reuse", () => {
         expect(yield* Effect.promise(() => exists(socket.path))).toBe(false)
       }).pipe(withInstanceStores),
     20_000,
+  )
+})
+
+describe("semantic manager spawn serialization", () => {
+  it.live(
+    "serializes daemon cold starts across directories through the global gate",
+    () =>
+      Effect.gen(function* () {
+        const socketDir = yield* tmpdirScoped()
+        const markerA = path.join(socketDir, "a.marker")
+        const markerB = path.join(socketDir, "b.marker")
+        const dirA = yield* tmpdirScoped({
+          config: {
+            semantic: { enabled: true, socket_dir: socketDir, command: [process.execPath, slowDaemon, markerA] },
+          },
+        })
+        const dirB = yield* tmpdirScoped({
+          config: {
+            semantic: { enabled: true, socket_dir: socketDir, command: [process.execPath, slowDaemon, markerB] },
+          },
+        })
+
+        const start = (dir: string) =>
+          Effect.gen(function* () {
+            const semantic = yield* Semantic.Service
+            yield* semantic.init()
+            yield* triggerSpawn(semantic)
+            yield* pollReady(semantic)
+          }).pipe(provideInstance(dir))
+
+        // 两个目录同时请求（各自的首次 readView），但冷启动必须全局串行。
+        yield* Effect.all([start(dirA), start(dirB)], { concurrency: "unbounded" })
+
+        const readMarker = (file: string) =>
+          Effect.promise(async () => {
+            const text = await fs.readFile(file, "utf8")
+            return text
+              .trim()
+              .split("\n")
+              .map((line) => {
+                const [kind, ts] = line.split(" ")
+                return { kind, ts: Number(ts) }
+              })
+          })
+        const a = yield* readMarker(markerA)
+        const b = yield* readMarker(markerB)
+        expect(a.map((entry) => entry.kind)).toEqual(["start", "end"])
+        expect(b.map((entry) => entry.kind)).toEqual(["start", "end"])
+        // 单目录区间合法，且两个 [start, end] 区间不允许重叠。
+        expect(a[0].ts).toBeLessThan(a[1].ts)
+        expect(b[0].ts).toBeLessThan(b[1].ts)
+        expect(a[1].ts < b[0].ts || b[1].ts < a[0].ts).toBe(true)
+      }).pipe(withInstanceStores),
+    30_000,
+  )
+})
+
+describe("semantic manager failure retry", () => {
+  it.live(
+    "does not spawn again before the cooldown and retries after it",
+    () =>
+      Effect.gen(function* () {
+        const socketDir = yield* tmpdirScoped()
+        const marker = path.join(socketDir, "attempts.log")
+        const dir = yield* tmpdirScoped({
+          config: {
+            semantic: {
+              enabled: true,
+              socket_dir: socketDir,
+              command: [
+                process.execPath,
+                "-e",
+                `require("fs").appendFileSync(${JSON.stringify(marker)}, Date.now() + "\\n"); process.exit(3)`,
+              ],
+            },
+          },
+        })
+
+        const previous = RetryPolicy.failedCooldownMs
+        RetryPolicy.failedCooldownMs = 1_000
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            RetryPolicy.failedCooldownMs = previous
+          }),
+        )
+
+        yield* Effect.gen(function* () {
+          const semantic = yield* Semantic.Service
+          yield* semantic.init()
+          yield* triggerSpawn(semantic)
+          const failed = yield* pollWithTimeout(
+            Effect.gen(function* () {
+              const current = yield* semantic.status()
+              return current.status === "failed" ? current : undefined
+            }),
+            "semantic engine never reported failure",
+            "15 seconds",
+          )
+          expect(failed.error).toContain("exited with code 3")
+          expect(yield* countLines(marker)).toBe(1)
+
+          // 冷却期内：请求只报告 failed，不重新 spawn。
+          const error = yield* semantic.readView({ file: "engine.ts", view: "entry" }).pipe(Effect.flip)
+          expect(error).toBeInstanceOf(Protocol.UnavailableError)
+          expect(error.message).toContain("semantic engine failed")
+          expect(yield* countLines(marker)).toBe(1)
+
+          // 冷却结束后：下一次请求重置为 idle 并重新拉起（再次失败，attempts 增长）。
+          yield* Effect.sleep("1200 millis")
+          yield* triggerSpawn(semantic)
+          yield* pollWithTimeout(
+            Effect.gen(function* () {
+              return (yield* countLines(marker)) >= 2 ? true : undefined
+            }),
+            "semantic engine never retried the spawn after the cooldown",
+            "15 seconds",
+          )
+        }).pipe(provideInstance(dir))
+      }).pipe(withInstanceStores),
+    30_000,
   )
 })
