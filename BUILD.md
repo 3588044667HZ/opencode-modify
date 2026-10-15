@@ -18,3 +18,5 @@
 | 2026-10-14 22:54 | 261014-2254-bb17f78 | bb17f78 | chore(build): record edit transaction build markers | 261014-2254-bb17f78 | 261014-2254-bb17f78 |
 | 2026-10-14 23:19 | 261014-2319-bb17f78-dirty | bb17f78 | 未提交改动 | 261014-2319-bb17f78-dirty | 261014-2319-bb17f78-dirty |
 | 2026-10-15 08:05 | 261015-0805-01f0276-dirty | 01f0276 | fix(semantic): reuse stable per-directory daemon sockets; fix(semantic): isolate daemon sandbox per project | 261015-0805-01f0276-dirty | 261015-0805-01f0276-dirty |
+| 2026-10-15 08:28 | 261015-0828-e3536fc | e3536fc | chore(build): record daemon isolation build markers | 261015-0828-e3536fc | 261015-0828-e3536fc |
+| 2026-10-15 08:59 | 261015-0859-4ebbb7e-dirty | 4ebbb7e | feat(semantic): protect project model files and invalidate the map on model changes; fix(semantic): start the daemon lazily with serialized spawns; feat(app): load project sessions lazily on demand | 261015-0859-4ebbb7e-dirty | 261015-0859-4ebbb7e-dirty |
