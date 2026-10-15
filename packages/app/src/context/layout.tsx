@@ -18,6 +18,7 @@ import { createPathHelpers } from "./file/path"
 import type { ProjectAvatarVariant } from "@opencode-ai/ui/v2/project-avatar-v2"
 import { migrateLegacySessionStateKeys, ServerScope, SessionStateKey } from "@/utils/server-scope"
 import { createSessionKeyReader, ensureSessionKey, pruneSessionKeys } from "./layout-helpers"
+import { createProjectSessionWarmup } from "./project-session-warmup"
 import { requireServerKey } from "@/utils/session-route"
 import { type DraftTab, useTabs } from "./tabs"
 import { closeSessionTab, openSessionTab, previewSessionTab, type SessionTabs } from "./layout-tabs"
@@ -589,26 +590,12 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
       }
     })
 
-    let sessionFrame: number | undefined
-    let sessionTimer: number | undefined
-
-    onMount(() => {
-      sessionFrame = requestAnimationFrame(() => {
-        sessionFrame = undefined
-        sessionTimer = window.setTimeout(() => {
-          sessionTimer = undefined
-          void Promise.all(
-            server.projects.list().map((project) => {
-              return serverSync().project.loadSessions(project.worktree)
-            }),
-          )
-        }, 0)
-      })
-    })
-
-    onCleanup(() => {
-      if (sessionFrame !== undefined) cancelAnimationFrame(sessionFrame)
-      if (sessionTimer !== undefined) window.clearTimeout(sessionTimer)
+    const projectSessions = createProjectSessionWarmup({
+      list: () => server.projects.list(),
+      rootFor,
+      loadSessions: (directory) => serverSync().project.loadSessions(directory),
+      openProject: (root) => server.projects.open(root),
+      expandProject: (root) => server.projects.expand(root),
     })
 
     return {
@@ -640,18 +627,11 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
             .slice(0, RECENTLY_CLOSED_DISPLAY_LIMIT)
             .map((worktree) => enrich({ worktree, expanded: false }))
         }),
-        open(directory: string) {
-          const root = rootFor(directory)
-          if (server.projects.list().find((x) => x.worktree === root)) return
-          void serverSync().project.loadSessions(root)
-          server.projects.open(root)
-        },
+        open: projectSessions.open,
         close(directory: string) {
           server.projects.close(directory)
         },
-        expand(directory: string) {
-          server.projects.expand(directory)
-        },
+        expand: projectSessions.expand,
         collapse(directory: string) {
           server.projects.collapse(directory)
         },
