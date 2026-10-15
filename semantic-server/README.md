@@ -271,8 +271,8 @@ scope 非字符串 → `-32603`）。
 处理顺序（冻结）：
 
 ① 参数校验（-32603，含 `options.lock_timeout_ms` ≥ 1 校验）→ ② 路径保护（保护段 `.venv/ venv/
-env/ node_modules/ .git/ dist/ build/ target/ out/ __pycache__/ .pytest_cache/ .mypy_cache/`，
-后缀 `*.lock *.min.js *.min.css`；命中即 -32013，**先于存在性检查**）→ ③ 文件不存在 → RPC
+env/ node_modules/ .git/ .idea/ dist/ build/ target/ out/ __pycache__/ .pytest_cache/ .mypy_cache/`，
+后缀 `*.lock *.min.js *.min.css *.iml`；命中即 -32013，**先于存在性检查**）→ ③ 文件不存在 → RPC
 -32001 → ④ **规范化绝对路径后获取文件互斥锁**（公平队列，超时 `lock_timeout_ms`；超时 → -32017）
 → 锁内：读内容 + 当前版本（先按 mtime 差异 refresh VFS）→ ⑤ `baseVersion` 不匹配 → -32012
 （返回 current_version + content）→ ⑥ 纯度（`[err:`、`→ def@`、`L\d+ \[`、`pos: L\d+`）→ ⑦ 锚点
@@ -646,7 +646,10 @@ import 不计（无来源模块）。
 （日志 `Native file watcher is disabled`），因此每个 ready 查询用磁盘指纹做被动检测——已扫描
 目录的“相关目录项集合”变化（新增/删除/移动/重命名）→ 全量失效；已记录文件 mtime 变化 → 仅
 dependencies 失效（structure/hot 保留缓存并立即命中；重建依赖前按需 refresh VFS 让 PSI 看到
-新内容）。规格“文件内容修改不失效”对 structure 生效；无法廉价区分 import 变化，内容修改一律
+新内容）。**例外（模型文件）**：`*.iml`（项目根与目录内均记录 mtime）或 `.idea/` 下 `*.xml`
+（追加进指纹）内容变化 → 视同结构变化，`invalidated (model changed: …)` 全量失效（structure
+与 dependencies 都重建）——引擎依赖 `.idea`/`*.iml` 项目模型，模型变化不能只重建 dependencies。
+规格“文件内容修改不失效”对 structure 生效；无法廉价区分 import 变化，模型文件外的内容修改一律
 重建 dependencies（偏差）。scope（`module:<name或path>`）只过滤展示、不缓存；无前缀/未知前缀
 忽略；未匹配到模块时返回空列表（不报错）。scope 下 structure 只列出该模块（含其入口点，
 root_files 空），project 计数仍为全量；dependencies 只返回涉及该模块的边（cycles 保留全量）；
@@ -700,6 +703,7 @@ bun script/map-probe.ts .tmp/map.sock --normalize-root --wait-ready --out fixtur
 - `dependencies.from/to` 与 `cycles` 使用模块 `path`（spec 样例口径），而非 name；
 - scope 过滤按上文的展示口径（spec 只写了 `module:core`）；未匹配模块返回空而非错误；
 - 内容修改仅失效 dependencies（无法廉价区分 import 变化；spec 的“符号增删失效 structure”未单独实现）；
+  模型文件（`*.iml` / `.idea` 下 `*.xml`）例外，按上方缓存与失效说明全量失效；
 - 无原生监听，被动失效检测成本 O(已扫描目录数 + 文件数) 次磁盘元数据读取（目录项 + stat），
   大项目每次 ready 查询有固定开销；
 - `files` 上限 200 仅影响展示，`total_files` 为全量；`hot` 恒空（作者选择 A）。

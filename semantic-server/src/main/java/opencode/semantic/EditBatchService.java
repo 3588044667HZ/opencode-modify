@@ -90,10 +90,11 @@ final class EditBatchService {
   /** 保护段：任一路径段命中即拒绝（相对项目根计算，项目名本身不参与）。 */
   private static final Set<String> PROTECTED_SEGMENTS =
       Set.of(
-          ".venv", "venv", "env", "node_modules", ".git",
+          ".venv", "venv", "env", "node_modules", ".git", ".idea",
           "dist", "build", "target", "out",
           "__pycache__", ".pytest_cache", ".mypy_cache");
-  private static final List<String> PROTECTED_SUFFIXES = List.of(".lock", ".min.js", ".min.css");
+  private static final List<String> PROTECTED_SUFFIXES =
+      List.of(".lock", ".min.js", ".min.css", ".iml");
 
   /** 源文件纯度：渲染层元语（[err: ...] / → def@... / L42 [...] / pos: L42）。 */
   private static final Pattern IMPURE_PATTERN = Pattern.compile("\\[err:|→ def@|L\\d+ \\[|pos: L\\d+");

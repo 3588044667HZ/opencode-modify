@@ -55,7 +55,8 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  * {building:true, progress:0}（数组为空、project 计数为 0），构建中后续查询返回进度，
  * 完成后返回不带 building 的缓存结果。失效规则：
  * - VFS 文件新增/删除/移动（等价于任一已扫描目录的目录项集合变化）→ 全量失效；
- * - 文件内容修改 → 仅 dependencies 失效（structure/hot 保留缓存）。
+ * - 文件内容修改 → 仅 dependencies 失效（structure/hot 保留缓存）；
+ * - 模型文件（*.iml 或 .idea/ 下 *.xml）内容修改 → 视同结构变化，全量失效（引擎依赖项目模型）。
  * 无头沙箱禁用了原生文件监听（Native file watcher is disabled），因此每次 ready 查询用
  * 磁盘指纹（目录项集合 + 文件 mtime）做被动失效检测，命中时同步刷新变更文件再重建依赖。
  * scope（module:<name或path>）不缓存；无前缀/未知前缀忽略。
@@ -306,9 +307,24 @@ final class ProjectMapService {
       }
     }
     if (changed.isEmpty()) return;
+    List<String> models = changed.stream().filter(ProjectMapService::isModelFile).toList();
+    if (!models.isEmpty()) {
+      // 引擎依赖 .idea/*.iml 项目模型：模型内容变化视同结构变化
+      Log.info("project_map invalidated (model changed: " + String.join(", ", models) + ")");
+      invalidateAll();
+      return;
+    }
     depsDirty = true;
     pendingContentFiles.addAll(changed);
     Log.info("project_map dependencies dirty (content changed: " + changed.size() + " files)");
+  }
+
+  /** 项目模型文件：任意 *.iml，或 .idea/ 目录下的 *.xml（内容变化视同结构变化）。 */
+  private static boolean isModelFile(String relativePath) {
+    String name = lastSegment(relativePath);
+    if (name.endsWith(".iml")) return true;
+    return name.endsWith(".xml")
+        && (relativePath.startsWith(".idea/") || relativePath.contains("/.idea/"));
   }
 
   /** 目录的“相关目录项”集合：非隐藏、非排除目录的项（与扫描时的记录口径一致）。 */
@@ -403,7 +419,17 @@ final class ProjectMapService {
     List<VirtualFile> subdirs = new ArrayList<>();
     for (VirtualFile child : dir.getChildren()) {
       String name = child.getName();
-      if (name.startsWith(".")) continue;
+      if (name.startsWith(".")) {
+        // 隐藏目录不参与模块划分，但 .idea 下的 *.xml 是项目模型：只记录 mtime 供失效检测
+        if (isRoot && ".idea".equals(name) && child.isDirectory()) {
+          for (VirtualFile modelFile : child.getChildren()) {
+            if (modelFile.isDirectory() || !modelFile.getName().endsWith(".xml")) continue;
+            String modelPath = ".idea/" + modelFile.getName();
+            state.fingerprint.fileMtimes.put(modelPath, mtime(rootPath.resolve(modelPath)));
+          }
+        }
+        continue;
+      }
       if (child.isDirectory()) {
         if (child.is(VFileProperty.SYMLINK) || EXCLUDED_DIRS.contains(name)) continue;
         entries.add(name);
