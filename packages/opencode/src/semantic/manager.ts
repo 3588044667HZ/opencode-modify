@@ -78,16 +78,32 @@ const layer = Layer.effect(
         const s: State = { status: "starting", progress: 0 }
         const socket = socketPathFor(ctx.directory, semantic.socket_dir)
         if (socket.dir) yield* fsutil.ensureDir(socket.dir).pipe(Effect.orDie)
-        const child = Process.spawn([...semantic.command, ctx.directory, socket.path], {
-          cwd: ctx.directory,
-          stdin: "ignore",
-          stdout: "ignore",
-          stderr: "ignore",
-          env:
-            semantic.idle_timeout_ms === undefined
-              ? undefined
-              : { OPENCODE_SEMANTIC_IDLE_TIMEOUT_MS: String(semantic.idle_timeout_ms) },
-        })
+
+        // socket 名按目录稳定：同项目已运行的守护（例如另一个 opencode server 进程先前
+        // spawn 的实例）直接复用，不再 spawn。跨进程复用同一守护是可接受行为。
+        const existing = yield* Effect.tryPromise({
+          try: () => Client.connect(socket.path, { connect_timeout_ms: 500 }),
+          catch: Protocol.toSemanticError,
+        }).pipe(Effect.catch(() => Effect.succeed(undefined)))
+        const spawned = existing === undefined
+        if (existing) {
+          yield* Effect.logInfo("reusing existing daemon", { socket: socket.path })
+        } else {
+          // 连接失败但文件仍在：崩溃/退出残留的陈旧 socket，删除后再 spawn。
+          yield* Effect.promise(() => fs.unlink(socket.path).catch(() => {}))
+        }
+        const child = spawned
+          ? Process.spawn([...semantic.command, ctx.directory, socket.path], {
+              cwd: ctx.directory,
+              stdin: "ignore",
+              stdout: "ignore",
+              stderr: "ignore",
+              env:
+                semantic.idle_timeout_ms === undefined
+                  ? undefined
+                  : { OPENCODE_SEMANTIC_IDLE_TIMEOUT_MS: String(semantic.idle_timeout_ms) },
+            })
+          : undefined
 
         yield* publish(s)
 
@@ -95,25 +111,28 @@ const layer = Layer.effect(
           Effect.promise(async () => {
             const client = s.client
             s.client = undefined
-            if (client) {
+            // 复用的守护归最先启动它的实例所有：dispose 只断开连接，不发 shutdown、不删 socket，
+            // 留给它的主父进程或守护自身的空闲超时回收。
+            if (client && spawned) {
               // Never let a hung daemon stall instance disposal; kill it via
               // Process.stop below when shutdown does not answer quickly.
               await Promise.race([client.shutdown().catch(() => {}), new Promise((done) => setTimeout(done, 2_000))])
-              client.close()
             }
-            await Process.stop(child)
+            client?.close()
+            if (!spawned) return
+            if (child) await Process.stop(child)
             if (socket.dir) await fs.unlink(socket.path).catch(() => {})
           }),
         )
 
-        yield* Effect.forkScoped(supervise(s, child, socket.path))
+        yield* Effect.forkScoped(supervise(s, child, socket.path, existing))
         return s
       }),
     )
 
-    const supervise = (s: State, child: Process.Child, socketPath: string) =>
+    const supervise = (s: State, child: Process.Child | undefined, socketPath: string, existing?: Client.Client) =>
       Effect.gen(function* () {
-        const client = yield* waitForClient(child, socketPath)
+        const client = existing ?? (yield* waitForClient(child, socketPath))
         s.client = client
         yield* Effect.tryPromise({ try: () => client.subscribe(), catch: Protocol.toSemanticError })
 
@@ -143,7 +162,11 @@ const layer = Layer.effect(
         }
 
         if (s.status !== "ready") return
-        yield* Effect.raceFirst(Effect.promise(() => child.exited), Queue.take(stopped))
+        // 复用的守护没有子进程句柄：进程消失只能通过连接关闭（stopped）观测。
+        const gone = child
+          ? Effect.raceFirst(Effect.promise(() => child.exited), Queue.take(stopped))
+          : Queue.take(stopped)
+        yield* gone
         if (s.status !== "ready") return
         s.status = "failed"
         s.error = "semantic daemon stopped"
@@ -317,18 +340,20 @@ const layer = Layer.effect(
   }),
 )
 
-const waitForClient = (child: Process.Child, socketPath: string) =>
+const waitForClient = (child: Process.Child | undefined, socketPath: string) =>
   Effect.gen(function* () {
     let exitCode: number | undefined
     let spawnError: Error | undefined
-    void child.exited.then(
-      (code) => {
-        exitCode = code
-      },
-      (error: unknown) => {
-        spawnError = error instanceof Error ? error : new Error(String(error))
-      },
-    )
+    if (child) {
+      void child.exited.then(
+        (code) => {
+          exitCode = code
+        },
+        (error: unknown) => {
+          spawnError = error instanceof Error ? error : new Error(String(error))
+        },
+      )
+    }
     const deadline = Date.now() + Protocol.Defaults.socketReadyTimeoutMs
     while (true) {
       if (spawnError) {
@@ -380,15 +405,16 @@ function causeMessage(cause: Cause.Cause<Protocol.SemanticError>) {
   return error instanceof Error ? error.message : String(error)
 }
 
-let socketCounter = 0
-
-function socketPathFor(directory: string, socketDir?: string): { path: string; dir?: string } {
-  const hash = createHash("sha1").update(directory).digest("hex").slice(0, 10)
-  const suffix = `${hash}-${process.pid}-${socketCounter++}`
+export function socketPathFor(directory: string, socketDir?: string): { path: string; dir?: string } {
+  // 稳定 per-directory socket 名（无 pid/counter）：同项目不同 opencode 进程可复用同一守护。
+  // 目录先 resolve/normalize，Windows 下统一小写，保证盘符/大小写/分隔符写法不同仍命中同一 socket。
+  const resolved = path.normalize(path.resolve(directory))
+  const normalized = process.platform === "win32" ? resolved.toLowerCase() : resolved
+  const hash = createHash("sha1").update(normalized).digest("hex").slice(0, 10)
   // Windows 下守护进程（Java AF_UNIX）不能绑定命名管道路径，只能绑文件路径；
   // Bun 两端都支持文件路径，因此所有平台统一用 socket 文件。
   const dir = socketDir ?? os.tmpdir()
-  return { path: path.join(dir, `opencode-semantic-${suffix}.sock`), dir }
+  return { path: path.join(dir, `opencode-semantic-${hash}.sock`), dir }
 }
 
 export const node = LayerNode.make({
