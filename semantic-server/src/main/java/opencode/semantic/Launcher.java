@@ -2,11 +2,15 @@ package opencode.semantic;
 
 import java.io.IOException;
 import java.net.URISyntaxException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * 可执行入口，支持冻结接口的 CLI 形式：
@@ -14,7 +18,9 @@ import java.util.List;
  *
  * 平台无法从单个插件 jar 内部引导，因此 Launcher 负责：
  *   1. 定位本地 IDEA（环境变量 IDEA_HOME / IDEA_DIR，默认 D:/IntelliJ IDEA 2026.2.0.1）
- *   2. 把自身作为插件安装到 sandbox（默认 ~/.opencode-semantic/sandbox，可用 SEMANTIC_SANDBOX 覆盖）
+ *   2. 把自身作为插件安装到按项目隔离的 sandbox（默认
+ *      ~/.opencode-semantic/sandbox-<sha1-10(canonical project)>，可用 SEMANTIC_SANDBOX 覆盖）：
+ *      多个项目并发启动时各自持有独立 sandbox，避开平台单实例锁互踢。
  *   3. 用 IDEA 自带 JBR 以 run-local.sh 相同的 VM 参数拉起 com.intellij.idea.Main semantic-server ...
  */
 public final class Launcher {
@@ -39,7 +45,7 @@ public final class Launcher {
       System.exit(2);
     }
 
-    Path sandbox = resolveSandbox();
+    Path sandbox = resolveSandbox(argv.get(0));
     Path pluginLib = sandbox.resolve("plugins/semantic-server/lib");
     Files.createDirectories(pluginLib);
     Path self = Path.of(Launcher.class.getProtectionDomain().getCodeSource().getLocation().toURI());
@@ -94,7 +100,7 @@ public final class Launcher {
     command.add("semantic-server");
     command.addAll(argv);
 
-    System.err.println("[semantic-launcher] " + ideaDir.resolve("jbr") + " -> semantic-server " + argv);
+    System.err.println("[semantic-launcher] sandbox=" + sandbox + " " + ideaDir.resolve("jbr") + " -> semantic-server " + argv);
     ProcessBuilder builder = new ProcessBuilder(command);
     builder.inheritIO();
     Process process = builder.start();
@@ -113,10 +119,27 @@ public final class Launcher {
     return null;
   }
 
-  private static Path resolveSandbox() {
+  private static Path resolveSandbox(String project) {
     String override = System.getenv("SEMANTIC_SANDBOX");
     if (override != null && !override.isBlank()) return Path.of(override).toAbsolutePath().normalize();
-    return Path.of(System.getProperty("user.home"), ".opencode-semantic", "sandbox");
+    return Path.of(System.getProperty("user.home"), ".opencode-semantic", "sandbox-" + projectHash(project));
+  }
+
+  /** 每个项目一个沙箱目录：SHA-1(canonical project path) 的前 10 个十六进制字符。
+   *  canonical = toAbsolutePath().normalize()；Windows 下统一小写，保证盘符/大小写写法不同仍命中同一沙箱。 */
+  private static String projectHash(String project) {
+    String canonical = Path.of(project).toAbsolutePath().normalize().toString();
+    if (System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win")) {
+      canonical = canonical.toLowerCase(Locale.ROOT);
+    }
+    try {
+      byte[] digest = MessageDigest.getInstance("SHA-1").digest(canonical.getBytes(StandardCharsets.UTF_8));
+      StringBuilder hex = new StringBuilder(10);
+      for (int i = 0; i < 5; i++) hex.append(String.format("%02x", digest[i] & 0xff));
+      return hex.toString();
+    } catch (NoSuchAlgorithmException e) {
+      throw new IllegalStateException("SHA-1 is unavailable", e);
+    }
   }
 
   /** sample-project 的 .idea/misc.xml 引用 semantic-jdk，首次运行生成 jdk.table.xml。

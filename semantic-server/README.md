@@ -79,12 +79,21 @@ bash script/run-local.sh [project_path] [socket_path] [--idle-seconds N]
 # 默认: sample-project  .tmp/semantic.sock  1800s
 ```
 
-### 方式 B：冻结接口 CLI 形式（插件自装到用户目录 sandbox）
+### 方式 B：冻结接口 CLI 形式（插件自装到按项目隔离的 sandbox）
 
 ```bash
 java -Djava.awt.headless=true -jar build-local/semantic-server.jar <project> <socket> [--idle-seconds N]
-# sandbox: ~/.opencode-semantic/sandbox（可用 SEMANTIC_SANDBOX 覆盖；IDEA 位置用 IDEA_HOME，默认 D:/IntelliJ IDEA 2026.2.0.1）
+# sandbox: ~/.opencode-semantic/sandbox-<hash10>（hash10 = SHA-1(canonical project path) 前 10 位十六进制；
+#          可用 SEMANTIC_SANDBOX 覆盖；IDEA 位置用 IDEA_HOME，默认 D:/IntelliJ IDEA 2026.2.0.1）
 ```
+
+**每项目一个沙箱**：sandbox 目录按项目路径哈希隔离（四个路径 config/system/plugins/log 都在该目录下，
+插件也安装到该项目自己的 sandbox）。多个项目并发拉起守护时不再共享同一个平台沙箱，避免 IDEA 平台
+单实例锁把后启动的实例当成 `External instance command received` 转发后秒退。canonical 规则：
+`Path.of(project).toAbsolutePath().normalize()`，Windows 下统一小写（盘符/大小写写法不同仍命中同一沙箱）。
+
+**迁移备注**：旧版本使用的共享 sandbox `~/.opencode-semantic/sandbox` 已不再被 CLI 形式引用，可直接删除；
+新目录首次启动会自动重建（含 jdk.table.xml 与插件安装）。
 
 两者最终都以 `com.intellij.idea.Main semantic-server <project> <socket> --idle-seconds N` 启动平台并加载本插件。
 
