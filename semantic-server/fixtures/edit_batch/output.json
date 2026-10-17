@@ -5,6 +5,25 @@
   "changes_total": 2,
   "old_version": "<version>",
   "new_version": "<version>",
+  "version": "<version>",
+  "changed": {
+    "start_line": 4,
+    "end_line": 6,
+    "text": "<changed>",
+    "truncated": false
+  },
+  "position_map": [
+    {
+      "old_start": 4,
+      "old_end": 4,
+      "delta": 0
+    },
+    {
+      "old_start": 6,
+      "old_end": 6,
+      "delta": 0
+    }
+  ],
   "diagnostics_delta": {
     "errors": -1,
     "warnings": 0

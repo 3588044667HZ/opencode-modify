@@ -29,6 +29,7 @@ import type { SQL } from "drizzle-orm"
 import { AgentMessageTable, BlackboardTable, PartTable, SessionTable } from "@opencode-ai/core/session/sql"
 import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { MessageV2 } from "./message-v2"
+import { SessionLedger } from "./ledger"
 import type { InstanceContext } from "../project/instance-context"
 import { InstanceState } from "@/effect/instance-state"
 import { Snapshot } from "@/snapshot"
@@ -486,7 +487,7 @@ export type Patch = Omit<Partial<Info>, "time" | "share" | "summary" | "revert" 
 const layer: Layer.Layer<
   Service,
   never,
-  BackgroundJob.Service | RuntimeFlags.Service | Database.Service | EventV2Bridge.Service
+  BackgroundJob.Service | RuntimeFlags.Service | Database.Service | EventV2Bridge.Service | SessionLedger.Service
 > = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -495,6 +496,7 @@ const layer: Layer.Layer<
     const background = yield* BackgroundJob.Service
     const events = yield* EventV2Bridge.Service
     const flags = yield* RuntimeFlags.Service
+    const ledger = yield* SessionLedger.Service
 
     const createNext = Effect.fn("Session.createNext")(function* (input: {
       id?: SessionID
@@ -613,7 +615,10 @@ const layer: Layer.Layer<
           Effect.catchCause(() => Effect.succeed(false)),
         )
 
-        if (hasInstance) yield* cancelBackgroundJobs(background, sessionID)
+        if (hasInstance) {
+          yield* cancelBackgroundJobs(background, sessionID)
+          yield* ledger.clear(sessionID)
+        }
         const kids = yield* children(sessionID)
         for (const child of kids) {
           yield* remove(child.id)
@@ -1015,7 +1020,7 @@ function listByProject(
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [BackgroundJob.node, RuntimeFlags.node, Database.node, EventV2Bridge.node],
+  deps: [BackgroundJob.node, RuntimeFlags.node, Database.node, EventV2Bridge.node, SessionLedger.node],
 })
 
 export * as Session from "./session"

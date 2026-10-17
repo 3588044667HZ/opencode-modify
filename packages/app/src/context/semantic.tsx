@@ -28,7 +28,8 @@ export const { use: useSemantic, provider: SemanticProvider } = createSimpleCont
     const platform = usePlatform()
     const settings = useSettings()
     const language = useLanguage()
-    const [state, setState] = createStore<Partial<SemanticIndexingState>>({ progress: 0 })
+    // 状态按目录隔离：事件与状态查询都携带工作目录，避免跨项目互相覆盖
+    const [states, setStates] = createStore<Record<string, SemanticIndexingState>>({})
 
     const reportFailure = (error?: string) => {
       const title = language.t("semantic.warmup.failed.title")
@@ -38,42 +39,40 @@ export const { use: useSemantic, provider: SemanticProvider } = createSimpleCont
       if (settings.notifications.errors()) void platform.notify(title, description)
     }
 
-    const stop = serverSDK().event.listen((event) => {
+    const apply = (directory: string, next: SemanticIndexingState) => {
+      // 每个目录只在首次进入 failed 时提示一次
+      if (next.status === "failed" && states[directory]?.status !== "failed") reportFailure(next.error)
+      setStates(directory, next)
+    }
+
+    const stop = serverSDK().event.listen((envelope) => {
+      // 事件以 { name: directory, details: payload } 信封投递；缺失目录时不猜测归属
+      if (!envelope.name) return
       // `semantic.indexing` 由 packages/schema 定义；app 固定的客户端类型包尚未包含
       // 该事件，这里按字符串消费，避免依赖类型包重新生成。
-      const payload = readIndexingPayload(event)
+      const payload = readIndexingPayload(envelope.details)
       if (!payload) return
-      const firstFailure = payload.status === "failed" && state.status !== "failed"
-      setState({
-        status: payload.status,
-        progress: payload.progress,
-        current: payload.current,
-        phase: payload.phase,
-        error: payload.error,
-      })
-      if (firstFailure) reportFailure(payload.error)
+      apply(envelope.name, payload)
     })
     onCleanup(stop)
 
     return {
-      status: () => state.status,
-      progress: () => state.progress ?? 0,
-      current: () => state.current,
-      error: () => state.error,
-      active: createMemo(() => state.status === "starting" || state.status === "indexing"),
+      state: (directory: string) => states[directory],
+      seed: (directory: string, next: SemanticIndexingState) => apply(directory, next),
+      active: createMemo(() =>
+        Object.keys(states).some((key) => {
+          const status = states[key]?.status
+          return status === "starting" || status === "indexing"
+        }),
+      ),
     }
   },
 })
 
 function readIndexingPayload(event: unknown): SemanticIndexingState | undefined {
-  const envelope = event as { details?: unknown; type?: unknown; properties?: unknown; data?: unknown } | null
-  if (!envelope) return
-  const payload = (envelope.details ?? envelope) as {
-    type?: unknown
-    properties?: unknown
-    data?: unknown
-  } | null
-  if (!payload || payload.type !== "semantic.indexing") return
+  if (!event || typeof event !== "object") return
+  const payload = event as { type?: unknown; properties?: unknown; data?: unknown }
+  if (payload.type !== "semantic.indexing") return
   const data = payload.properties ?? payload.data
   if (!data || typeof data !== "object") return
   const record = data as Record<string, unknown>

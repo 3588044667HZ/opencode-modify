@@ -6,7 +6,7 @@ import { frame, listenServer } from "./fake-server"
 describe("semantic transport", () => {
   test("reassembles split frames and splits glued frames", async () => {
     const server = await listenServer()
-    const transport = await Transport.connect(server.path, { timeout_ms: 2_000 })
+    const transport = await Transport.connect({ host: server.endpoint.host, port: server.endpoint.port }, { timeout_ms: 2_000 })
     const received: Protocol.Message[] = []
     transport.onMessage((message) => received.push(message))
 
@@ -29,7 +29,7 @@ describe("semantic transport", () => {
 
   test("ignores malformed frames and handles CRLF", async () => {
     const server = await listenServer()
-    const transport = await Transport.connect(server.path, { timeout_ms: 2_000 })
+    const transport = await Transport.connect({ host: server.endpoint.host, port: server.endpoint.port }, { timeout_ms: 2_000 })
     const received: Protocol.Message[] = []
     transport.onMessage((message) => received.push(message))
 
@@ -45,7 +45,7 @@ describe("semantic transport", () => {
 
   test("notifies onClose when the peer disconnects", async () => {
     const server = await listenServer()
-    const transport = await Transport.connect(server.path, { timeout_ms: 2_000 })
+    const transport = await Transport.connect({ host: server.endpoint.host, port: server.endpoint.port }, { timeout_ms: 2_000 })
     const closed = new Promise<void>((resolve) => transport.onClose(() => resolve()))
 
     const socket = await server.first()
@@ -58,9 +58,9 @@ describe("semantic transport", () => {
 
   test("rejects connect when nothing is listening", async () => {
     const server = await listenServer()
-    const path = server.path
+    const endpoint = { host: server.endpoint.host, port: server.endpoint.port }
     await server.close()
 
-    await expect(Transport.connect(path, { timeout_ms: 500 })).rejects.toBeInstanceOf(Protocol.ConnectionError)
+    await expect(Transport.connect(endpoint, { timeout_ms: 500 })).rejects.toBeInstanceOf(Protocol.ConnectionError)
   })
 })

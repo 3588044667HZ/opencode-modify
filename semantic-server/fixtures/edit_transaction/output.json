@@ -8,6 +8,25 @@
       "file": "src/main/java/demo/txn/Alpha.java",
       "old_version": "<version>",
       "new_version": "<version>",
+      "version": "<version>",
+      "changed": {
+        "start_line": 5,
+        "end_line": 9,
+        "text": "<changed>",
+        "truncated": false
+      },
+      "position_map": [
+        {
+          "old_start": 5,
+          "old_end": 5,
+          "delta": 0
+        },
+        {
+          "old_start": 9,
+          "old_end": 9,
+          "delta": 0
+        }
+      ],
       "changes_applied": 2,
       "line_changes": [
         {
@@ -24,6 +43,25 @@
       "file": "src/main/java/demo/txn/Beta.java",
       "old_version": "<version>",
       "new_version": "<version>",
+      "version": "<version>",
+      "changed": {
+        "start_line": 5,
+        "end_line": 9,
+        "text": "<changed>",
+        "truncated": false
+      },
+      "position_map": [
+        {
+          "old_start": 5,
+          "old_end": 5,
+          "delta": 0
+        },
+        {
+          "old_start": 9,
+          "old_end": 9,
+          "delta": 0
+        }
+      ],
       "changes_applied": 2,
       "line_changes": [
         {

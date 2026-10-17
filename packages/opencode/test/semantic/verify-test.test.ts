@@ -223,7 +223,7 @@ describe("semantic verify_test client", () => {
       requests.push(message)
       socket.write(frame({ jsonrpc: "2.0", id: message.id, result: SAMPLE_VERIFY_SUCCESS }))
     })
-    const client = await Client.connect(server.path, { connect_timeout_ms: 2_000 })
+    const client = await Client.connect(server.endpoint, { connect_timeout_ms: 2_000 })
     const input: Protocol.VerifyTestRequest = {
       command: "pytest",
       options: { cwd: "src", timeout_ms: 1_000, env: { CI: "1" } },
@@ -242,7 +242,7 @@ describe("semantic verify_test client", () => {
       if (message.method !== "verify_test") return
       socket.write(frame({ jsonrpc: "2.0", id: message.id, result: { ...SAMPLE_VERIFY_SUCCESS, extra: true } }))
     })
-    const client = await Client.connect(server.path, { connect_timeout_ms: 2_000 })
+    const client = await Client.connect(server.endpoint, { connect_timeout_ms: 2_000 })
 
     const error = await client.verifyTest({ command: "pytest" }).catch((cause) => cause)
     expect(error).toBeInstanceOf(Protocol.RpcError)
@@ -261,7 +261,7 @@ describe("semantic verify_test client", () => {
       const code = codes[index++] ?? Protocol.ErrorCode.internalError
       socket.write(frame({ jsonrpc: "2.0", id: message.id, error: { code, message: `rpc ${code}` } }))
     })
-    const client = await Client.connect(server.path, { connect_timeout_ms: 2_000 })
+    const client = await Client.connect(server.endpoint, { connect_timeout_ms: 2_000 })
 
     for (const code of codes) {
       const error = await client.verifyTest({ command: "pytest" }).catch((cause) => cause)

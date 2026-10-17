@@ -28,6 +28,7 @@ import { Vcs } from "@/project/vcs"
 import { ProviderAuth } from "@/provider/auth"
 import { Provider } from "@/provider/provider"
 import { Question } from "@/question"
+import { Semantic } from "@/semantic/manager"
 import { SessionCompaction } from "@/session/compaction"
 import { Instruction } from "@/session/instruction"
 import { LLM } from "@/session/llm"
@@ -98,6 +99,7 @@ import { projectCopyHandlers } from "./handlers/project-copy"
 import { providerHandlers } from "./handlers/provider"
 import { ptyConnectHandlers, ptyHandlers } from "./handlers/pty"
 import { questionHandlers } from "./handlers/question"
+import { semanticHandlers } from "./handlers/semantic"
 import { sessionHandlers } from "./handlers/session"
 import { syncHandlers } from "./handlers/sync"
 import { tuiHandlers } from "./handlers/tui"
@@ -166,6 +168,7 @@ const instanceApiRoutes = HttpApiBuilder.layer(InstanceHttpApi).pipe(
     questionHandlers,
     permissionHandlers,
     providerHandlers,
+    semanticHandlers,
     sessionHandlers,
     syncHandlers,
     tuiHandlers,
@@ -256,6 +259,7 @@ const app = LayerNode.group([
   Command.node,
   Truncate.node,
   ToolRegistry.node,
+  Semantic.node,
   Format.node,
   Project.node,
   Vcs.node,

@@ -6,6 +6,8 @@ import { frame, listenServer } from "./fake-server"
 import {
   SAMPLE_EDIT_TRANSACTION_FAILURE,
   SAMPLE_EDIT_TRANSACTION_FAILURE_RENDER,
+  SAMPLE_EDIT_TRANSACTION_MISMATCH,
+  SAMPLE_EDIT_TRANSACTION_MISMATCH_RENDER,
   SAMPLE_EDIT_TRANSACTION_SUCCESS,
   SAMPLE_EDIT_TRANSACTION_SUCCESS_RENDER,
 } from "./fixture"
@@ -33,6 +35,31 @@ describe("semantic edit_transaction render", () => {
 
   test("renders the spec failure sample byte for byte", () => {
     expect(renderEditTransaction(SAMPLE_EDIT_TRANSACTION_FAILURE)).toBe(SAMPLE_EDIT_TRANSACTION_FAILURE_RENDER)
+  })
+
+  test("renders a VERSION_MISMATCH delta reconciliation byte for byte", () => {
+    expect(renderEditTransaction(SAMPLE_EDIT_TRANSACTION_MISMATCH)).toBe(SAMPLE_EDIT_TRANSACTION_MISMATCH_RENDER)
+  })
+
+  test("renders a full re-read hint with the rollback notice last", () => {
+    const result: Protocol.EditTransactionFailure = {
+      applied: false,
+      error: {
+        code: Protocol.EditTransactionErrorCode.versionMismatch,
+        message: "VERSION_MISMATCH",
+        detail: { file: "engine.ts", current_version: "b7e1d4" },
+        reconciliation: { mode: "full", current_version: "b7e1d4" },
+      },
+    }
+
+    expect(renderEditTransaction(result)).toBe(
+      [
+        "edit_transaction FAILED: version mismatch in engine.ts",
+        "  version mismatch (current b7e1d4)",
+        "  reconciliation: full re-read required (current v:b7e1d4)",
+        "  所有文件均未修改",
+      ].join("\n"),
+    )
   })
 
   test("merges consecutive lines ignoring action and keeps other runs split", () => {
@@ -255,6 +282,32 @@ describe("semantic edit_transaction decoding", () => {
     expect(decode(SAMPLE_EDIT_TRANSACTION_FAILURE)).toEqual(SAMPLE_EDIT_TRANSACTION_FAILURE)
   })
 
+  test("accepts per-file additions and an error reconciliation payload", () => {
+    expect(decode(SAMPLE_EDIT_TRANSACTION_MISMATCH)).toEqual(SAMPLE_EDIT_TRANSACTION_MISMATCH)
+    expect(decode(SAMPLE_EDIT_TRANSACTION_SUCCESS)).toEqual(SAMPLE_EDIT_TRANSACTION_SUCCESS)
+    const files = SAMPLE_EDIT_TRANSACTION_SUCCESS.files
+    expect(files[0]?.version).toBe("b7e1d4")
+    expect(files[0]?.position_map).toHaveLength(2)
+  })
+
+  test("rejects unknown reconciliation shapes on transaction errors", () => {
+    expect(
+      decode({
+        ...SAMPLE_EDIT_TRANSACTION_MISMATCH,
+        error: {
+          ...SAMPLE_EDIT_TRANSACTION_MISMATCH.error,
+          reconciliation: { mode: "delta" },
+        },
+      }),
+    ).toBeUndefined()
+    expect(
+      decode({
+        ...SAMPLE_EDIT_TRANSACTION_SUCCESS,
+        files: [{ ...SAMPLE_EDIT_TRANSACTION_SUCCESS.files[0], position_map: [{ old_start: 1, old_end: 1 }] }],
+      }),
+    ).toBeUndefined()
+  })
+
   test("accepts a failure result without a hint or detail", () => {
     const result: Protocol.EditTransactionFailure = {
       applied: false,
@@ -345,12 +398,25 @@ describe("semantic edit_transaction client", () => {
       requests.push(message)
       socket.write(frame({ jsonrpc: "2.0", id: message.id, result }))
     })
-    const client = await Client.connect(server.path, { connect_timeout_ms: 2_000 })
+    const client = await Client.connect(server.endpoint, { connect_timeout_ms: 2_000 })
 
     expect(await client.editTransaction(input)).toEqual(SAMPLE_EDIT_TRANSACTION_SUCCESS)
     expect(await client.editTransaction(input)).toEqual(SAMPLE_EDIT_TRANSACTION_FAILURE)
     expect(requests[0]?.method).toBe("edit_transaction")
     expect(requests[0]?.params).toEqual(input)
+
+    client.close()
+    await server.close()
+  })
+
+  test("decodes VERSION_MISMATCH responses with a reconciliation payload", async () => {
+    const server = await listenServer((message, socket) => {
+      if (message.method !== "edit_transaction") return
+      socket.write(frame({ jsonrpc: "2.0", id: message.id, result: SAMPLE_EDIT_TRANSACTION_MISMATCH }))
+    })
+    const client = await Client.connect(server.endpoint, { connect_timeout_ms: 2_000 })
+
+    expect(await client.editTransaction(input)).toEqual(SAMPLE_EDIT_TRANSACTION_MISMATCH)
 
     client.close()
     await server.close()
@@ -363,7 +429,7 @@ describe("semantic edit_transaction client", () => {
         frame({ jsonrpc: "2.0", id: message.id, result: { ...SAMPLE_EDIT_TRANSACTION_SUCCESS, extra: true } }),
       )
     })
-    const client = await Client.connect(server.path, { connect_timeout_ms: 2_000 })
+    const client = await Client.connect(server.endpoint, { connect_timeout_ms: 2_000 })
 
     const error = await client.editTransaction(input).catch((cause) => cause)
     expect(error).toBeInstanceOf(Protocol.RpcError)
@@ -379,7 +445,7 @@ describe("semantic edit_transaction client", () => {
       if (message.method !== "edit_transaction") return
       socket.write(frame({ jsonrpc: "2.0", id: message.id, error: { code: -32018, message: "JOURNAL_RECOVERY_FAILED" } }))
     })
-    const client = await Client.connect(server.path, { connect_timeout_ms: 2_000 })
+    const client = await Client.connect(server.endpoint, { connect_timeout_ms: 2_000 })
 
     const error = await client.editTransaction(input).catch((cause) => cause)
     expect(error).toBeInstanceOf(Protocol.RpcError)

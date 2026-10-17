@@ -66,7 +66,9 @@ export function teamDelegationGuidance(input: { agent: Agent.Info; enabled: bool
   return [
     "<team_delegation>",
     "The `dispatch` tool runs several subagents in parallel, each in its own session with only the prompt you give it.",
-    "Use it when the work splits into independent streams that benefit from running concurrently; use the task tool (or work directly) for a single subagent, serial dependencies, or small edits.",
+    "Default to delegating: before starting non-trivial work, check whether it splits into independent streams and dispatch them rather than running everything serially in this session.",
+    "Good delegation candidates: broad investigation across multiple areas, multi-file or multi-part changes, and noisy exploration that would flood your context. Keep synthesis, decisions, and verification in the main session.",
+    "Use the task tool (or work directly) for a single subagent, strictly serial dependencies, quick lookups, and small edits. When in doubt, prefer a small team over a long serial crawl.",
     "Keep teams small: the default concurrency is 4, respect any `budget_tokens`, and give every member a self-contained prompt that states exactly what to return.",
     ...(coordination.length === 0 ? [] : [`Coordination: ${coordination.join("; ")}.`]),
     "Use the `team` tool to inspect or stop dispatched members when they stall or wait on a permission.",

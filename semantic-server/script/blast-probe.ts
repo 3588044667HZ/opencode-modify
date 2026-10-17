@@ -1,15 +1,16 @@
 #!/usr/bin/env bun
-// blast_radius 探针：raw NDJSON 连接 → ping/subscribe → （可选 --early 立即发一次）→ 等 ready →
+// blast_radius 探针：读 locator → TCP 连接 → ping/subscribe → （可选 --early 立即发一次）→ 等 ready →
 // 发送 fixtures/blast_radius/input.json（可覆盖）→ 打印结果；--out 时把 result 美化落盘（fixtures 生成用）。
-// 用法: bun script/blast-probe.ts [socket_path] [--params file.json] [--params-json '{...}'] [--out file]
+// 用法: bun script/blast-probe.ts [locator_path] [--params file.json] [--params-json '{...}'] [--out file]
 //        [--repeat N] [--early] [--no-wait] [--timeout secs] [--shutdown] [--refresh project-relative-file]
 import net from "node:net"
 import path from "node:path"
 import fs from "node:fs"
+import { connectLocator } from "./connect"
 
 const argv = process.argv.slice(2)
 const options = {
-  socket: "",
+  locator: "",
   params: "",
   paramsJson: "",
   out: "",
@@ -35,7 +36,7 @@ for (let i = 0; i < argv.length; i++) {
   else positional.push(arg)
 }
 const scriptDir = import.meta.dir
-options.socket = positional[0] ?? path.resolve(scriptDir, "../.tmp/blast.sock")
+options.locator = positional[0] ?? path.resolve(scriptDir, "../.tmp/blast.port")
 const paramsPath = options.params || path.resolve(scriptDir, "../fixtures/blast_radius/input.json")
 
 const params = options.paramsJson
@@ -95,23 +96,10 @@ function sleep(ms: number) {
 }
 
 async function connectWithRetry(deadlineMs: number): Promise<void> {
-  const started = Date.now()
-  for (;;) {
-    const candidate = net.createConnection({ path: options.socket })
-    try {
-      await new Promise<void>((resolve, reject) => {
-        candidate.once("connect", resolve)
-        candidate.once("error", reject)
-      })
-      socket = candidate
-      attach(socket)
-      return
-    } catch (error) {
-      candidate.destroy()
-      if (Date.now() - started > deadlineMs) throw error
-      await sleep(500)
-    }
-  }
+  const connection = await connectLocator(options.locator, { deadlineMs })
+  socket = connection.socket
+  buffer = connection.leftover
+  attach(socket)
 }
 
 function printResult(label: string, message: any) {
@@ -119,7 +107,7 @@ function printResult(label: string, message: any) {
 }
 
 await connectWithRetry(10_000)
-console.log("[blast-probe] connected:", options.socket)
+console.log("[blast-probe] connected:", options.locator)
 
 printResult("ping", await call("ping"))
 printResult("subscribe", await call("subscribe"))

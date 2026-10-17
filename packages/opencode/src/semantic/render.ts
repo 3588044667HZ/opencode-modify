@@ -5,7 +5,12 @@ import { Protocol } from "./protocol"
 // rows line up; longer code lines fall back to a single separating space.
 const ANNOTATION_COLUMN = 36
 
+// 大变更降级：引擎返回全量视图且 delta 不可用，提示模型内容即当前版本。
+const RECONCILIATION_FULL_VIEW = "reconciliation: full view (delta too large)"
+
 export function render(result: Protocol.ReadViewResult): string {
+  if (Protocol.isReadViewUnchanged(result)) return `read_view: unchanged (v:${result.version})`
+  if (Protocol.isReadViewDelta(result)) return deltaView(result)
   const lines = [header(result)]
   const position = positionLine(result)
   if (position !== undefined) lines.push(position)
@@ -16,10 +21,46 @@ export function render(result: Protocol.ReadViewResult): string {
     lines.push("")
     lines.push(coverage)
   }
+  if (result.reconciliation?.mode === "full") lines.push(RECONCILIATION_FULL_VIEW)
+  // 降级警告作为最后一行输出：模型据此知道哪些分析节不可用。
+  for (const warning of result.warnings ?? []) lines.push(`warning: ${warning}`)
   return lines.join("\n")
 }
 
-function header(result: Protocol.ReadViewResult): string {
+// 读时对账：只展示有界 delta hunks，不重发已在上文消费过的完整内容。
+function deltaView(result: Protocol.ReadViewDeltaView): string {
+  const reconciliation = result.reconciliation
+  const lines = [
+    `${result.file} [v:${result.version}]`,
+    `delta: v:${reconciliation.from_version} → v:${reconciliation.to_version} (${reconciliation.hunks.length} hunks)`,
+  ]
+  for (const hunk of reconciliation.hunks) lines.push(...deltaHunkLines(hunk, "  "))
+  return lines.join("\n")
+}
+
+function deltaHunkLines(hunk: Protocol.DeltaHunk, indent: string): string[] {
+  const oldLines = hunk.lines.flatMap((line) => (line.old_line === undefined ? [] : [line.old_line]))
+  const newLines = hunk.lines.flatMap((line) => (line.new_line === undefined ? [] : [line.new_line]))
+  const range = [
+    ...(oldLines.length === 0 ? [] : [`old L${Math.min(...oldLines)}-${Math.max(...oldLines)}`]),
+    ...(newLines.length === 0 ? [] : [`new L${Math.min(...newLines)}-${Math.max(...newLines)}`]),
+  ].join(" → ")
+  const lines = [`${indent}@@ ${range} @@`]
+  for (const entry of hunk.lines) {
+    const marker = entry.op === "added" ? "+" : entry.op === "removed" ? "-" : " "
+    const number = entry.op === "removed" ? entry.old_line : (entry.new_line ?? entry.old_line)
+    const body =
+      number === undefined
+        ? entry.text
+        : entry.text.length === 0
+          ? `L${number}`
+          : `L${number}  ${entry.text}`
+    lines.push(`${indent}${marker} ${body}`)
+  }
+  return lines
+}
+
+function header(result: Protocol.ReadViewContent): string {
   const status = [
     ...(result.status.modified ? ["M"] : []),
     ...(result.status.errors > 0 ? [`${result.status.errors}err`] : []),
@@ -28,7 +69,7 @@ function header(result: Protocol.ReadViewResult): string {
   return `${result.file} [${status.join(", ")}] · L1-${result.size.lines} · symbols: ${result.size.symbols}`
 }
 
-function positionLine(result: Protocol.ReadViewResult): string | undefined {
+function positionLine(result: Protocol.ReadViewContent): string | undefined {
   const position = result.position
   if (!position) return undefined
   const percent = position.total > 0 ? Math.floor((position.current / position.total) * 100) : 0
@@ -53,7 +94,7 @@ function contentLine(entry: Protocol.ContentLine, diagnostics: ReadonlyArray<Pro
   return padded + annotations.join(" ")
 }
 
-function coverageLine(result: Protocol.ReadViewResult): string | undefined {
+function coverageLine(result: Protocol.ReadViewContent): string | undefined {
   const sections = [
     ...(result.coverage.read.length > 0 ? [`read: ${formatRanges(result.coverage.read)}`] : []),
     ...(result.coverage.unread.length > 0 ? [`unread: ${formatRanges(result.coverage.unread)}`] : []),
@@ -107,12 +148,32 @@ export function renderEditBatch(result: Protocol.EditBatchResult): string {
 function editBatchSuccess(result: Protocol.EditBatchSuccess): string {
   // 渲染层只展示 errors；before 由 after - delta 反推，避免额外请求一次快照。
   const beforeErrors = result.diagnostics_after.errors - result.diagnostics_delta.errors
-  return [
+  const lines = [
     `edit_batch applied ${result.changes_applied}/${result.changes_total} changes`,
     `  ${result.file}: ${formatLineChanges(result.line_changes)}`,
     `  diagnostics: ${beforeErrors} err → ${result.diagnostics_after.errors} err`,
     `  version: ${result.old_version} → ${result.new_version}`,
-  ].join("\n")
+  ]
+  if (result.changed !== undefined) lines.push(...changedLines("  changed:", result.changed))
+  if (result.position_map !== undefined && result.position_map.length > 0) {
+    lines.push(`  position_map: ${formatPositionMap(result.position_map)}`)
+  }
+  return lines.join("\n")
+}
+
+// 有界变更摘要：展示行区间与截断标记；单行内联，多行按缩进块展开。
+function changedLines(prefix: string, changed: Protocol.ChangedExcerpt): string[] {
+  const header = `${prefix} L${changed.start_line}-${changed.end_line}${changed.truncated ? " (truncated)" : ""}`
+  if (changed.text === "") return [header]
+  const parts = changed.text.split("\n")
+  if (parts.length === 1) return [`${header}: ${parts[0]}`]
+  return [`${header}:`, ...parts.map((line) => `    ${line}`)]
+}
+
+function formatPositionMap(entries: ReadonlyArray<Protocol.PositionMapEntry>): string {
+  return entries
+    .map((entry) => `old ${entry.old_start}-${entry.old_end} → delta ${entry.delta >= 0 ? "+" : ""}${entry.delta}`)
+    .join(", ")
 }
 
 function formatLineChanges(changes: ReadonlyArray<Protocol.EditBatchLineChange>): string {
@@ -142,8 +203,20 @@ function editBatchFailure(result: Protocol.EditBatchFailure): string {
   // LOCK_TIMEOUT 的 file 优先取 detail.file（守护进程按锁目标文件回报，result.file 可能缺省）。
   const detailFile = error.code === Protocol.EditBatchErrorCode.lockTimeout ? error.detail?.file : undefined
   const lines = [`edit_batch FAILED: ${headline}`, `  ${detailFile ?? result.file ?? "?"}: ${editBatchDetailLine(result)}`]
+  if (error.reconciliation !== undefined) lines.push(...reconciliationLines(error.reconciliation, "  "))
   if (error.hint !== undefined) lines.push(`  hint: ${error.hint}`)
   return lines.join("\n")
+}
+
+// VERSION_MISMATCH 不再裸错：给出可继续的对账信息（有界 delta 或 full 再读提示）。
+function reconciliationLines(reconciliation: Protocol.Reconciliation, indent: string): string[] {
+  if (reconciliation.mode === "delta") {
+    return [
+      `${indent}reconciliation: delta from v:${reconciliation.from_version} (${reconciliation.hunks.length} hunks)`,
+      ...reconciliation.hunks.flatMap((hunk) => deltaHunkLines(hunk, `${indent}  `)),
+    ]
+  }
+  return [`${indent}reconciliation: full re-read required (current v:${reconciliation.current_version ?? "?"})`]
 }
 
 const HumanFailure: Record<number, string | undefined> = {
@@ -196,9 +269,14 @@ function editTransactionSuccess(result: Protocol.EditTransactionSuccess): string
     `edit_transaction applied ${result.changes_applied}/${result.changes_total} changes across ${result.files_changed} files`,
   ]
   for (const file of result.files) {
+    const versionPart = file.version === undefined ? "" : ` v:${file.version}`
     lines.push(
-      `  ${`${file.file}:`.padEnd(width)}${transactionLineList(file.line_changes)} (${file.changes_applied} changes)`,
+      `  ${`${file.file}:`.padEnd(width)}${transactionLineList(file.line_changes)} (${file.changes_applied} changes)${versionPart}`,
     )
+    if (file.changed !== undefined) lines.push(...changedLines("    changed:", file.changed))
+    if (file.position_map !== undefined && file.position_map.length > 0) {
+      lines.push(`    position_map: ${formatPositionMap(file.position_map)}`)
+    }
   }
   for (const [file, delta] of Object.entries(result.diagnostics_delta)) {
     // 只展示发生变化的文件；before 由 after - delta 反推，避免额外请求一次快照。
@@ -234,6 +312,7 @@ function editTransactionFailure(result: Protocol.EditTransactionFailure): string
     ...(detail?.change_index === undefined ? [] : [`(change ${detail.change_index + 1}/${detail.changes_total ?? "?"})`]),
   ].join(" ")
   const lines = [`edit_transaction FAILED: ${headline}`, `  ${editTransactionDetailLine(result.error)}`]
+  if (result.error.reconciliation !== undefined) lines.push(...reconciliationLines(result.error.reconciliation, "  "))
   if (result.error.hint !== undefined) lines.push(`  hint: ${result.error.hint}`)
   lines.push("  所有文件均未修改")
   return lines.join("\n")

@@ -1,0 +1,22 @@
+{
+  "file": "main.py",
+  "version": "1a1443dbf5e",
+  "size": { "lines": 10, "symbols": 2 },
+  "status": { "modified": false, "errors": 0 },
+  "position": { "current": 1, "total": 10, "in_symbol": "greet", "remaining_symbols": 0 },
+  "content": [
+    { "line": 1, "text": "def greet(name):" },
+    { "line": 2, "text": "    return \"hello \" + name", "anchor": { "symbol": "name", "location": "main.py:1" } },
+    { "line": 3, "text": "" },
+    { "line": 4, "text": "" },
+    { "line": 5, "text": "def main():" },
+    { "line": 6, "text": "    print(greet(\"world\"))", "anchor": { "symbol": "greet", "location": "main.py:1" } },
+    { "line": 7, "text": "" },
+    { "line": 8, "text": "" },
+    { "line": 9, "text": "if __name__ == \"__main__\":" },
+    { "line": 10, "text": "    main()", "anchor": { "symbol": "main", "location": "main.py:5" } }
+  ],
+  "coverage": { "read": [[1, 10]], "unread": [] },
+  "diagnostics": [],
+  "warnings": ["analysis unavailable: RuntimeException: com.intellij.pycharm.community.ide.impl.PyProjectScopeBuilder"]
+}

@@ -29,7 +29,7 @@ interface ToolDefinition {
 ```
 
 **默认可见。** 新工具默认暴露，需要隐藏时显式设 `hide: true`。当前隐藏的工具：
-`edit`、`write`、`multiedit`、`apply_patch`。
+`edit`、`write`、`apply_patch`（本 fork 没有 `multiedit`）。
 
 **三处消费 `hide` 字段：**
 
@@ -207,5 +207,5 @@ fallback。
 > `tools/list` 和 system prompt 过滤 `hide == true`。
 > 解析层不校验 `hide`，只查注册表。
 > `fallback_option_direct` 动态读取 `hide: true` 的工具，生成定义文本。
-> 当前隐藏：edit / write / multiedit / apply_patch。
+> 当前隐藏：edit / write / apply_patch（本 fork 没有 multiedit）。
 > 新增隐藏工具时，fallback 自动覆盖，无需改代码。

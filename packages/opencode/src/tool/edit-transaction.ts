@@ -5,6 +5,7 @@ import { Semantic } from "@/semantic/manager"
 import { renderEditTransaction } from "@/semantic/render"
 import { Protocol } from "@/semantic/protocol"
 import { InstanceState } from "@/effect/instance-state"
+import { SessionLedger } from "@/session/ledger"
 import { assertExternalDirectoryEffect } from "./external-directory"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { PositiveInt } from "@opencode-ai/schema/schema"
@@ -49,6 +50,7 @@ export const EditTransactionTool = Tool.define(
   "edit_transaction",
   Effect.gen(function* () {
     const semantic = yield* Semantic.Service
+    const ledger = yield* SessionLedger.Service
     return {
       description: DESCRIPTION,
       parameters: Parameters,
@@ -110,6 +112,14 @@ export const EditTransactionTool = Tool.define(
               metadata,
               output: renderEditTransaction(outcome.result),
             }
+          }
+
+          // D5：逐文件登记新版本；结果里的文件路径可能是相对路径，先按请求映射回绝对路径。
+          const requested = new Map(requests.map((item) => [item.relative.replaceAll(path.sep, "/"), item.filepath]))
+          for (const [index, file] of outcome.result.files.entries()) {
+            const filepath = requested.get(file.file.replaceAll(path.sep, "/")) ?? requests[index]?.filepath
+            if (filepath === undefined) continue
+            yield* ledger.noteEdit({ sessionID: ctx.sessionID, file: filepath, newVersion: file.new_version })
           }
 
           const metadata: Metadata = {

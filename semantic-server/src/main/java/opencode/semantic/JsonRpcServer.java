@@ -8,8 +8,9 @@ import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.StandardProtocolFamily;
-import java.net.UnixDomainSocketAddress;
 import java.nio.channels.Channels;
 import java.nio.channels.ClosedChannelException;
 import java.nio.channels.ServerSocketChannel;
@@ -17,6 +18,8 @@ import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.security.SecureRandom;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
@@ -25,10 +28,14 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * JSON-RPC 2.0 over AF_UNIX，NDJSON 帧（一行一个对象，UTF-8）。
+ * JSON-RPC 2.0 over TCP 127.0.0.1（ephemeral port），NDJSON 帧（一行一个对象，UTF-8）。
+ * 绑定成功后原子写入 locator（{v,port,token,pid}）；每连接的第一个请求必须是携带正确
+ * token 的 hello，未认证连接调用其它方法一律 -32019 并在冲刷响应后关闭。
  * 专用 accept 线程 + 每连接一个读线程；写操作按连接加锁以支持服务端推送。
  */
 final class JsonRpcServer {
+
+  private static final int UNAUTHORIZED = -32019;
 
   interface Handler {
     JsonObject handle(Client client, String method, JsonObject params) throws RpcException;
@@ -59,6 +66,7 @@ final class JsonRpcServer {
     private final String name;
     private final Object writeLock = new Object();
     private volatile boolean subscribed;
+    private volatile boolean authenticated;
     private volatile boolean closed;
 
     private Client(SocketChannel channel, String name) {
@@ -73,6 +81,14 @@ final class JsonRpcServer {
 
     boolean isSubscribed() {
       return subscribed;
+    }
+
+    void authenticate() {
+      authenticated = true;
+    }
+
+    boolean isAuthenticated() {
+      return authenticated;
     }
 
     void send(JsonObject message) {
@@ -100,7 +116,7 @@ final class JsonRpcServer {
     }
   }
 
-  private final Path socketPath;
+  private final Path locatorPath;
   private final Handler handler;
   private final long idleMillis;
   private final Set<Client> clients = ConcurrentHashMap.newKeySet();
@@ -109,20 +125,25 @@ final class JsonRpcServer {
   private final AtomicBoolean stopping = new AtomicBoolean();
   private final CountDownLatch stopped = new CountDownLatch(1);
   private volatile ServerSocketChannel serverChannel;
+  private String token;
 
-  JsonRpcServer(Path socketPath, Handler handler, long idleMillis) {
-    this.socketPath = socketPath;
+  JsonRpcServer(Path locatorPath, Handler handler, long idleMillis) {
+    this.locatorPath = locatorPath;
     this.handler = handler;
     this.idleMillis = idleMillis;
   }
 
   void start() throws IOException {
-    Path parent = socketPath.toAbsolutePath().getParent();
+    Path parent = locatorPath.toAbsolutePath().getParent();
     if (parent != null) Files.createDirectories(parent);
-    Files.deleteIfExists(socketPath);
 
-    serverChannel = ServerSocketChannel.open(StandardProtocolFamily.UNIX);
-    serverChannel.bind(UnixDomainSocketAddress.of(socketPath));
+    // 显式绑定 IPv4 loopback（不用通配地址与 ::1），port 0 由系统分配
+    serverChannel = ServerSocketChannel.open(StandardProtocolFamily.INET);
+    serverChannel.bind(new InetSocketAddress(InetAddress.getByName("127.0.0.1"), 0));
+    int port = ((InetSocketAddress) serverChannel.getLocalAddress()).getPort();
+
+    token = newToken();
+    writeLocator(port);
 
     Thread acceptThread = new Thread(this::acceptLoop, "semantic-rpc-accept");
     acceptThread.setDaemon(true);
@@ -133,7 +154,33 @@ final class JsonRpcServer {
       watchdog.setDaemon(true);
       watchdog.start();
     }
-    Log.info("listening on unix socket " + socketPath);
+    Log.info("listening on 127.0.0.1:" + port);
+  }
+
+  /** 128-bit token（SecureRandom）→ 32 位十六进制。仅写入 locator 文件，不落日志。 */
+  private static String newToken() {
+    byte[] bytes = new byte[16];
+    new SecureRandom().nextBytes(bytes);
+    StringBuilder hex = new StringBuilder(32);
+    for (byte b : bytes) hex.append(String.format("%02x", b & 0xff));
+    return hex.toString();
+  }
+
+  /** 单行 JSON：{"v":1,"port":N,"token":"...","pid":N}；同目录临时文件 + ATOMIC_MOVE 原子替换。 */
+  private void writeLocator(int port) throws IOException {
+    JsonObject locator = new JsonObject();
+    locator.addProperty("v", 1);
+    locator.addProperty("port", port);
+    locator.addProperty("token", token);
+    locator.addProperty("pid", ProcessHandle.current().pid());
+    Path tmp = locatorPath.resolveSibling(locatorPath.getFileName().toString() + ".tmp");
+    Files.writeString(tmp, locator.toString(), StandardCharsets.UTF_8);
+    try {
+      Files.move(tmp, locatorPath, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+    } catch (IOException e) {
+      Files.deleteIfExists(tmp);
+      throw e;
+    }
   }
 
   private void acceptLoop() {
@@ -191,8 +238,29 @@ final class JsonRpcServer {
             ? request.getAsJsonObject("params")
             : new JsonObject();
 
+    boolean hello = "hello".equals(method);
+    if (!client.isAuthenticated()) {
+      // 每连接的第一个请求必须是 hello + 正确 token；token 不匹配或任何其它首请求 → -32019 并关闭
+      if (!hello || !token.equals(readToken(params))) {
+        client.send(errorResponse(id, UNAUTHORIZED, "unauthorized", null));
+        client.close();
+        return;
+      }
+      client.authenticate();
+      if (id == null) return;
+      lastActivity.set(System.currentTimeMillis());
+      client.send(okResponse(id));
+      return;
+    }
+
     if (id == null) return; // 本协议未定义客户端通知
     lastActivity.set(System.currentTimeMillis());
+
+    if (hello) { // hello 幂等：已认证连接重复 hello 仍返回 ok
+      client.send(okResponse(id));
+      return;
+    }
+
     try {
       JsonObject result = handler.handle(client, method, params);
       JsonObject response = new JsonObject();
@@ -206,6 +274,22 @@ final class JsonRpcServer {
       Log.error("handler failed for method " + method, t);
       client.send(errorResponse(id, -32603, "internal error", null));
     }
+  }
+
+  private static String readToken(JsonObject params) {
+    JsonElement token = params.get("token");
+    if (token == null || !token.isJsonPrimitive() || !token.getAsJsonPrimitive().isString()) return null;
+    return token.getAsString();
+  }
+
+  private static JsonObject okResponse(JsonElement id) {
+    JsonObject result = new JsonObject();
+    result.addProperty("ok", true);
+    JsonObject response = new JsonObject();
+    response.addProperty("jsonrpc", "2.0");
+    response.add("id", id);
+    response.add("result", result);
+    return response;
   }
 
   private static JsonObject errorResponse(JsonElement id, int code, String message, JsonElement data) {
@@ -235,7 +319,7 @@ final class JsonRpcServer {
   void broadcast(String method, JsonObject params) {
     JsonObject message = notification(method, params);
     for (Client client : clients) {
-      if (client.isSubscribed()) client.send(message);
+      if (client.isAuthenticated() && client.isSubscribed()) client.send(message);
     }
   }
 
@@ -266,9 +350,9 @@ final class JsonRpcServer {
     for (Client client : clients) client.close();
     clients.clear();
     try {
-      Files.deleteIfExists(socketPath);
+      Files.deleteIfExists(locatorPath);
     } catch (IOException e) {
-      Log.warn("failed to delete socket file: " + e);
+      Log.warn("failed to delete locator file: " + e);
     }
     stopped.countDown();
   }

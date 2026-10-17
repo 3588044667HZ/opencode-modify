@@ -29,7 +29,7 @@ OC 进程（AI 原生外壳）
   ├─ 一致性层：版本戳、写前校验、源文件纯度、路径保护
   ├─ Blackboard：多 agent 共享状态
   └─ 通知出口：主 agent 压缩 → 响铃
-  ↕ JSON-RPC over Unix socket
+  ↕ JSON-RPC over TCP loopback
 IntelliJ 无头守护（语义引擎，无状态）
   ├─ 适配层：blast_radius / read_view / edit_transaction / verify_*
   └─ 语义引擎：PSI / Stub 索引 / VFS / Daemon Analyzer / Refactoring API / LSP 客户端
@@ -54,7 +54,7 @@ IntelliJ 无头守护（语义引擎，无状态）
 | IntelliJ 保留 | PSI、Stub 索引、VFS、Daemon Analyzer、Refactoring API、LSP 客户端、项目模型       |
 | IntelliJ 放弃 | 全部 UI 模块                                                                      |
 | IntelliJ 改造 | 交互式 → 批量语义查询；无状态；索引期间等待                                       |
-| 连接          | JSON-RPC over Unix socket                                                         |
+| 连接          | JSON-RPC over TCP loopback                                                         |
 | 生命周期      | 常驻 + 自动拉起，单项目，空闲 30 分钟退出                                         |
 | 工具暴露      | 新工具可见；旧工具隐藏但注册表保留；`map()` 内置只读按需揭示；**绝不转发**        |
 | map 返回      | 坦白（一直存在，被隐藏）→ 定义 → 标签（简单粗暴）                                 |

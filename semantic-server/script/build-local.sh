@@ -3,29 +3,31 @@
 #   1. 用本地 IDEA 的平台 jar 做 classpath，javac 编译 Java 源码
 #   2. 把 META-INF/plugin.xml 一起打进 semantic-server.jar
 #   3. 安装到 .sandbox/plugins/semantic-server/lib 供 run-local.sh 启动
+# IDE 与 JDK 解析：SEMANTIC_IDE_HOME/IDEA_HOME/IDEA_DIR 覆盖，其次注册表/Toolbox/常见路径发现；
+# JDK：TOOL_JAVA_HOME > SEMANTIC_JDK_HOME > JAVA_HOME > 常见目录 > PATH javac（见 script/resolve-env.sh）。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-IDEA_DIR="${IDEA_DIR:-D:/IntelliJ IDEA 2026.2.0.1}"
+# shellcheck source=resolve-env.sh
+source "$SCRIPT_DIR/resolve-env.sh"
 
-resolve_tool_home() {
-  local candidate
-  for candidate in "${TOOL_JAVA_HOME:-}" "D:/jdk25" "D:/Android Studio/jbr" "D:/jdk17/jdk-17"; do
-    if [ -n "$candidate" ] && [ -x "$candidate/bin/javac.exe" ]; then
-      echo "$candidate"
-      return
-    fi
-  done
-  if command -v javac >/dev/null 2>&1; then
-    dirname "$(dirname "$(command -v javac)")"
-    return
-  fi
-  echo "ERROR: no javac found; set TOOL_JAVA_HOME" >&2
+if [ -n "${TOOL_JAVA_HOME:-}" ] && { [ -x "$TOOL_JAVA_HOME/bin/javac.exe" ] || [ -x "$TOOL_JAVA_HOME/bin/javac" ]; }; then
+  TOOL_HOME="$TOOL_JAVA_HOME"
+elif TOOL_HOME="$(semantic_resolve_jdk_home --require-javac)"; then
+  :
+elif command -v javac >/dev/null 2>&1; then
+  TOOL_HOME="$(dirname "$(dirname "$(command -v javac)")")"
+else
+  echo "ERROR: no javac found; set TOOL_JAVA_HOME / SEMANTIC_JDK_HOME / JAVA_HOME" >&2
   exit 1
-}
+fi
 
-TOOL_HOME="$(resolve_tool_home)"
+if ! IDEA_DIR="$(semantic_resolve_idea_dir --require-java)"; then
+  echo "ERROR: no Java-capable IntelliJ IDE found; set SEMANTIC_IDE_HOME / IDEA_HOME / IDEA_DIR" >&2
+  exit 1
+fi
+
 JAVAC="$TOOL_HOME/bin/javac.exe"
 [ -x "$JAVAC" ] || JAVAC="$TOOL_HOME/bin/javac"
 JAR="$TOOL_HOME/bin/jar.exe"
@@ -40,6 +42,7 @@ mkdir -p "$OUT/classes"
 # sources.txt 必须是相对路径（Windows javac 不识别 MSYS 的 /e/... 形式）
 (cd "$ROOT" && find src/main/java -name '*.java' | sort > "$OUT/sources.txt")
 
+echo "[build-local] idea: $IDEA_DIR"
 echo "[build-local] javac: $JAVAC"
 (cd "$ROOT" && "$JAVAC" --release 21 -encoding UTF-8 -cp "$CP" -d "$OUT/classes" "@$OUT/sources.txt")
 

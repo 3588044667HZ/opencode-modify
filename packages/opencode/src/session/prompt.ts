@@ -56,6 +56,7 @@ import { SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionReminders } from "./reminders"
 import { SessionPeers } from "./peers"
 import { Mailbox } from "./mailbox"
+import { SessionLedger } from "./ledger"
 import { SessionTools } from "./tools"
 import { LLMEvent } from "@opencode-ai/llm"
 
@@ -139,6 +140,7 @@ const layer = Layer.effect(
     const revert = yield* SessionRevert.Service
     const summary = yield* SessionSummary.Service
     const mailbox = yield* Mailbox.Service
+    const ledger = yield* SessionLedger.Service
     const sys = yield* SystemPrompt.Service
     const llm = yield* LLM.Service
     const events = yield* EventV2Bridge.Service
@@ -1199,6 +1201,8 @@ const layer = Layer.effect(
             Effect.provideService(Mailbox.Service, mailbox),
             Effect.orDie,
           )
+          // D5：对账 digest 只在账本有 stale/supersede 时尾部追加合成文本；空账本零开销。
+          msgs = yield* ledger.apply({ messages: msgs, sessionID })
 
           const msg: SessionV1.Assistant = {
             id: MessageID.ascending(),
@@ -1652,6 +1656,7 @@ export const node = LayerNode.make({
     SessionRevert.node,
     SessionSummary.node,
     Mailbox.node,
+    SessionLedger.node,
     SystemPrompt.node,
     LLM.node,
     EventV2Bridge.node,

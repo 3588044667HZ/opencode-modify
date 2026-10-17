@@ -44,6 +44,7 @@ describe("session.system.teamDelegationGuidance", () => {
       expect(guidance).toContain("team_delegation")
       expect(guidance).toContain("dispatch")
       expect(guidance).toContain("budget_tokens")
+      expect(guidance).toContain("Default to delegating")
     }),
   )
 

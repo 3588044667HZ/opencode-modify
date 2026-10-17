@@ -3,6 +3,7 @@ package opencode.semantic;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.project.Project;
@@ -10,10 +11,12 @@ import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.ThrowableComputable;
 import com.intellij.openapi.vfs.VFileProperty;
 import com.intellij.openapi.vfs.VfsUtil;
+import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiAnnotation;
 import com.intellij.psi.PsiArrayType;
 import com.intellij.psi.PsiDocumentManager;
+import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiImportList;
 import com.intellij.psi.PsiImportStatement;
@@ -23,7 +26,9 @@ import com.intellij.psi.PsiJavaFile;
 import com.intellij.psi.PsiManager;
 import com.intellij.psi.PsiMethod;
 import com.intellij.psi.PsiModifier;
+import com.intellij.psi.PsiNamedElement;
 import com.intellij.psi.PsiParameter;
+import com.intellij.psi.PsiRecursiveElementWalkingVisitor;
 import com.intellij.psi.PsiType;
 import com.intellij.psi.PsiTypes;
 import com.intellij.psi.util.PsiTreeUtil;
@@ -40,6 +45,7 @@ import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -47,6 +53,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.regex.Pattern;
 
 /**
  * project_map：项目级只读地图（structure / dependencies / hot）。
@@ -65,13 +72,34 @@ final class ProjectMapService {
   private static final int MODULE_LIMIT = 20;
   private static final int MODULE_FILES_LIMIT = 200;
 
-  /** 模块划分排除目录（隐藏目录另按 '.' 前缀排除，故 .git/.idea/.pytest_cache 天然被排除）。 */
-  private static final Set<String> EXCLUDED_DIRS =
-      Set.of("venv", "env", "node_modules", "build", "out", "target", "__pycache__", "dist");
-
   /** 路由注解 simple name（忽略大小写）：JAX-RS @GET/@POST/... 与 @Path、Spring @RequestMapping。 */
   private static final Set<String> ROUTE_ANNOTATIONS =
       Set.of("get", "post", "put", "delete", "patch", "requestmapping", "path");
+
+  /** Python 路由装饰器（FastAPI/Flask/aiohttp 风格）：`@app.get(...)` / `@router.route(...)`。 */
+  private static final Pattern PY_ROUTE_DECORATOR =
+      Pattern.compile("\\.\\s*(get|post|put|delete|patch|route|websocket|api_route|add_api_route)\\s*\\(");
+
+  /** JS/TS 路由调用（Express/Koa/Fastify 风格）与 NestJS 装饰器。 */
+  private static final Pattern JS_ROUTE_CALL =
+      Pattern.compile(
+          "(?:^|[^\\w$])(?:app|router|server|fastify)\\.\\s*(get|post|put|delete|patch|route|all|use)\\s*\\(\\s*[\"'`]");
+  private static final Pattern JS_ROUTE_DECORATOR =
+      Pattern.compile("^@\\s*(Get|Post|Put|Delete|Patch)\\s*\\(");
+  /** 路由调用的具名 handler 参数：`app.get("/x", handler)`。 */
+  private static final Pattern JS_ROUTE_HANDLER =
+      Pattern.compile(",\\s*([A-Za-z_$][A-Za-z0-9_$]*)\\s*[,)]");
+  private static final List<String> JS_EXTENSIONS =
+      List.of(".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs");
+  private static final int JS_CONFIG_SCAN_DEPTH = 8;
+  private static final Pattern JS_IMPORT_FROM =
+      Pattern.compile("\\bfrom\\s*[\"']([^\"']+)[\"']");
+  private static final Pattern JS_IMPORT_SIDE_EFFECT =
+      Pattern.compile("^\\s*import\\s*[\"']([^\"']+)[\"']");
+  private static final Pattern JS_REQUIRE =
+      Pattern.compile("\\brequire\\s*\\(\\s*[\"']([^\"']+)[\"']\\s*\\)");
+  private static final Pattern JS_DYNAMIC_IMPORT =
+      Pattern.compile("\\bimport\\s*\\(\\s*[\"']([^\"']+)[\"']\\s*\\)");
 
   private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
   private final Set<String> pendingContentFiles = new HashSet<>();
@@ -288,7 +316,7 @@ final class ProjectMapService {
     Fingerprint fingerprint = snapshot.fingerprint;
 
     for (Map.Entry<String, List<String>> entry : fingerprint.dirEntries.entrySet()) {
-      List<String> now = relevantEntries(Paths.get(root, entry.getKey()));
+      List<String> now = relevantEntries(Paths.get(root, entry.getKey()), entry.getKey());
       if (now == null || !now.equals(entry.getValue())) {
         Log.info(
             "project_map invalidated (structure changed at "
@@ -328,14 +356,15 @@ final class ProjectMapService {
   }
 
   /** 目录的“相关目录项”集合：非隐藏、非排除目录的项（与扫描时的记录口径一致）。 */
-  private static List<String> relevantEntries(Path dir) {
+  private static List<String> relevantEntries(Path dir, String relative) {
     List<String> entries = new ArrayList<>();
     try (DirectoryStream<Path> stream = Files.newDirectoryStream(dir)) {
       for (Path entry : stream) {
         String name = entry.getFileName().toString();
         if (name.startsWith(".")) continue;
         if (Files.isSymbolicLink(entry) && Files.isDirectory(entry)) continue;
-        if (Files.isDirectory(entry) && EXCLUDED_DIRS.contains(name)) continue;
+        String childRelative = relative.isEmpty() ? name : relative + "/" + name;
+        if (Files.isDirectory(entry) && Exclusions.excludesDir(childRelative, name)) continue;
         entries.add(name);
       }
     } catch (IOException e) {
@@ -386,6 +415,10 @@ final class ProjectMapService {
     final List<ModuleInfo> modules = new ArrayList<>();
     final List<String> rootFiles = new ArrayList<>();
     final List<FileRef> javaFiles = new ArrayList<>();
+    final List<FileRef> pythonFiles = new ArrayList<>();
+    final List<FileRef> jsFiles = new ArrayList<>();
+    final List<FileRef> jsonManifests = new ArrayList<>();
+    final Map<String, FileRef> jsFileIndex = new HashMap<>();
     final Fingerprint fingerprint = new Fingerprint();
   }
 
@@ -431,7 +464,8 @@ final class ProjectMapService {
         continue;
       }
       if (child.isDirectory()) {
-        if (child.is(VFileProperty.SYMLINK) || EXCLUDED_DIRS.contains(name)) continue;
+        String childRelative = relative.isEmpty() ? name : relative + "/" + name;
+        if (child.is(VFileProperty.SYMLINK) || Exclusions.excludesDir(childRelative, name)) continue;
         entries.add(name);
         subdirs.add(child);
       } else {
@@ -449,6 +483,15 @@ final class ProjectMapService {
         state.rootFiles.add(file.name);
         state.fingerprint.fileMtimes.put(file.name, mtime(rootPath.resolve(file.name)));
         if (file.name.endsWith(".java")) state.javaFiles.add(new FileRef(file.file, file.name, null));
+        if (file.name.endsWith(".py")) state.pythonFiles.add(new FileRef(file.file, file.name, null));
+        if (JavaScriptSupport.isJsFile(file.name)) {
+          FileRef ref = new FileRef(file.file, file.name, null);
+          state.jsFiles.add(ref);
+          state.jsFileIndex.put(file.name, ref);
+        }
+        if ("package.json".equals(file.name)) {
+          state.jsonManifests.add(new FileRef(file.file, file.name, null));
+        }
       }
     } else if (!files.isEmpty()) {
       ModuleInfo module = new ModuleInfo(lastSegment(relative), relative);
@@ -458,6 +501,15 @@ final class ProjectMapService {
         module.filePaths.add(path);
         state.fingerprint.fileMtimes.put(path, mtime(rootPath.resolve(path)));
         if (file.name.endsWith(".java")) state.javaFiles.add(new FileRef(file.file, path, relative));
+        if (file.name.endsWith(".py")) state.pythonFiles.add(new FileRef(file.file, path, relative));
+        if (JavaScriptSupport.isJsFile(file.name)) {
+          FileRef ref = new FileRef(file.file, path, relative);
+          state.jsFiles.add(ref);
+          state.jsFileIndex.put(path, ref);
+        }
+        if ("package.json".equals(file.name)) {
+          state.jsonManifests.add(new FileRef(file.file, path, relative));
+        }
       }
       state.modules.add(module);
     }
@@ -476,10 +528,47 @@ final class ProjectMapService {
   private static Index buildIndex(Project project, ScanState state) {
     PsiManager psiManager = PsiManager.getInstance(project);
     Map<String, EntryPoint> entries = new HashMap<>();
-    for (FileRef ref : state.javaFiles) {
-      PsiFile psiFile = psiManager.findFile(ref.file);
-      if (!(psiFile instanceof PsiJavaFile javaFile)) continue;
-      collectEntries(project, javaFile, ref.path, entries);
+    if (JavaSupport.available()) {
+      for (FileRef ref : state.javaFiles) {
+        try {
+          PsiFile psiFile = psiManager.findFile(ref.file);
+          if (!(psiFile instanceof PsiJavaFile javaFile)) continue;
+          collectEntries(project, javaFile, ref.path, entries);
+        } catch (Throwable t) {
+          // Java 索引可能在本轮构建期间再次进入 dumb：跳过该文件，不拖垮整张地图
+          Log.info("project_map java entry scan skipped (" + ref.path + "): " + t);
+        }
+      }
+    }
+    if (PythonSupport.available()) {
+      for (FileRef ref : state.pythonFiles) {
+        try {
+          PsiFile psiFile = psiManager.findFile(ref.file);
+          if (psiFile == null) continue;
+          collectPythonEntries(project, psiFile, ref.path, entries);
+        } catch (Throwable t) {
+          // 安装不完整/语言服务异常：该文件不贡献入口，不影响 Java 路径与其他文件
+          Log.warn("project_map python entry scan failed (" + ref.path + "): " + t);
+        }
+      }
+    }
+    if (JavaScriptSupport.available()) {
+      for (FileRef manifest : state.jsonManifests) {
+        try {
+          collectPackageEntries(manifest, state.jsFileIndex, entries);
+        } catch (Throwable t) {
+          Log.warn("project_map package.json scan failed (" + manifest.path + "): " + t);
+        }
+      }
+      for (FileRef ref : state.jsFiles) {
+        try {
+          PsiFile psiFile = psiManager.findFile(ref.file);
+          if (psiFile == null) continue;
+          collectJsEntries(project, psiFile, ref.path, entries);
+        } catch (Throwable t) {
+          Log.warn("project_map js entry scan failed (" + ref.path + "): " + t);
+        }
+      }
     }
     List<EntryPoint> entryPoints = new ArrayList<>(entries.values());
     entryPoints.sort(
@@ -517,6 +606,301 @@ final class ProjectMapService {
     }
   }
 
+  /** Python 入口：模块级 main / __main__ 守卫内调用的模块级函数 / 路由装饰器函数。 */
+  private static void collectPythonEntries(
+      Project project, PsiFile psiFile, String path, Map<String, EntryPoint> entries) {
+    List<PythonFunction> functions = new ArrayList<>();
+    String[] guardText = new String[1];
+    psiFile.accept(
+        new PsiRecursiveElementWalkingVisitor() {
+          @Override
+          public void visitElement(PsiElement element) {
+            String simple = element.getClass().getSimpleName();
+            if (guardText[0] == null && simple.contains("PyIfStatement") && isMainGuard(element)) {
+              guardText[0] = element.getText();
+            }
+            if (ReadViewService.pythonSymbolKind(element) == 1 && element instanceof PsiNamedElement named) {
+              String name = named.getName();
+              if (name != null) {
+                functions.add(
+                    new PythonFunction(
+                        element, name, isTopLevelPython(psiFile, element), decoratorText(element)));
+              }
+            }
+            super.visitElement(element);
+          }
+        });
+
+    for (PythonFunction function : functions) {
+      Integer line = elementLine(project, psiFile, function.element);
+      if (line == null) continue;
+      if (function.topLevel
+          && ("main".equals(function.name)
+              || (guardText[0] != null && callsName(guardText[0], function.name)))) {
+        putEntry(entries, path, line, function.name, "main");
+      }
+      if (function.decorators != null
+          && PY_ROUTE_DECORATOR.matcher(function.decorators).find()) {
+        putEntry(entries, path, line, function.name, "route");
+      }
+    }
+  }
+
+  private static final class PythonFunction {
+    final PsiElement element;
+    final String name;
+    final boolean topLevel;
+    final String decorators;
+
+    PythonFunction(
+        PsiElement element, String name, boolean topLevel, String decorators) {
+      this.element = element;
+      this.name = name;
+      this.topLevel = topLevel;
+      this.decorators = decorators;
+    }
+  }
+
+  /** 顶层判定：定义与文件之间没有类/函数声明（嵌套函数与类方法不算模块入口）。 */
+  private static boolean isTopLevelPython(PsiFile file, PsiElement element) {
+    PsiElement parent = element.getParent();
+    while (parent != null && parent != file) {
+      if (ReadViewService.pythonSymbolKind(parent) >= 0) return false;
+      parent = parent.getParent();
+    }
+    return parent == file;
+  }
+
+  /** 装饰器文本：先取函数子节点，再回看前置兄弟（不同平台版本挂载位置不同）。 */
+  private static String decoratorText(PsiElement element) {
+    StringBuilder text = new StringBuilder();
+    for (PsiElement child : element.getChildren()) {
+      if (child.getClass().getSimpleName().contains("PyDecorator")) {
+        text.append(child.getText()).append('\n');
+      }
+    }
+    PsiElement sibling = element.getPrevSibling();
+    while (sibling != null && text.length() == 0) {
+      String simple = sibling.getClass().getSimpleName();
+      if (simple.contains("PyDecorator")) {
+        text.insert(0, sibling.getText() + "\n");
+        break;
+      }
+      if (!sibling.getText().isBlank()) break;
+      sibling = sibling.getPrevSibling();
+    }
+    return text.length() == 0 ? null : text.toString();
+  }
+
+  private static boolean isMainGuard(PsiElement element) {
+    String text = element.getText();
+    return text.contains("__name__") && text.contains("__main__");
+  }
+
+  /** 守卫块内是否调用了该函数（允许空白）；转义名称避免正则元字符。 */
+  private static boolean callsName(String guardText, String name) {
+    return Pattern.compile("\\b" + Pattern.quote(name) + "\\s*\\(").matcher(guardText).find();
+  }
+
+  // ---- JS/TS 入口（package.json main/bin、路由调用/装饰器、顶层 main） ----
+
+  private static void collectPackageEntries(
+      FileRef manifest,
+      Map<String, FileRef> jsFileIndex,
+      Map<String, EntryPoint> entries) {
+    String text;
+    try {
+      text = VfsUtilCore.loadText(manifest.file);
+    } catch (IOException e) {
+      Log.warn("package.json read failed (" + manifest.path + "): " + e);
+      return;
+    }
+    JsonObject packageJson = JsonParser.parseString(text).getAsJsonObject();
+    String packageName =
+        packageJson.has("name") && packageJson.get("name").isJsonPrimitive()
+            ? packageJson.get("name").getAsString()
+            : null;
+    JsonElement main = packageJson.get("main");
+    if (main != null && main.isJsonPrimitive() && main.getAsJsonPrimitive().isString()) {
+      putManifestEntry(
+          entries,
+          jsFileIndex,
+          manifest.path,
+          main.getAsString(),
+          packageName == null ? "main" : packageName,
+          "main");
+    }
+    JsonElement bin = packageJson.get("bin");
+    if (bin == null) return;
+    if (bin.isJsonPrimitive() && bin.getAsJsonPrimitive().isString()) {
+      putManifestEntry(
+          entries, jsFileIndex, manifest.path, bin.getAsString(), packageName == null ? "bin" : packageName, "bin");
+      return;
+    }
+    if (!bin.isJsonObject()) return;
+    for (Map.Entry<String, JsonElement> item : bin.getAsJsonObject().entrySet()) {
+      if (!item.getValue().isJsonPrimitive() || !item.getValue().getAsJsonPrimitive().isString()) {
+        continue;
+      }
+      putManifestEntry(
+          entries, jsFileIndex, manifest.path, item.getValue().getAsString(), item.getKey(), "bin");
+    }
+  }
+
+  private static void putManifestEntry(
+      Map<String, EntryPoint> entries,
+      Map<String, FileRef> jsFileIndex,
+      String manifestPath,
+      String specifier,
+      String symbol,
+      String kind) {
+    // package.json 的 main/bin 通常写 "src/index.js"（无 ./ 前缀）：按清单目录相对路径处理
+    String value =
+        specifier.startsWith("./") || specifier.startsWith("../") || specifier.startsWith("/")
+            ? specifier
+            : "./" + specifier;
+    FileRef target = resolveJsFile(jsFileIndex, manifestPath, value);
+    if (target == null) return;
+    putEntry(entries, target.path, 1, symbol, kind);
+  }
+
+  private static void collectJsEntries(
+      Project project, PsiFile psiFile, String path, Map<String, EntryPoint> entries) {
+    psiFile.accept(
+        new PsiRecursiveElementWalkingVisitor() {
+          @Override
+          public void visitElement(PsiElement element) {
+            String simple = element.getClass().getSimpleName();
+            if (simple.contains("CallExpression")) {
+              String text = element.getText();
+              if (text != null && JS_ROUTE_CALL.matcher(text).find()) {
+                addRouteEntry(project, psiFile, path, element, text, entries);
+              }
+            } else if (simple.contains("Decorator")) {
+              String text = element.getText() == null ? "" : element.getText().trim();
+              if (JS_ROUTE_DECORATOR.matcher(text).find()) {
+                Integer line = elementLine(project, psiFile, element);
+                if (line != null) {
+                  putEntry(entries, path, line, jsContextName(element, psiFile), "route");
+                }
+              }
+            }
+            if (JavaScriptSupport.symbolKind(element) == 1
+                && element instanceof PsiNamedElement named
+                && "main".equals(named.getName())
+                && isTopLevelJs(psiFile, element)) {
+              Integer line = elementLine(project, psiFile, element);
+              if (line != null) putEntry(entries, path, line, named.getName(), "main");
+            }
+            super.visitElement(element);
+          }
+        });
+  }
+
+  private static void addRouteEntry(
+      Project project,
+      PsiFile psiFile,
+      String path,
+      PsiElement element,
+      String text,
+      Map<String, EntryPoint> entries) {
+    Integer line = elementLine(project, psiFile, element);
+    if (line == null) return;
+    PsiElement context = jsContext(element);
+    String symbol =
+        context instanceof PsiNamedElement named && named.getName() != null
+            ? named.getName()
+            : routeHandlerSymbol(text);
+    putEntry(entries, path, line, symbol, "route");
+  }
+
+  private static String routeHandlerSymbol(String callText) {
+    java.util.regex.Matcher matcher = JS_ROUTE_HANDLER.matcher(callText);
+    return matcher.find() ? matcher.group(1) : routeSymbol(callText);
+  }
+
+  private static String routeSymbol(String callText) {
+    java.util.regex.Matcher matcher = JS_ROUTE_CALL.matcher(callText);
+    if (!matcher.find()) return "route";
+    return matcher.group().replaceAll("[^\\w.$]", "");
+  }
+
+  private static String jsContextName(PsiElement element, PsiFile file) {
+    PsiElement context = jsContext(element);
+    if (context instanceof PsiNamedElement named && named.getName() != null) return named.getName();
+    return fileStemName(file);
+  }
+
+  private static PsiElement jsContext(PsiElement element) {
+    for (PsiElement current = element.getParent();
+        current != null && !(current instanceof PsiFile);
+        current = current.getParent()) {
+      if (JavaScriptSupport.symbolKind(current) == 1) return current;
+    }
+    return null;
+  }
+
+  private static String fileStemName(PsiFile file) {
+    String name = file.getName();
+    int dot = name.lastIndexOf('.');
+    return dot > 0 ? name.substring(0, dot) : name;
+  }
+
+  private static boolean isTopLevelJs(PsiFile file, PsiElement element) {
+    for (PsiElement current = element.getParent();
+        current != null && current != file;
+        current = current.getParent()) {
+      if (JavaScriptSupport.symbolKind(current) >= 0) return false;
+    }
+    return true;
+  }
+
+  private static FileRef resolveJsFile(
+      Map<String, FileRef> jsFileIndex, String sourcePath, String specifier) {
+    String cleaned = specifier.trim();
+    int query = cleaned.indexOf('?');
+    if (query >= 0) cleaned = cleaned.substring(0, query);
+    int hash = cleaned.indexOf('#');
+    if (hash >= 0) cleaned = cleaned.substring(0, hash);
+    if (cleaned.isEmpty()) return null;
+    String relative;
+    if (cleaned.startsWith("./") || cleaned.startsWith("../")) {
+      String dir = parentDirectory(sourcePath);
+      relative = normalizeRelative((dir == null ? "" : dir + "/") + cleaned);
+    } else if (cleaned.startsWith("/")) {
+      relative = normalizeRelative(cleaned.substring(1));
+    } else {
+      return null; // 裸包名/别名由 tsconfig 解析器处理（依赖），入口只接受项目路径
+    }
+    if (relative == null) return null;
+    FileRef direct = jsFileIndex.get(relative);
+    if (direct != null) return direct;
+    for (String extension : JS_EXTENSIONS) {
+      FileRef candidate = jsFileIndex.get(relative + extension);
+      if (candidate != null) return candidate;
+    }
+    for (String extension : JS_EXTENSIONS) {
+      FileRef candidate = jsFileIndex.get(relative + "/index" + extension);
+      if (candidate != null) return candidate;
+    }
+    return null;
+  }
+
+  private static String normalizeRelative(String value) {
+    String[] parts = value.replace('\\', '/').split("/");
+    Deque<String> stack = new ArrayDeque<>();
+    for (String part : parts) {
+      if (part.isEmpty() || ".".equals(part)) continue;
+      if ("..".equals(part)) {
+        if (stack.isEmpty()) return null;
+        stack.removeLast();
+      } else {
+        stack.addLast(part);
+      }
+    }
+    return String.join("/", stack);
+  }
+
   private static void putEntry(
       Map<String, EntryPoint> entries, String file, int line, String symbol, String kind) {
     String key = file + "|" + line + "|" + symbol + "|" + kind;
@@ -551,7 +935,12 @@ final class ProjectMapService {
   }
 
   private static Integer methodLine(Project project, PsiFile file, PsiMethod method) {
-    TextRange range = method.getTextRange();
+    return elementLine(project, file, method);
+  }
+
+  private static Integer elementLine(
+      Project project, PsiFile file, PsiElement element) {
+    TextRange range = element.getTextRange();
     if (range == null) return null;
     Document document = PsiDocumentManager.getInstance(project).getDocument(file);
     if (document != null) {
@@ -580,43 +969,495 @@ final class ProjectMapService {
   }
 
   private static DepsResult computeDeps(Project project, String root, Index index) {
+    Map<String, Map<String, Integer>> counts = new TreeMap<>();
+    if (JavaSupport.available()) collectJavaDeps(project, root, index, counts);
+    if (PythonSupport.available()) collectPythonDeps(project, root, index, counts);
+    if (JavaScriptSupport.available()) collectJsDeps(project, root, index, counts);
+    return new DepsResult(flattenDependencies(counts), findCycles(counts));
+  }
+
+  private static void collectJavaDeps(
+      Project project, String root, Index index, Map<String, Map<String, Integer>> counts) {
     PsiManager psiManager = PsiManager.getInstance(project);
     Map<String, Set<String>> packageOwners = new TreeMap<>();
     List<ModuleJavaFile> files = new ArrayList<>();
     for (ModuleInfo module : index.modules) {
       for (String path : module.filePaths) {
         if (!path.endsWith(".java")) continue;
-        VirtualFile virtualFile =
-            VfsUtil.findFileByIoFile(Paths.get(root).resolve(path).toFile(), true);
-        if (virtualFile == null) continue;
-        PsiFile psiFile = psiManager.findFile(virtualFile);
-        if (!(psiFile instanceof PsiJavaFile javaFile)) continue;
-        files.add(new ModuleJavaFile(module.path, javaFile));
-        String packageName = javaFile.getPackageName();
-        if (!packageName.isEmpty()) {
-          packageOwners.computeIfAbsent(packageName, key -> new TreeSet<>()).add(module.path);
+        try {
+          VirtualFile virtualFile =
+              VfsUtil.findFileByIoFile(Paths.get(root).resolve(path).toFile(), true);
+          if (virtualFile == null) continue;
+          PsiFile psiFile = psiManager.findFile(virtualFile);
+          if (!(psiFile instanceof PsiJavaFile javaFile)) continue;
+          files.add(new ModuleJavaFile(module.path, javaFile));
+          String packageName = javaFile.getPackageName();
+          if (!packageName.isEmpty()) {
+            packageOwners.computeIfAbsent(packageName, key -> new TreeSet<>()).add(module.path);
+          }
+        } catch (Throwable t) {
+          Log.info("project_map java dependency scan skipped (" + path + "): " + t);
         }
       }
     }
 
-    Map<String, Map<String, Integer>> counts = new TreeMap<>();
     for (ModuleJavaFile file : files) {
-      PsiImportList importList = file.javaFile.getImportList();
-      if (importList == null) continue;
-      for (PsiImportStatementBase statement : importList.getAllImportStatements()) {
-        String target = importTarget(statement);
-        if (target == null) continue;
-        Set<String> owners = longestPackageOwners(target, packageOwners);
-        if (owners == null) continue;
-        for (String owner : owners) {
-          if (owner.equals(file.modulePath)) continue; // from≠to
-          counts
-              .computeIfAbsent(file.modulePath, key -> new TreeMap<>())
-              .merge(owner, 1, Integer::sum); // 同一文件多行同一目标计多
+      try {
+        PsiImportList importList = file.javaFile.getImportList();
+        if (importList == null) continue;
+        for (PsiImportStatementBase statement : importList.getAllImportStatements()) {
+          String target = importTarget(statement);
+          if (target == null) continue;
+          Set<String> owners = longestPackageOwners(target, packageOwners);
+          if (owners == null) continue;
+          for (String owner : owners) {
+            if (owner.equals(file.modulePath)) continue; // from≠to
+            counts
+                .computeIfAbsent(file.modulePath, key -> new TreeMap<>())
+                .merge(owner, 1, Integer::sum); // 同一文件多行同一目标计多
+          }
+        }
+      } catch (Throwable t) {
+        Log.info("project_map java dependency import skipped (" + file.modulePath + "): " + t);
+      }
+    }
+  }
+
+  // ---- Python 依赖（import/from-import 归并到模块级） ----
+
+  private static void collectPythonDeps(
+      Project project, String root, Index index, Map<String, Map<String, Integer>> counts) {
+    PsiManager psiManager = PsiManager.getInstance(project);
+    Map<String, Set<String>> moduleOwners = new TreeMap<>();
+    for (ModuleInfo module : index.modules) {
+      registerDotted(moduleOwners, module.path.replace('/', '.'), module.path);
+    }
+
+    List<ModulePythonFile> files = new ArrayList<>();
+    for (ModuleInfo module : index.modules) {
+      for (String path : module.filePaths) {
+        if (!path.endsWith(".py")) continue;
+        VirtualFile virtualFile =
+            VfsUtil.findFileByIoFile(Paths.get(root).resolve(path).toFile(), true);
+        if (virtualFile == null) continue;
+        try {
+          PsiFile psiFile = psiManager.findFile(virtualFile);
+          if (psiFile == null) continue;
+          files.add(new ModulePythonFile(module.path, path, psiFile));
+          registerDotted(
+              moduleOwners, path.substring(0, path.length() - 3).replace('/', '.'), module.path);
+        } catch (Throwable t) {
+          // 安装不完整时该文件不贡献依赖（不影响其他文件）
+          Log.warn("project_map python import scan failed (" + path + "): " + t);
         }
       }
     }
-    return new DepsResult(flattenDependencies(counts), findCycles(counts));
+
+    for (ModulePythonFile file : files) {
+      try {
+        file.psiFile.accept(
+            new PsiRecursiveElementWalkingVisitor() {
+              @Override
+              public void visitElement(PsiElement element) {
+                String simple = element.getClass().getSimpleName();
+                if (simple.startsWith("PyImportStatement")
+                    || simple.startsWith("PyFromImportStatement")) {
+                  applyPythonImport(
+                      element.getText(), file.relativePath, file.modulePath, moduleOwners, counts);
+                }
+                super.visitElement(element);
+              }
+            });
+      } catch (Throwable t) {
+        Log.warn("project_map python import walk failed (" + file.relativePath + "): " + t);
+      }
+    }
+  }
+
+  private static final class ModulePythonFile {
+    final String modulePath;
+    final String relativePath;
+    final PsiFile psiFile;
+
+    ModulePythonFile(String modulePath, String relativePath, PsiFile psiFile) {
+      this.modulePath = modulePath;
+      this.relativePath = relativePath;
+      this.psiFile = psiFile;
+    }
+  }
+
+  /** 项目内点分模块名 → 模块 path；`src/` 源根布局同时登记去掉前缀的写法。 */
+  private static void registerDotted(
+      Map<String, Set<String>> owners, String dotted, String modulePath) {
+    if (dotted.isEmpty()) return;
+    owners.computeIfAbsent(dotted, key -> new TreeSet<>()).add(modulePath);
+    if (dotted.startsWith("src.")) {
+      owners.computeIfAbsent(dotted.substring(4), key -> new TreeSet<>()).add(modulePath);
+    }
+  }
+
+  /** 一条 import 语句按目标模块归并；同一语句内同一模块只计 1，from≠to。 */
+  private static void applyPythonImport(
+      String rawText,
+      String relativePath,
+      String modulePath,
+      Map<String, Set<String>> owners,
+      Map<String, Map<String, Integer>> counts) {
+    List<String> targets = pythonImportTargets(rawText, relativePath);
+    if (targets.isEmpty()) return;
+    Set<String> resolved = new TreeSet<>();
+    for (String target : targets) {
+      Set<String> found = longestDottedOwners(target, owners);
+      if (found != null) resolved.addAll(found);
+    }
+    resolved.remove(modulePath);
+    for (String owner : resolved) {
+      counts
+          .computeIfAbsent(modulePath, key -> new TreeMap<>())
+          .merge(owner, 1, Integer::sum);
+    }
+  }
+
+  /** 解析 `import a.b` / `from a.b import c`（含相对点号、括号展开与 `as` 别名）。 */
+  private static List<String> pythonImportTargets(String rawText, String relativePath) {
+    String text =
+        rawText.replace('\r', ' ').replace('\n', ' ').replace('\\', ' ').replace('\t', ' ');
+    text = text.replace('(', ' ').replace(')', ' ').replaceAll("\\s+", " ").trim();
+    List<String> targets = new ArrayList<>();
+    if (text.startsWith("import ")) {
+      for (String part : text.substring("import ".length()).split(",")) {
+        String name = withoutAlias(part);
+        if (!name.isEmpty()) targets.add(name);
+      }
+      return targets;
+    }
+    if (!text.startsWith("from ")) return targets;
+    int importIndex = text.indexOf(" import ");
+    if (importIndex < 0) return targets;
+    String module = text.substring("from ".length(), importIndex).trim();
+    String imported = text.substring(importIndex + " import ".length()).trim();
+    List<String> names = new ArrayList<>();
+    for (String part : imported.split(",")) {
+      String name = withoutAlias(part);
+      if (!name.isEmpty() && !"*".equals(name)) names.add(name);
+    }
+    if (module.startsWith(".")) {
+      addRelativePythonTargets(module, names, relativePath, targets);
+      return targets;
+    }
+    if (!module.isEmpty()) {
+      targets.add(module);
+      for (String name : names) targets.add(module + "." + name);
+    }
+    return targets;
+  }
+
+  private static String withoutAlias(String part) {
+    String value = part.trim();
+    int alias = value.indexOf(" as ");
+    if (alias >= 0) value = value.substring(0, alias).trim();
+    return value.replaceAll("\\s+", "");
+  }
+
+  /** 相对导入：`.`=当前包，`..`=父包；同时生成 src/ 与去 src/ 两种候选。 */
+  private static void addRelativePythonTargets(
+      String module, List<String> names, String relativePath, List<String> targets) {
+    int dots = 0;
+    while (dots < module.length() && module.charAt(dots) == '.') dots++;
+    String rest = module.substring(dots).trim();
+    String dir = parentDirectory(relativePath);
+    if (dir == null) return;
+    String[] parts = dir.split("/");
+    int keep = parts.length - (dots - 1);
+    if (keep < 0) return;
+    String base = String.join(".", Arrays.copyOfRange(parts, 0, keep));
+    Set<String> bases = new LinkedHashSet<>();
+    bases.add(base);
+    if (base.startsWith("src.")) bases.add(base.substring(4));
+    for (String candidate : bases) {
+      String target = rest.isEmpty() ? candidate : candidate + "." + rest;
+      if (candidate.isEmpty() || target.isEmpty()) continue;
+      targets.add(target);
+      for (String name : names) targets.add(target + "." + name);
+    }
+  }
+
+  /** 最长匹配的项目模块前缀 → 属主模块集合；未命中（stdlib/第三方）返回 null。 */
+  private static Set<String> longestDottedOwners(
+      String qualifiedName, Map<String, Set<String>> owners) {
+    String[] parts = qualifiedName.split("\\.");
+    for (int cut = parts.length; cut >= 1; cut--) {
+      String candidate = String.join(".", Arrays.copyOfRange(parts, 0, cut));
+      Set<String> found = owners.get(candidate);
+      if (found != null) return found;
+    }
+    return null;
+  }
+
+  // ---- JS/TS 依赖（import/export/require + 相对路径/tsconfig paths） ----
+
+  private static void collectJsDeps(
+      Project project, String root, Index index, Map<String, Map<String, Integer>> counts) {
+    PsiManager psiManager = PsiManager.getInstance(project);
+    Path rootPath = Paths.get(root).toAbsolutePath().normalize();
+    Map<String, String> fileOwners = new HashMap<>();
+    for (ModuleInfo module : index.modules) {
+      for (String path : module.filePaths) {
+        if (JavaScriptSupport.isJsFile(path)) fileOwners.put(path, module.path);
+      }
+    }
+    Map<String, JsConfig> configs = new HashMap<>();
+
+    for (ModuleInfo module : index.modules) {
+      for (String path : module.filePaths) {
+        if (!JavaScriptSupport.isJsFile(path)) continue;
+        VirtualFile virtualFile =
+            VfsUtil.findFileByIoFile(rootPath.resolve(path).toFile(), true);
+        if (virtualFile == null) continue;
+        try {
+          PsiFile psiFile = psiManager.findFile(virtualFile);
+          if (psiFile == null) continue;
+          Set<String> owners = new TreeSet<>();
+          for (String specifier : jsImportSpecifiers(psiFile)) {
+            String owner =
+                resolveJsSpecifierOwner(rootPath, path, specifier, fileOwners, configs);
+            if (owner != null) owners.add(owner);
+          }
+          owners.remove(module.path);
+          if (owners.isEmpty()) continue;
+          Map<String, Integer> row =
+              counts.computeIfAbsent(module.path, key -> new TreeMap<>());
+          for (String owner : owners) row.merge(owner, 1, Integer::sum);
+        } catch (Throwable t) {
+          Log.warn("project_map js import scan failed (" + path + "): " + t);
+        }
+      }
+    }
+  }
+
+  private static Set<String> jsImportSpecifiers(PsiFile psiFile) {
+    Set<String> specifiers = new LinkedHashSet<>();
+    psiFile.accept(
+        new PsiRecursiveElementWalkingVisitor() {
+          @Override
+          public void visitElement(PsiElement element) {
+            String simple = element.getClass().getSimpleName();
+            if (simple.contains("Import")
+                || simple.contains("Export")
+                || simple.contains("CallExpression")) {
+              String text = element.getText();
+              if (text != null) {
+                if (simple.contains("Import") || simple.contains("Export")) {
+                  addSpecifiers(JS_IMPORT_FROM, text, specifiers);
+                  addSpecifiers(JS_IMPORT_SIDE_EFFECT, text, specifiers);
+                }
+                if (simple.contains("CallExpression")) {
+                  addSpecifiers(JS_REQUIRE, text, specifiers);
+                  addSpecifiers(JS_DYNAMIC_IMPORT, text, specifiers);
+                }
+              }
+            }
+            super.visitElement(element);
+          }
+        });
+    return specifiers;
+  }
+
+  private static void addSpecifiers(
+      Pattern pattern, String text, Set<String> specifiers) {
+    java.util.regex.Matcher matcher = pattern.matcher(text);
+    while (matcher.find()) {
+      String value = matcher.group(1);
+      if (value != null && !value.isEmpty()) specifiers.add(value.trim());
+    }
+  }
+
+  private static String resolveJsSpecifierOwner(
+      Path rootPath,
+      String sourcePath,
+      String rawSpecifier,
+      Map<String, String> fileOwners,
+      Map<String, JsConfig> configs) {
+    String cleaned = rawSpecifier.trim();
+    int query = cleaned.indexOf('?');
+    if (query >= 0) cleaned = cleaned.substring(0, query);
+    int hash = cleaned.indexOf('#');
+    if (hash >= 0) cleaned = cleaned.substring(0, hash);
+    if (cleaned.isEmpty()) return null;
+
+    String relative = null;
+    if (cleaned.startsWith("./") || cleaned.startsWith("../")) {
+      String dir = parentDirectory(sourcePath);
+      relative = normalizeRelative((dir == null ? "" : dir + "/") + cleaned);
+    } else if (cleaned.startsWith("/")) {
+      relative = normalizeRelative(cleaned.substring(1));
+    } else {
+      try {
+        JsConfig config = findJsConfig(rootPath, sourcePath, configs);
+        if (config != null) {
+          String aliasOwner = resolveJsAlias(config, rootPath, cleaned, fileOwners);
+          if (aliasOwner != null) return aliasOwner;
+          Path baseCandidate = config.baseUrl.resolve(cleaned).normalize();
+          if (baseCandidate.startsWith(rootPath)) {
+            String owner =
+                ownerOfRelative(
+                    rootPath.relativize(baseCandidate).toString().replace('\\', '/'), fileOwners);
+            if (owner != null) return owner;
+          }
+        }
+      } catch (Throwable ignored) {
+        // 非法路径（node:fs / bun:test / URL 等）：按外部依赖忽略
+        return null;
+      }
+      // 裸协议/imports map 不是项目路径
+      if (cleaned.contains(":") || cleaned.startsWith("#")) return null;
+      relative = normalizeRelative(cleaned);
+    }
+    if (relative == null) return null;
+    return ownerOfRelative(relative, fileOwners);
+  }
+
+  private static String ownerOfRelative(
+      String relative, Map<String, String> fileOwners) {
+    String direct = fileOwners.get(relative);
+    if (direct != null) return direct;
+    for (String extension : JS_EXTENSIONS) {
+      if (!relative.endsWith(extension)) continue;
+      String stem = relative.substring(0, relative.length() - extension.length());
+      for (String replacement : JS_EXTENSIONS) {
+        String owner = fileOwners.get(stem + replacement);
+        if (owner != null) return owner;
+      }
+    }
+    for (String extension : JS_EXTENSIONS) {
+      String owner = fileOwners.get(relative + extension);
+      if (owner != null) return owner;
+    }
+    for (String extension : JS_EXTENSIONS) {
+      String owner = fileOwners.get(relative + "/index" + extension);
+      if (owner != null) return owner;
+    }
+    return null;
+  }
+
+  private static final class JsConfig {
+    final Path baseUrl;
+    final List<JsPathAlias> aliases;
+
+    JsConfig(Path baseUrl, List<JsPathAlias> aliases) {
+      this.baseUrl = baseUrl;
+      this.aliases = aliases;
+    }
+  }
+
+  private static final class JsPathAlias {
+    final String pattern;
+    final List<String> targets;
+
+    JsPathAlias(String pattern, List<String> targets) {
+      this.pattern = pattern;
+      this.targets = targets;
+    }
+
+    /** 匹配成功返回 `*` 捕获段（无 `*` 返回空串），不匹配返回 null。 */
+    String match(String specifier) {
+      int star = pattern.indexOf('*');
+      if (star < 0) return pattern.equals(specifier) ? "" : null;
+      String prefix = pattern.substring(0, star);
+      String suffix = pattern.substring(star + 1);
+      if (!specifier.startsWith(prefix) || !specifier.endsWith(suffix)) return null;
+      if (specifier.length() < prefix.length() + suffix.length()) return null;
+      return specifier.substring(prefix.length(), specifier.length() - suffix.length());
+    }
+  }
+
+  private static JsConfig findJsConfig(
+      Path rootPath, String sourcePath, Map<String, JsConfig> configs) {
+    String dir = parentDirectory(sourcePath);
+    Path current = dir == null ? rootPath : rootPath.resolve(dir).normalize();
+    for (int depth = 0;
+        current != null && current.startsWith(rootPath) && depth < JS_CONFIG_SCAN_DEPTH;
+        depth++, current = current.getParent()) {
+      String key = current.toString();
+      if (!configs.containsKey(key)) {
+        JsConfig parsed = readJsConfig(current.resolve("tsconfig.json"));
+        if (parsed == null) parsed = readJsConfig(current.resolve("jsconfig.json"));
+        configs.put(key, parsed);
+      }
+      JsConfig found = configs.get(key);
+      if (found != null) return found;
+      if (current.equals(rootPath)) break;
+    }
+    return null;
+  }
+
+  /** 读取 compilerOptions.baseUrl / paths（不处理 extends；单个 `*` 模式）。 */
+  private static JsConfig readJsConfig(Path file) {
+    if (!Files.isRegularFile(file)) return null;
+    try {
+      JsonObject json = JsonParser.parseString(Files.readString(file)).getAsJsonObject();
+      JsonElement optionsElement = json.get("compilerOptions");
+      JsonObject options =
+          optionsElement != null && optionsElement.isJsonObject()
+              ? optionsElement.getAsJsonObject()
+              : new JsonObject();
+      Path configDir = file.getParent();
+      Path baseUrl = configDir;
+      JsonElement baseUrlElement = options.get("baseUrl");
+      if (baseUrlElement != null
+          && baseUrlElement.isJsonPrimitive()
+          && baseUrlElement.getAsJsonPrimitive().isString()) {
+        baseUrl = configDir.resolve(baseUrlElement.getAsString()).normalize();
+      }
+      List<JsPathAlias> aliases = new ArrayList<>();
+      JsonElement pathsElement = options.get("paths");
+      if (pathsElement != null && pathsElement.isJsonObject()) {
+        for (Map.Entry<String, JsonElement> entry : pathsElement.getAsJsonObject().entrySet()) {
+          if (!entry.getValue().isJsonArray()) continue;
+          List<String> targets = new ArrayList<>();
+          for (JsonElement target : entry.getValue().getAsJsonArray()) {
+            if (target.isJsonPrimitive() && target.getAsJsonPrimitive().isString()) {
+              targets.add(target.getAsString());
+            }
+          }
+          if (!targets.isEmpty()) aliases.add(new JsPathAlias(entry.getKey(), targets));
+        }
+      }
+      // 更具体的模式优先（前缀越长越优先；无通配符按整串长度）
+      aliases.sort(
+          Comparator.comparingInt(
+                  (JsPathAlias alias) -> {
+                    int star = alias.pattern.indexOf('*');
+                    return star < 0 ? alias.pattern.length() : star;
+                  })
+              .reversed());
+      return new JsConfig(baseUrl, aliases);
+    } catch (Throwable t) {
+      Log.warn("tsconfig parse failed (" + file + "): " + t);
+      return null;
+    }
+  }
+
+  private static String resolveJsAlias(
+      JsConfig config, Path rootPath, String specifier, Map<String, String> fileOwners) {
+    for (JsPathAlias alias : config.aliases) {
+      String star = alias.match(specifier);
+      if (star == null) continue;
+      for (String target : alias.targets) {
+        String expanded = target.replace("*", star);
+        try {
+          Path candidate = config.baseUrl.resolve(expanded).normalize();
+          if (!candidate.startsWith(rootPath)) continue;
+          String owner =
+              ownerOfRelative(
+                  rootPath.relativize(candidate).toString().replace('\\', '/'), fileOwners);
+          if (owner != null) return owner;
+        } catch (Throwable ignored) {
+          // 非法 alias 目标跳过
+        }
+      }
+    }
+    return null;
   }
 
   private static final class ModuleJavaFile {

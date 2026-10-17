@@ -74,6 +74,7 @@ export type Event =
   | EventQuestionV2Rejected
   | EventTodoUpdated
   | EventLspUpdated
+  | EventSemanticIndexing
   | EventPermissionAsked
   | EventPermissionReplied
   | EventTuiPromptAppend2
@@ -1452,6 +1453,17 @@ export type GlobalEvent = {
       }
     | {
         id: string
+        type: "semantic.indexing"
+        properties: {
+          status: "starting" | "indexing" | "ready" | "failed"
+          progress: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+          current?: string
+          phase?: string
+          error?: string
+        }
+      }
+    | {
+        id: string
         type: "permission.asked"
         properties: {
           id: string
@@ -2022,6 +2034,7 @@ export type Config = {
         description?: string
         prompt?: string
         variant?: string
+        autonomy?: Array<string>
       }>
       max_parallel?: number
       aggregate?: "concat" | "none"
@@ -2101,6 +2114,13 @@ export type Config = {
               }
             }
       }
+  semantic?: {
+    enabled?: boolean
+    command?: Array<string>
+    socket_dir?: string
+    idle_timeout_ms?: number
+    exclude?: Array<string>
+  }
   instructions?: Array<string>
   layout?: LayoutConfig
   permission?: PermissionConfig
@@ -2644,6 +2664,14 @@ export type ProviderAuthError1 = {
   }
 }
 
+export type SemanticStatusInfo = {
+  status: "disabled" | "idle" | "starting" | "indexing" | "ready" | "failed"
+  progress: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  phase?: string
+  current?: string
+  error?: string
+}
+
 export type NotFoundError = {
   name: "NotFoundError"
   data: {
@@ -3026,6 +3054,7 @@ export type V2Event =
   | QuestionV2Rejected
   | TodoUpdated
   | LspUpdated
+  | SemanticIndexing
   | PermissionAsked
   | PermissionReplied
   | TuiPromptAppend
@@ -5916,6 +5945,27 @@ export type LspUpdated = {
   }
 }
 
+export type SemanticIndexing = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "semantic.indexing"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    status: "starting" | "indexing" | "ready" | "failed"
+    progress: number | "NaN" | "Infinity" | "-Infinity"
+    current?: string
+    phase?: string
+    error?: string
+  }
+}
+
 export type PermissionAsked = {
   id: string
   metadata?: {
@@ -7148,6 +7198,18 @@ export type EventLspUpdated = {
   }
 }
 
+export type EventSemanticIndexing = {
+  id: string
+  type: "semantic.indexing"
+  properties: {
+    status: "starting" | "indexing" | "ready" | "failed"
+    progress: number | "NaN" | "Infinity" | "-Infinity"
+    current?: string
+    phase?: string
+    error?: string
+  }
+}
+
 export type EventPermissionAsked = {
   id: string
   type: "permission.asked"
@@ -7679,6 +7741,7 @@ export type GlobalHealthResponses = {
   200: {
     healthy: true
     version: string
+    build: string
   }
 }
 
@@ -9868,6 +9931,62 @@ export type ProviderOauthCallbackResponses = {
 }
 
 export type ProviderOauthCallbackResponse = ProviderOauthCallbackResponses[keyof ProviderOauthCallbackResponses]
+
+export type SemanticStatusData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/semantic/status"
+}
+
+export type SemanticStatusErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type SemanticStatusError = SemanticStatusErrors[keyof SemanticStatusErrors]
+
+export type SemanticStatusResponses = {
+  /**
+   * Semantic engine status snapshot
+   */
+  200: SemanticStatusInfo
+}
+
+export type SemanticStatusResponse = SemanticStatusResponses[keyof SemanticStatusResponses]
+
+export type SemanticWarmupData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/semantic/warmup"
+}
+
+export type SemanticWarmupErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type SemanticWarmupError = SemanticWarmupErrors[keyof SemanticWarmupErrors]
+
+export type SemanticWarmupResponses = {
+  /**
+   * Semantic engine status snapshot after warmup trigger
+   */
+  200: SemanticStatusInfo
+}
+
+export type SemanticWarmupResponse = SemanticWarmupResponses[keyof SemanticWarmupResponses]
 
 export type SessionListData = {
   body?: never

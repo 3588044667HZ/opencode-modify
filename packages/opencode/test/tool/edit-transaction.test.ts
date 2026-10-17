@@ -7,6 +7,7 @@ import path from "path"
 import { Agent } from "../../src/agent/agent"
 import { Semantic } from "@/semantic/manager"
 import { SessionID, MessageID } from "../../src/session/schema"
+import { SessionLedger } from "../../src/session/ledger"
 import { EditTransactionTool, Parameters } from "../../src/tool/edit-transaction"
 import { Truncate } from "@/tool/truncate"
 import { Tool } from "@/tool/tool"
@@ -14,6 +15,7 @@ import { provideInstance, testInstanceStoreLayer, tmpdirScoped } from "../fixtur
 import { pollWithTimeout, testEffect } from "../lib/effect"
 import {
   SAMPLE_EDIT_TRANSACTION_FAILURE_RENDER,
+  SAMPLE_EDIT_TRANSACTION_MISMATCH_RENDER,
   SAMPLE_EDIT_TRANSACTION_SUCCESS_RENDER,
 } from "../semantic/fixture"
 
@@ -21,7 +23,9 @@ const fakeDaemon = path.join(import.meta.dir, "..", "semantic", "fake-daemon.ts"
 const command = (...flags: string[]) => [process.execPath, fakeDaemon, ...flags]
 
 const toolLayer = () =>
-  LayerNode.compile(LayerNode.group([Semantic.node, Agent.node, Truncate.node, CrossSpawnSpawner.node]))
+  LayerNode.compile(
+    LayerNode.group([Semantic.node, Agent.node, Truncate.node, CrossSpawnSpawner.node, SessionLedger.node]),
+  )
 const it = testEffect(Layer.mergeAll(toolLayer(), testInstanceStoreLayer))
 
 const ctx = {
@@ -121,6 +125,22 @@ describe("tool.edit_transaction", () => {
 
         expect(result.output).toBe(SAMPLE_EDIT_TRANSACTION_FAILURE_RENDER)
         expect(result.metadata).toMatchObject({ applied: false, error_code: -32011, changes_total: 3 })
+      }),
+    20_000,
+  )
+
+  it.live(
+    "surfaces a VERSION_MISMATCH delta reconciliation with the rollback notice",
+    () =>
+      Effect.gen(function* () {
+        const dir = yield* tmpdirScoped({
+          config: { semantic: { enabled: true, command: command("--edit-transaction-error=mismatch") } },
+        })
+
+        const result = yield* run(dir, args)
+
+        expect(result.output).toBe(SAMPLE_EDIT_TRANSACTION_MISMATCH_RENDER)
+        expect(result.metadata).toMatchObject({ applied: false, error_code: -32012 })
       }),
     20_000,
   )

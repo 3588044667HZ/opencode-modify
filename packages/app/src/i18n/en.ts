@@ -1188,6 +1188,8 @@ export const dict = {
 
   "semantic.warmup.starting": "Analyzing project...",
   "semantic.warmup.indexing": "Analyzing project... {{progress}}% ({{current}})",
+  "semantic.warmup.progress": "Analyzing project... {{progress}}%",
+  "semantic.warmup.action": "Warm up engine",
   "semantic.warmup.failed.title": "Semantic engine failed to start",
   "semantic.warmup.failed.description": "Indexing is unavailable. Queued requests continue without semantic context.",
 }

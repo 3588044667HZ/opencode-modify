@@ -5,8 +5,10 @@ import { Semantic } from "@/semantic/manager"
 import { render } from "@/semantic/render"
 import { Protocol } from "@/semantic/protocol"
 import { InstanceState } from "@/effect/instance-state"
+import { SessionLedger } from "@/session/ledger"
 import { assertExternalDirectoryEffect } from "./external-directory"
 import { FSUtil } from "@opencode-ai/core/fs-util"
+import { FALLBACK_HINT } from "./fallback-option-direct"
 
 const DESCRIPTION = `Read a file as a token semantic view produced by the semantic engine.
 
@@ -17,6 +19,8 @@ Views:
 - sequential: read forward from "position"
 - continue: continue reading from where the previous view of this file ended
 - definition: jump to the definition of "symbol"
+
+Reconciliation: pass "known_version" (a version from an earlier read_view of the same file) to reconcile instead of re-reading. A file that still matches returns a micro result (unchanged); otherwise the engine returns a bounded line delta plus the new version, falling back to a full view only for large changes.
 
 The semantic engine may still be indexing; in that case the response explains the current progress and you can retry shortly.`
 
@@ -35,6 +39,10 @@ export const Parameters = Schema.Struct({
   symbol: Schema.optional(Schema.String).annotate({
     description: "Symbol name to resolve (definition view)",
   }),
+  known_version: Schema.optional(Schema.String).annotate({
+    description:
+      "Version stamp from an earlier read_view of this file: reconcile against it (unchanged micro result, or a bounded delta plus the new version) instead of re-reading the whole view",
+  }),
 })
 
 type Metadata = {
@@ -43,6 +51,7 @@ type Metadata = {
   version?: string
   lines?: number
   symbols?: number
+  unchanged?: boolean
   unavailable?: boolean
 }
 
@@ -50,6 +59,7 @@ export const ReadViewTool = Tool.define(
   "read_view",
   Effect.gen(function* () {
     const semantic = yield* Semantic.Service
+    const ledger = yield* SessionLedger.Service
     return {
       description: DESCRIPTION,
       parameters: Parameters,
@@ -79,10 +89,17 @@ export const ReadViewTool = Tool.define(
               view: args.view,
               ...(args.position === undefined ? {} : { position: args.position }),
               ...(args.symbol === undefined ? {} : { symbol: args.symbol }),
+              ...(args.known_version === undefined ? {} : { known_version: args.known_version }),
             })
             .pipe(
               Effect.map((result) => ({ ok: true as const, result })),
-              Effect.catch((error) => Effect.succeed({ ok: false as const, message: Protocol.describeError(error) })),
+              Effect.catch((error) =>
+                Effect.succeed({
+                  ok: false as const,
+                  message: Protocol.describeError(error),
+                  fallback: error instanceof Protocol.RpcError && error.code === Protocol.ErrorCode.fileNotFound,
+                }),
+              ),
             )
 
           if (!outcome.ok) {
@@ -90,7 +107,28 @@ export const ReadViewTool = Tool.define(
             return {
               title,
               metadata,
-              output: `read_view unavailable: ${outcome.message}`,
+              output: [`read_view unavailable: ${outcome.message}`, ...(outcome.fallback ? [FALLBACK_HINT] : [])].join(
+                "\n",
+              ),
+            }
+          }
+
+          // D5：三个视图变体都携带 version，登记后 digest 才能及时发现外部变更。
+          yield* ledger.noteRead({ sessionID: ctx.sessionID, file: filepath, version: outcome.result.version })
+
+          if (Protocol.isReadViewUnchanged(outcome.result)) {
+            return {
+              title,
+              metadata: { view: args.view, file: filepath, version: outcome.result.version, unchanged: true },
+              output: render(outcome.result),
+            }
+          }
+
+          if (Protocol.isReadViewDelta(outcome.result)) {
+            return {
+              title,
+              metadata: { view: args.view, file: filepath, version: outcome.result.version },
+              output: render(outcome.result),
             }
           }
 

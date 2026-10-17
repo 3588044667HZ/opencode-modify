@@ -1227,6 +1227,8 @@ export const dict = {
 
   "semantic.warmup.starting": "正在分析项目...",
   "semantic.warmup.indexing": "正在分析项目... {{progress}}% ({{current}})",
+  "semantic.warmup.progress": "正在分析项目... {{progress}}%",
+  "semantic.warmup.action": "预热语义引擎",
   "semantic.warmup.failed.title": "语义引擎启动失败",
   "semantic.warmup.failed.description": "项目索引不可用，排队中的请求将在无语义上下文中继续执行。",
 } satisfies Partial<Record<Keys, string>>

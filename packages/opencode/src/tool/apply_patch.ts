@@ -304,6 +304,7 @@ export const ApplyPatchTool = Tool.define(
     })
 
     return {
+      hide: true,
       description: DESCRIPTION,
       parameters: Parameters,
       execute: (params: Schema.Schema.Type<typeof Parameters>, ctx: Tool.Context) =>

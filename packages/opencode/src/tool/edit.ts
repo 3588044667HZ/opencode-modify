@@ -64,6 +64,7 @@ export const EditTool = Tool.define(
     const events = yield* EventV2Bridge.Service
 
     return {
+      hide: true,
       description: DESCRIPTION,
       parameters: Parameters,
       execute: (params: Schema.Schema.Type<typeof Parameters>, ctx: Tool.Context) =>

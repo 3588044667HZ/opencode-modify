@@ -183,6 +183,10 @@ import type {
   QuestionReplyErrors,
   QuestionReplyResponses,
   QuestionV2Reply,
+  SemanticStatusErrors,
+  SemanticStatusResponses,
+  SemanticWarmupErrors,
+  SemanticWarmupResponses,
   SessionAbortErrors,
   SessionAbortResponses,
   SessionBlackboardErrors,
@@ -3491,6 +3495,68 @@ export class Provider extends HeyApiClient {
   private _oauth?: Oauth
   get oauth(): Oauth {
     return (this._oauth ??= new Oauth({ client: this.client }))
+  }
+}
+
+export class Semantic extends HeyApiClient {
+  /**
+   * Get semantic engine status
+   *
+   * Get the current semantic engine status snapshot for the active project directory without starting the daemon.
+   */
+  public status<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<SemanticStatusResponses, SemanticStatusErrors, ThrowOnError>({
+      url: "/semantic/status",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Warm up semantic engine
+   *
+   * Trigger a lazy cold start of the semantic engine daemon for the active project directory and return the post-trigger status snapshot. Ongoing progress continues through semantic.indexing events.
+   */
+  public warmup<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SemanticWarmupResponses, SemanticWarmupErrors, ThrowOnError>({
+      url: "/semantic/warmup",
+      ...options,
+      ...params,
+    })
   }
 }
 
@@ -7393,6 +7459,11 @@ export class OpencodeClient extends HeyApiClient {
   private _provider?: Provider
   get provider(): Provider {
     return (this._provider ??= new Provider({ client: this.client }))
+  }
+
+  private _semantic?: Semantic
+  get semantic(): Semantic {
+    return (this._semantic ??= new Semantic({ client: this.client }))
   }
 
   private _session?: Session2

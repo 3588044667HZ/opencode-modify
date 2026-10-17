@@ -1,17 +1,18 @@
 #!/usr/bin/env bun
-// project_map 探针：raw NDJSON 连接 → ping → 可选 --wait-ready（building 轮询到 ready）
+// project_map 探针：读 locator → TCP 连接（raw NDJSON）→ ping → 可选 --wait-ready（building 轮询到 ready）
 // → 发送 {view, scope?}；打印原始响应帧与耗时；--out 时把 result 美化落盘（fixtures 生成用）。
 // --parallel N 时开 N 条连接并发发起同一请求并在 ready 后比较结果是否一致。
-// 用法: bun script/map-probe.ts [socket] [--view structure|dependencies|hot] [--scope s]
+// 用法: bun script/map-probe.ts [locator] [--view structure|dependencies|hot] [--scope s]
 //        [--out file] [--normalize-root] [--wait-ready] [--parallel N] [--raw]
 //        [--params-json '{...}'] [--fail-fast] [--timeout secs] [--no-wait] [--shutdown]
 import net from "node:net"
 import path from "node:path"
 import fs from "node:fs"
+import { connectLocator } from "./connect"
 
 const argv = process.argv.slice(2)
 const options = {
-  socket: "",
+  locator: "",
   view: "structure",
   scope: "",
   out: "",
@@ -43,7 +44,7 @@ for (let i = 0; i < argv.length; i++) {
   else positional.push(arg)
 }
 const scriptDir = import.meta.dir
-options.socket = positional[0] ?? path.resolve(scriptDir, "../.tmp/map.sock")
+options.locator = positional[0] ?? path.resolve(scriptDir, "../.tmp/map.port")
 if (options.failFast) options.waitDaemon = false
 
 if (!options.paramsJson && !["structure", "dependencies", "hot"].includes(options.view)) {
@@ -68,23 +69,10 @@ class Conn {
   private nextId = 0
 
   async connect(deadlineMs: number): Promise<void> {
-    const started = Date.now()
-    for (;;) {
-      const candidate = net.createConnection({ path: options.socket })
-      try {
-        await new Promise<void>((resolve, reject) => {
-          candidate.once("connect", resolve)
-          candidate.once("error", reject)
-        })
-        this.socket = candidate
-        this.attach()
-        return
-      } catch (error) {
-        candidate.destroy()
-        if (Date.now() - started > deadlineMs) throw error
-        await sleep(500)
-      }
-    }
+    const connection = await connectLocator(options.locator, { deadlineMs })
+    this.socket = connection.socket
+    this.buffer = connection.leftover
+    this.attach()
   }
 
   private attach() {
@@ -213,7 +201,7 @@ function writeOut(result: any) {
 async function runSingle() {
   const conn = new Conn()
   await conn.connect(10_000)
-  console.log("[map-probe] connected:", options.socket, `params=${JSON.stringify(params)}`)
+  console.log("[map-probe] connected:", options.locator, `params=${JSON.stringify(params)}`)
   if (options.waitDaemon) await conn.waitDaemonReady()
 
   const started = Date.now()
@@ -241,7 +229,7 @@ async function runParallel() {
     await conn.connect(10_000)
     conns.push(conn)
   }
-  console.log(`[map-probe] connected ${count} clients:`, options.socket, `params=${JSON.stringify(params)}`)
+  console.log(`[map-probe] connected ${count} clients:`, options.locator, `params=${JSON.stringify(params)}`)
   if (options.waitDaemon) {
     await Promise.all(conns.map((conn) => conn.waitDaemonReady()))
   }

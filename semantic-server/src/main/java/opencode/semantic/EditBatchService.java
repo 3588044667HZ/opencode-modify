@@ -62,6 +62,13 @@ final class EditBatchService {
   /** 锁等待超过该时长记 WARN，便于诊断写者卡住/系统负载异常。 */
   private static final long LOCK_WAIT_WARN_MS = 1_000L;
 
+  /** D3 changed 摘录上限：行数与字符数（超出截断并置 truncated=true）。 */
+  private static final int CHANGED_MAX_LINES = 40;
+  private static final int CHANGED_MAX_CHARS = 4096;
+
+  /** D3 position_map 条数上限（超出保留旧坐标最靠前的 N 个变更块）。 */
+  private static final int POSITION_MAP_MAX_ENTRIES = 20;
+
   /** 文件锁表：key 为规范化绝对路径；锁保留在 map 中（避免频繁创建），进程退出即消失。edit_batch 与 edit_transaction 共享。 */
   static final ConcurrentHashMap<String, ReentrantLock> FILE_LOCKS = new ConcurrentHashMap<>();
 
@@ -196,7 +203,8 @@ final class EditBatchService {
       detail.addProperty("current_version", oldVersion);
       detail.addProperty("content", content);
       return failure(file, changes.size(), VERSION_MISMATCH, "VERSION_MISMATCH", detail,
-          "文件已变化：用返回的 current_version 与 content 重新读取后再提交");
+          "文件已变化：用返回的 current_version 与 content 重新读取后再提交",
+          Reconcile.mismatch(path, baseVersion, content, oldVersion));
     }
 
     // ⑦ 纯度校验
@@ -280,6 +288,9 @@ final class EditBatchService {
     virtualFile.refresh(false, false);
     syncDocument(project, virtualFile, newContent);
     String newVersion = ReadViewService.versionOf(virtualFile);
+    // D4：写时记录旧/新版本全文，供后续 read_view 与 VERSION_MISMATCH 对账（有界 LRU，不落盘）
+    Reconcile.remember(path, oldVersion, content);
+    Reconcile.remember(path, newVersion, newContent);
 
     // ⑭ 诊断 after 与增量、line_changes
     int[] after = ReadAction.computeBlocking(
@@ -289,7 +300,7 @@ final class EditBatchService {
         + " version=" + oldVersion + "->" + newVersion
         + " diagnostics=" + before[0] + "/" + before[1] + "->" + after[0] + "/" + after[1]);
 
-    return success(file, changes.size(), oldVersion, newVersion, before, after, lineChanges(newContent, changes));
+    return success(file, changes, oldVersion, newVersion, before, after, content, newContent);
   }
 
   // ---- 参数 ----
@@ -486,14 +497,7 @@ final class EditBatchService {
   // ---- line_changes ----
 
   static JsonArray lineChanges(String newContent, List<Change> changes) {
-    // 先按原坐标排序，累计前面替换的长度差得到每个 change 在新内容中的起点
-    List<Change> byStart = new ArrayList<>(changes);
-    byStart.sort(Comparator.comparingInt((Change change) -> change.start));
-    int delta = 0;
-    for (Change change : byStart) {
-      change.newStart = change.start + delta;
-      delta += change.newString.length() - change.oldString.length();
-    }
+    assignNewStarts(changes);
 
     List<JsonObject> entries = new ArrayList<>();
     for (Change change : changes) {
@@ -551,27 +555,55 @@ final class EditBatchService {
   // ---- 结果 ----
 
   private static JsonObject success(
-      String file, int applied, String oldVersion, String newVersion,
-      int[] before, int[] after, JsonArray lineChanges) {
+      String file, List<Change> changes, String oldVersion, String newVersion,
+      int[] before, int[] after, String oldContent, String newContent) {
     JsonObject result = new JsonObject();
     result.addProperty("file", file);
     result.addProperty("applied", true);
-    result.addProperty("changes_applied", applied);
-    result.addProperty("changes_total", applied);
+    result.addProperty("changes_applied", changes.size());
+    result.addProperty("changes_total", changes.size());
     result.addProperty("old_version", oldVersion);
     result.addProperty("new_version", newVersion);
     result.add("diagnostics_delta", counts(after[0] - before[0], after[1] - before[1]));
     result.add("diagnostics_after", counts(after[0], after[1]));
-    result.add("line_changes", lineChanges);
+    result.add("line_changes", lineChanges(newContent, changes));
+    addReconciliation(result, oldContent, newContent, changes, newVersion);
     return result;
+  }
+
+  /** D3：mutation 结果逐文件附加 version / changed / position_map（现有字段不变）。 */
+  static void addReconciliation(
+      JsonObject target, String oldContent, String newContent, List<Change> changes, String version) {
+    target.addProperty("version", version);
+    target.add("changed", changedExcerpt(newContent, changes));
+    target.add("position_map", positionMap(oldContent, changes));
+  }
+
+  /** 先按原坐标排序，累计前面替换的长度差得到每个 change 在新内容中的起点（lineChanges 与对账共用）。 */
+  private static void assignNewStarts(List<Change> changes) {
+    List<Change> byStart = new ArrayList<>(changes);
+    byStart.sort(Comparator.comparingInt((Change change) -> change.start));
+    int delta = 0;
+    for (Change change : byStart) {
+      change.newStart = change.start + delta;
+      delta += change.newString.length() - change.oldString.length();
+    }
   }
 
   private static JsonObject failure(
       String file, int changesTotal, int code, String message, JsonObject detail, String hint) {
+    return failure(file, changesTotal, code, message, detail, hint, null);
+  }
+
+  /** failure 的 D4 扩展：error 内可附 reconciliation（VERSION_MISMATCH 用）。 */
+  private static JsonObject failure(
+      String file, int changesTotal, int code, String message, JsonObject detail, String hint,
+      JsonObject reconciliation) {
     JsonObject error = new JsonObject();
     error.addProperty("code", code);
     error.addProperty("message", message);
     if (detail != null) error.add("detail", detail);
+    if (reconciliation != null) error.add("reconciliation", reconciliation);
     if (hint != null) error.addProperty("hint", hint);
     JsonObject result = new JsonObject();
     result.addProperty("applied", false);
@@ -579,6 +611,79 @@ final class EditBatchService {
     result.addProperty("changes_total", changesTotal);
     result.add("error", error);
     return result;
+  }
+
+  // ---- D3 对账字段（changed / position_map） ----
+
+  /** 变更区域的新内容有界摘录（≤40 行 / 4096 字符；超出置 truncated=true）。 */
+  private static JsonObject changedExcerpt(String newContent, List<Change> changes) {
+    assignNewStarts(changes);
+    int[] starts = Reconcile.lineStarts(newContent);
+    int startLine = Integer.MAX_VALUE;
+    int endLine = 0;
+    for (Change change : changes) {
+      int from = Reconcile.lineOf(starts, Math.min(change.newStart, newContent.length()));
+      int to = change.newString.isEmpty()
+          ? from
+          : Reconcile.lineOf(
+              starts, Math.min(change.newStart + change.newString.length() - 1, newContent.length()));
+      startLine = Math.min(startLine, from);
+      endLine = Math.max(endLine, to);
+    }
+    int includedEnd = Math.min(endLine, startLine + CHANGED_MAX_LINES - 1);
+    StringBuilder text = new StringBuilder();
+    boolean truncated = includedEnd < endLine;
+    for (int line = startLine; line <= includedEnd; line++) {
+      String content = Reconcile.lineText(newContent, starts, line);
+      int separator = text.length() > 0 ? 1 : 0;
+      if (text.length() + separator + content.length() > CHANGED_MAX_CHARS) {
+        int room = CHANGED_MAX_CHARS - text.length() - separator;
+        if (room > 0) {
+          if (separator == 1) text.append('\n');
+          text.append(content, 0, room);
+        }
+        truncated = true;
+        break;
+      }
+      if (separator == 1) text.append('\n');
+      text.append(content);
+    }
+    JsonObject changed = new JsonObject();
+    changed.addProperty("start_line", startLine);
+    changed.addProperty("end_line", includedEnd);
+    changed.addProperty("text", text.toString());
+    changed.addProperty("truncated", truncated);
+    return changed;
+  }
+
+  /**
+   * 逐变更块的旧→新行偏移（≤20 条，按旧坐标升序）：{old_start, old_end, delta}，
+   * delta = 新块换行数 − 旧块换行数，即该块之后旧行号需要叠加的行偏移。
+   */
+  private static JsonArray positionMap(String oldContent, List<Change> changes) {
+    List<Change> sorted = new ArrayList<>(changes);
+    sorted.sort(Comparator.comparingInt((Change change) -> change.start));
+    int[] starts = Reconcile.lineStarts(oldContent);
+    JsonArray map = new JsonArray();
+    for (Change change : sorted) {
+      if (map.size() >= POSITION_MAP_MAX_ENTRIES) break;
+      JsonObject entry = new JsonObject();
+      entry.addProperty(
+          "old_start", Reconcile.lineOf(starts, Math.min(change.start, oldContent.length())));
+      entry.addProperty(
+          "old_end", Reconcile.lineOf(starts, Math.min(change.end - 1, oldContent.length())));
+      entry.addProperty("delta", newlineCount(change.newString) - newlineCount(change.oldString));
+      map.add(entry);
+    }
+    return map;
+  }
+
+  private static int newlineCount(String text) {
+    int count = 0;
+    for (int index = 0; index < text.length(); index++) {
+      if (text.charAt(index) == '\n') count++;
+    }
+    return count;
   }
 
   private static JsonObject counts(int errors, int warnings) {

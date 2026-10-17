@@ -95,7 +95,7 @@ describe("semantic blast_radius client", () => {
   test("decodes a complete blast_radius result and forwards the scope", async () => {
     const requests: any[] = []
     const server = await serve(SAMPLE_BLAST_RESULT, (message) => requests.push(message))
-    const client = await Client.connect(server.path, { connect_timeout_ms: 2_000 })
+    const client = await Client.connect(server.endpoint, { connect_timeout_ms: 2_000 })
 
     const result = await client.blastRadius({ symbol: "load", scope: "file:engine.ts" })
     expect(result).toEqual(SAMPLE_BLAST_RESULT)
@@ -112,7 +112,7 @@ describe("semantic blast_radius client", () => {
         socket.write(frame({ jsonrpc: "2.0", id: message.id, error: { code: -32002, message: "symbol not found" } }))
       }
     })
-    const client = await Client.connect(server.path, { connect_timeout_ms: 2_000 })
+    const client = await Client.connect(server.endpoint, { connect_timeout_ms: 2_000 })
 
     const error = await client.blastRadius({ symbol: "missing" }).catch((cause) => cause)
     expect(error).toBeInstanceOf(Protocol.RpcError)
@@ -135,7 +135,7 @@ describe("semantic blast_radius client", () => {
 
     for (const result of cases) {
       const server = await serve(result)
-      const client = await Client.connect(server.path, { connect_timeout_ms: 2_000 })
+      const client = await Client.connect(server.endpoint, { connect_timeout_ms: 2_000 })
 
       const error = await client.blastRadius({ symbol: "load" }).catch((cause) => cause)
       expect(error).toBeInstanceOf(Protocol.RpcError)

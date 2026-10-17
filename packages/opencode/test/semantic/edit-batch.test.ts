@@ -6,6 +6,10 @@ import { frame, listenServer } from "./fake-server"
 import {
   SAMPLE_EDIT_BATCH_FAILURE,
   SAMPLE_EDIT_BATCH_FAILURE_RENDER,
+  SAMPLE_EDIT_BATCH_MISMATCH,
+  SAMPLE_EDIT_BATCH_MISMATCH_FULL,
+  SAMPLE_EDIT_BATCH_MISMATCH_FULL_RENDER,
+  SAMPLE_EDIT_BATCH_MISMATCH_RENDER,
   SAMPLE_EDIT_BATCH_SUCCESS,
   SAMPLE_EDIT_BATCH_SUCCESS_RENDER,
 } from "./fixture"
@@ -35,6 +39,47 @@ describe("semantic edit_batch render", () => {
 
   test("renders the spec failure sample byte for byte", () => {
     expect(renderEditBatch(SAMPLE_EDIT_BATCH_FAILURE)).toBe(SAMPLE_EDIT_BATCH_FAILURE_RENDER)
+  })
+
+  test("renders a VERSION_MISMATCH delta reconciliation byte for byte", () => {
+    expect(renderEditBatch(SAMPLE_EDIT_BATCH_MISMATCH)).toBe(SAMPLE_EDIT_BATCH_MISMATCH_RENDER)
+  })
+
+  test("renders a VERSION_MISMATCH full re-read hint byte for byte", () => {
+    expect(renderEditBatch(SAMPLE_EDIT_BATCH_MISMATCH_FULL)).toBe(SAMPLE_EDIT_BATCH_MISMATCH_FULL_RENDER)
+  })
+
+  test("renders a multi-line changed excerpt as an indented block and skips an empty position_map", () => {
+    const result: Protocol.EditBatchResult = {
+      ...SAMPLE_EDIT_BATCH_SUCCESS,
+      changed: { start_line: 4, end_line: 6, text: "int count = 7;\nreturn count + 1;", truncated: false },
+      position_map: [],
+    }
+
+    expect(renderEditBatch(result)).toBe(
+      [
+        "edit_batch applied 3/3 changes",
+        "  engine.ts: L42-44 (modified), L67 (modified), L89 (inserted)",
+        "  diagnostics: 2 err → 0 err",
+        "  version: a3f9c2 → b7e1d4",
+        "  changed: L4-6:",
+        "    int count = 7;",
+        "    return count + 1;",
+      ].join("\n"),
+    )
+  })
+
+  test("marks a truncated changed excerpt and renders a negative position_map delta without a plus sign", () => {
+    const result: Protocol.EditBatchResult = {
+      ...SAMPLE_EDIT_BATCH_SUCCESS,
+      changed: { start_line: 10, end_line: 12, text: "x", truncated: true },
+      position_map: [{ old_start: 10, old_end: 14, delta: -3 }],
+    }
+
+    expect(renderEditBatch(result).split("\n").slice(-2)).toEqual([
+      "  changed: L10-12 (truncated): x",
+      "  position_map: old 10-14 → delta -3",
+    ])
   })
 
   test("merges adjacent same-action lines and keeps other runs split", () => {
@@ -200,6 +245,32 @@ describe("semantic edit_batch decoding", () => {
     expect(decode(SAMPLE_EDIT_BATCH_FAILURE)).toEqual(SAMPLE_EDIT_BATCH_FAILURE)
   })
 
+  test("accepts version, changed, position_map, and error reconciliation additions strictly", () => {
+    expect(decode(SAMPLE_EDIT_BATCH_MISMATCH)).toEqual(SAMPLE_EDIT_BATCH_MISMATCH)
+    expect(decode(SAMPLE_EDIT_BATCH_MISMATCH_FULL)).toEqual(SAMPLE_EDIT_BATCH_MISMATCH_FULL)
+  })
+
+  test("rejects unknown reconciliation shapes and excess position_map fields", () => {
+    expect(
+      decode({ ...SAMPLE_EDIT_BATCH_SUCCESS, position_map: [{ old_start: 1, old_end: 2, delta: 0, extra: 1 }] }),
+    ).toBeUndefined()
+    expect(
+      decode({
+        ...SAMPLE_EDIT_BATCH_MISMATCH_FULL,
+        error: {
+          ...SAMPLE_EDIT_BATCH_MISMATCH_FULL.error,
+          reconciliation: { mode: "partial", current_version: "x" },
+        },
+      }),
+    ).toBeUndefined()
+    expect(
+      decode({
+        ...SAMPLE_EDIT_BATCH_MISMATCH,
+        error: { ...SAMPLE_EDIT_BATCH_MISMATCH.error, reconciliation: { known_version: "a3f9c2" } },
+      }),
+    ).toBeUndefined()
+  })
+
   test("accepts a failure result without a hint or detail", () => {
     const result: Protocol.EditBatchFailure = {
       applied: false,
@@ -286,7 +357,7 @@ describe("semantic edit_batch client", () => {
       requests.push(message)
       socket.write(frame({ jsonrpc: "2.0", id: message.id, result }))
     })
-    const client = await Client.connect(server.path, { connect_timeout_ms: 2_000 })
+    const client = await Client.connect(server.endpoint, { connect_timeout_ms: 2_000 })
     const input: Protocol.EditBatchRequest = {
       file: "engine.ts",
       changes: [{ oldString: "return json.load(data)", newString: "return parse(data)", description: "harden" }],
@@ -302,12 +373,27 @@ describe("semantic edit_batch client", () => {
     await server.close()
   })
 
+  test("decodes VERSION_MISMATCH responses with a reconciliation payload", async () => {
+    const server = await listenServer((message, socket) => {
+      if (message.method !== "edit_batch") return
+      socket.write(frame({ jsonrpc: "2.0", id: message.id, result: SAMPLE_EDIT_BATCH_MISMATCH }))
+    })
+    const client = await Client.connect(server.endpoint, { connect_timeout_ms: 2_000 })
+
+    expect(
+      await client.editBatch({ file: "engine.ts", changes: [], baseVersion: "a3f9c2" }),
+    ).toEqual(SAMPLE_EDIT_BATCH_MISMATCH)
+
+    client.close()
+    await server.close()
+  })
+
   test("rejects malformed results instead of silently ignoring fields", async () => {
     const server = await listenServer((message, socket) => {
       if (message.method !== "edit_batch") return
       socket.write(frame({ jsonrpc: "2.0", id: message.id, result: { ...SAMPLE_EDIT_BATCH_SUCCESS, extra: true } }))
     })
-    const client = await Client.connect(server.path, { connect_timeout_ms: 2_000 })
+    const client = await Client.connect(server.endpoint, { connect_timeout_ms: 2_000 })
 
     const error = await client
       .editBatch({ file: "engine.ts", changes: [], baseVersion: "a3f9c2" })
@@ -326,7 +412,7 @@ describe("semantic edit_batch client", () => {
         socket.write(frame({ jsonrpc: "2.0", id: message.id, error: { code: -32603, message: "internal error" } }))
       }
     })
-    const client = await Client.connect(server.path, { connect_timeout_ms: 2_000 })
+    const client = await Client.connect(server.endpoint, { connect_timeout_ms: 2_000 })
 
     const error = await client
       .editBatch({ file: "engine.ts", changes: [], baseVersion: "a3f9c2" })

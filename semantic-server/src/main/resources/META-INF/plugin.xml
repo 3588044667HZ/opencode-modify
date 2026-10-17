@@ -4,7 +4,7 @@
   <description>Headless semantic engine daemon exposing JSON-RPC over a Unix domain socket (ping / subscribe / read_view / shutdown).</description>
   <vendor>opencode</vendor>
   <depends>com.intellij.modules.platform</depends>
-  <depends>com.intellij.modules.java</depends>
+  <depends optional="true">com.intellij.modules.java</depends>
   <extensions defaultExtensionNs="com.intellij">
     <appStarter id="semantic-server" implementation="opencode.semantic.SemanticServerStarter"/>
   </extensions>

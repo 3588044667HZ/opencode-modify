@@ -16,13 +16,20 @@ export interface Client {
   readonly close: () => void
 }
 
+export interface Endpoint extends Transport.Endpoint {
+  readonly token: string
+}
+
 export interface ClientOptions {
   readonly connect_timeout_ms?: number
   readonly request_timeout_ms?: number
 }
 
-export async function connect(path: string, options?: ClientOptions): Promise<Client> {
-  const transport = await Transport.connect(path, { timeout_ms: options?.connect_timeout_ms })
+export async function connect(endpoint: Endpoint, options?: ClientOptions): Promise<Client> {
+  const transport = await Transport.connect(
+    { host: endpoint.host, port: endpoint.port },
+    { timeout_ms: options?.connect_timeout_ms },
+  )
   const requestTimeoutMs = options?.request_timeout_ms ?? Protocol.Defaults.requestTimeoutMs
   const pending = new Map<
     number,
@@ -70,7 +77,7 @@ export async function connect(path: string, options?: ClientOptions): Promise<Cl
     pending.clear()
   })
 
-  const request = (method: string, params?: unknown) =>
+  const request = (method: string, params?: unknown, timeoutMs = requestTimeoutMs) =>
     new Promise<unknown>((resolve, reject) => {
       if (closed) {
         reject(new Protocol.ConnectionError({ message: "semantic socket is closed" }))
@@ -81,12 +88,12 @@ export async function connect(path: string, options?: ClientOptions): Promise<Cl
         pending.delete(id)
         reject(
           new Protocol.TimeoutError({
-            message: `semantic request ${method} timed out after ${requestTimeoutMs}ms`,
+            message: `semantic request ${method} timed out after ${timeoutMs}ms`,
             method,
-            timeout_ms: requestTimeoutMs,
+            timeout_ms: timeoutMs,
           }),
         )
-      }, requestTimeoutMs)
+      }, timeoutMs)
       pending.set(id, { method, resolve, reject, timer })
       transport.write({ jsonrpc: "2.0", id, method, ...(params === undefined ? {} : { params }) })
     })
@@ -106,6 +113,21 @@ export async function connect(path: string, options?: ClientOptions): Promise<Cl
     }
     pending.clear()
     transport.close()
+  }
+
+  // 连接级握手：第一条请求必须是 hello。失败（-32019 / 超时 / 响应畸形）统一
+  // 归一化为 ConnectionError，让 manager 走"删除 locator 后重新 spawn"的回退。
+  const hello = await request(
+    "hello",
+    { token: endpoint.token },
+    options?.connect_timeout_ms ?? Protocol.Defaults.connectTimeoutMs,
+  ).then(undefined, (error: unknown) => {
+    close()
+    throw helloError(error)
+  })
+  if (typeof hello !== "object" || hello === null || (hello as { ok?: unknown }).ok !== true) {
+    close()
+    throw new Protocol.ConnectionError({ message: "semantic daemon returned a malformed hello response" })
   }
 
   return {
@@ -169,4 +191,22 @@ export async function connect(path: string, options?: ClientOptions): Promise<Cl
     onClose: (listener) => transport.onClose(listener),
     close,
   }
+}
+
+// hello 失败原因映射为 ConnectionError；守护在 -32019 后主动关闭连接也会
+// 落到 ConnectionError（"closed while awaiting hello"），无需单独分支。
+function helloError(error: unknown): Protocol.ConnectionError {
+  if (error instanceof Protocol.TimeoutError) {
+    return new Protocol.ConnectionError({
+      message: `semantic daemon hello handshake timed out after ${error.timeout_ms}ms`,
+    })
+  }
+  if (error instanceof Protocol.RpcError) {
+    return new Protocol.ConnectionError({
+      message: `semantic daemon rejected the hello handshake (${error.code}): ${error.message}`,
+    })
+  }
+  return new Protocol.ConnectionError({
+    message: `semantic daemon hello handshake failed: ${error instanceof Error ? error.message : String(error)}`,
+  })
 }

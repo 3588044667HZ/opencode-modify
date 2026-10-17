@@ -9,6 +9,8 @@ export const ErrorCode = {
   fileNotFound: -32001,
   symbolNotFound: -32002,
   journalRecoveryFailed: -32018,
+  // hello 门禁未授权。数值与 edit_transaction 的 duplicate_file 相同，作用域不同（帧级 vs 结果联合）。
+  unauthorized: -32019,
   internalError: -32603,
 } as const
 
@@ -182,7 +184,65 @@ export type Diagnostic = typeof Diagnostic.Type
 export const CoverageRange = Schema.Tuple([Schema.Int, Schema.Int])
 export type CoverageRange = typeof CoverageRange.Type
 
-export const ReadViewResult = Schema.Struct({
+export const DeltaOps = ["context", "added", "removed"] as const
+export type DeltaOp = (typeof DeltaOps)[number]
+
+// 行级对账 delta（有界，与 Java Reconcile 行口径一致）：removed 带 old_line，added 带 new_line，
+// context 两者皆有。
+const DeltaLine = Schema.Struct({
+  op: Schema.Literals(DeltaOps),
+  old_line: optional(Schema.Int),
+  new_line: optional(Schema.Int),
+  text: Schema.String,
+})
+export type DeltaLine = typeof DeltaLine.Type
+
+const DeltaHunk = Schema.Struct({
+  lines: Schema.Array(DeltaLine),
+})
+export type DeltaHunk = typeof DeltaHunk.Type
+
+// 有界 delta 对账载荷；编辑侧 VERSION_MISMATCH 额外附 current_version，read_view 省略。
+export const ReconciliationDelta = Schema.Struct({
+  mode: Schema.Literal("delta"),
+  from_version: Schema.String,
+  to_version: Schema.String,
+  hunks: Schema.Array(DeltaHunk),
+  current_version: optional(Schema.String),
+}).annotate({ identifier: "ReconciliationDelta", parseOptions: { onExcessProperty: "error" } })
+export type ReconciliationDelta = typeof ReconciliationDelta.Type
+
+// 大变更降级标记：全量视图或 full 再读提示。
+export const ReconciliationFull = Schema.Struct({
+  mode: Schema.Literal("full"),
+  current_version: optional(Schema.String),
+}).annotate({ identifier: "ReconciliationFull", parseOptions: { onExcessProperty: "error" } })
+export type ReconciliationFull = typeof ReconciliationFull.Type
+
+export const Reconciliation = Schema.Union([ReconciliationDelta, ReconciliationFull]).annotate({
+  identifier: "Reconciliation",
+  parseOptions: { onExcessProperty: "error" },
+})
+export type Reconciliation = typeof Reconciliation.Type
+
+// 版本一致时的微响应：不重发内容，调用方保留既有视图。
+export const ReadViewUnchanged = Schema.Struct({
+  unchanged: Schema.Literal(true),
+  version: Schema.String,
+}).annotate({ identifier: "ReadViewUnchanged", parseOptions: { onExcessProperty: "error" } })
+export type ReadViewUnchanged = typeof ReadViewUnchanged.Type
+
+// 读时对账的有界 delta 响应：只带 file/version/reconciliation，不重发内容。
+export const ReadViewDeltaView = Schema.Struct({
+  file: Schema.String,
+  version: Schema.String,
+  reconciliation: ReconciliationDelta,
+}).annotate({ identifier: "ReadViewDeltaView", parseOptions: { onExcessProperty: "error" } })
+export type ReadViewDeltaView = typeof ReadViewDeltaView.Type
+
+// Strict decoding: the frozen read_view contract must not silently accept
+// fields the daemon is not supposed to send.
+export const ReadViewContent = Schema.Struct({
   file: Schema.String,
   version: Schema.String,
   size: Schema.Struct({ lines: Schema.Int, symbols: Schema.Int }),
@@ -201,14 +261,33 @@ export const ReadViewResult = Schema.Struct({
     unread: Schema.Array(CoverageRange),
   }),
   diagnostics: Schema.Array(Diagnostic),
-}).annotate({ identifier: "ReadViewResult" })
+  // 发行版不完整等场景下分析节降级的可操作提示（有界、去重）；健康时省略。
+  warnings: optional(Schema.Array(Schema.String)),
+  reconciliation: optional(ReconciliationFull),
+}).annotate({ identifier: "ReadViewContent", parseOptions: { onExcessProperty: "error" } })
+export type ReadViewContent = typeof ReadViewContent.Type
+
+export const ReadViewResult = Schema.Union([ReadViewUnchanged, ReadViewDeltaView, ReadViewContent]).annotate({
+  identifier: "ReadViewResult",
+  parseOptions: { onExcessProperty: "error" },
+})
 export type ReadViewResult = typeof ReadViewResult.Type
+
+export function isReadViewUnchanged(result: ReadViewResult): result is ReadViewUnchanged {
+  return "unchanged" in result
+}
+
+export function isReadViewDelta(result: ReadViewResult): result is ReadViewDeltaView {
+  return !("unchanged" in result) && !("size" in result)
+}
 
 export interface ReadViewRequest {
   readonly file: string
   readonly view: View
   readonly position?: { readonly line: number }
   readonly symbol?: string
+  // 读时对账：上次读到的版本戳；与当前一致时引擎只回 unchanged 微响应。
+  readonly known_version?: string
 }
 
 export const BlastRadiusRisks = ["low", "medium", "high"] as const
@@ -328,6 +407,23 @@ export const EditBatchDiagnostics = Schema.Struct({
 })
 export type EditBatchDiagnostics = typeof EditBatchDiagnostics.Type
 
+// D3 写时对账：逐变更块的旧→新行偏移（有界）。
+export const PositionMapEntry = Schema.Struct({
+  old_start: Schema.Int,
+  old_end: Schema.Int,
+  delta: Schema.Int,
+})
+export type PositionMapEntry = typeof PositionMapEntry.Type
+
+// 变更区域新内容的有界摘录（行区间 + 文本 + 截断标记）。
+export const ChangedExcerpt = Schema.Struct({
+  start_line: Schema.Int,
+  end_line: Schema.Int,
+  text: Schema.String,
+  truncated: Schema.Boolean,
+}).annotate({ identifier: "ChangedExcerpt", parseOptions: { onExcessProperty: "error" } })
+export type ChangedExcerpt = typeof ChangedExcerpt.Type
+
 export const EditBatchSuccess = Schema.Struct({
   file: Schema.String,
   applied: Schema.Literal(true),
@@ -338,6 +434,9 @@ export const EditBatchSuccess = Schema.Struct({
   diagnostics_delta: EditBatchDiagnostics,
   diagnostics_after: EditBatchDiagnostics,
   line_changes: Schema.Array(EditBatchLineChange),
+  version: optional(Schema.String),
+  changed: optional(ChangedExcerpt),
+  position_map: optional(Schema.Array(PositionMapEntry)),
 }).annotate({ identifier: "EditBatchSuccess", parseOptions: { onExcessProperty: "error" } })
 export type EditBatchSuccess = typeof EditBatchSuccess.Type
 
@@ -362,6 +461,7 @@ export const EditBatchError = Schema.Struct({
   message: Schema.String,
   detail: optional(EditBatchDetail),
   hint: optional(Schema.String),
+  reconciliation: optional(Reconciliation),
 }).annotate({ identifier: "EditBatchError", parseOptions: { onExcessProperty: "error" } })
 export type EditBatchError = typeof EditBatchError.Type
 
@@ -430,6 +530,9 @@ export const EditTransactionFile = Schema.Struct({
   new_version: Schema.String,
   changes_applied: Schema.Int,
   line_changes: optional(Schema.Array(EditBatchLineChange)),
+  version: optional(Schema.String),
+  changed: optional(ChangedExcerpt),
+  position_map: optional(Schema.Array(PositionMapEntry)),
 }).annotate({ identifier: "EditTransactionFile", parseOptions: { onExcessProperty: "error" } })
 export type EditTransactionFile = typeof EditTransactionFile.Type
 
@@ -467,6 +570,7 @@ export const EditTransactionError = Schema.Struct({
   message: Schema.String,
   detail: optional(EditTransactionDetail),
   hint: optional(Schema.String),
+  reconciliation: optional(Reconciliation),
 }).annotate({ identifier: "EditTransactionError", parseOptions: { onExcessProperty: "error" } })
 export type EditTransactionError = typeof EditTransactionError.Type
 

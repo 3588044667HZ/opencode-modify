@@ -30,6 +30,7 @@ export interface StatusInfo {
 export interface Interface {
   readonly init: () => Effect.Effect<void>
   readonly status: () => Effect.Effect<StatusInfo>
+  readonly warmup: () => Effect.Effect<StatusInfo>
   readonly readView: (input: Protocol.ReadViewRequest) => Effect.Effect<Protocol.ReadViewResult, Protocol.SemanticError>
   readonly blastRadius: (input: Protocol.BlastRadiusRequest) => Effect.Effect<Protocol.BlastRadiusResult, Protocol.SemanticError>
   readonly editBatch: (input: Protocol.EditBatchRequest) => Effect.Effect<Protocol.EditBatchResult, Protocol.SemanticError>
@@ -44,7 +45,7 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/Se
 
 // 全局 spawn 串行闸门：所有目录共用，同一时刻最多一个目录处于“拉起 + 等待可连接”阶段。
 // 桌面应用恢复大量工作区时会话首次用到语义工具才惰性拉起；没有这道闸门，
-// 多个平台守护（每个 -Xmx2048m）会同时冷启动+索引，打满 CPU/内存并造成 socket 等待超时。
+// 多个平台守护（每个 -Xmx2048m）会同时冷启动+索引，打满 CPU/内存并造成连接等待超时。
 const spawnGate = Semaphore.makeUnsafe(1)
 
 // failed 不是终态：距上次失败超过冷却后，下一次请求重置为 idle 重新拉起。
@@ -56,8 +57,12 @@ export const RetryPolicy = {
 interface State {
   readonly directory: string
   readonly command: readonly string[]
-  readonly socket: { readonly path: string; readonly dir?: string }
+  readonly locator: { readonly path: string; readonly dir?: string }
   readonly idleTimeoutMs?: number
+  readonly exclude?: readonly string[]
+  readonly ide?: string
+  readonly ideHome?: string
+  readonly jdkHome?: string
   readonly scope: Scope.Scope
   status: Status
   progress: number
@@ -91,7 +96,7 @@ const layer = Layer.effect(
       })
     }
 
-    // 清理失败/停止后的守护现场：本进程 spawn 的子进程按所有权停止并删除 socket；
+    // 清理失败/停止后的守护现场：本进程 spawn 的子进程按所有权停止并删除 locator；
     // 复用的守护只断开连接。清理必须发生在重置为可重试之前。
     const markFailed = (s: State, message: string) =>
       Effect.gen(function* () {
@@ -109,7 +114,7 @@ const layer = Layer.effect(
         const spawned = s.spawned
         s.spawned = false
         if (spawned && child) yield* Effect.promise(() => Process.stop(child))
-        if (spawned && s.socket.dir) yield* Effect.promise(() => fs.unlink(s.socket.path).catch(() => {}))
+        if (spawned && s.locator.dir) yield* Effect.promise(() => fs.unlink(s.locator.path).catch(() => {}))
         yield* publish(s)
       })
 
@@ -117,33 +122,44 @@ const layer = Layer.effect(
       Effect.gen(function* () {
         yield* publish(s)
         // 惰性拉起的实际工作全部在收到首个请求后才被 fork 到这里。
-        // 复用检查、spawn、等待 socket 可连接都在全局闸门内串行；
+        // 复用检查、spawn、等待可连接（locator + hello）都在全局闸门内串行；
         // 一旦可连接即释放闸门，索引继续在后台进行、不占用其他目录的 spawn 名额。
         const client = yield* spawnGate.withPermit(
           Effect.gen(function* () {
-            // socket 名按目录稳定：同项目已运行的守护（例如另一个 opencode server 进程先前
-            // spawn 的实例）直接复用，不再 spawn。跨进程复用同一守护是可接受行为。
+            // locator 名按目录稳定：同项目已运行的守护（例如另一个 opencode server 进程先前
+            // spawn 的实例）直接读 locator + TCP 连接 + hello 复用，不再 spawn。
+            // 跨进程复用同一守护是可接受行为。
             const existing = yield* Effect.tryPromise({
-              try: () => Client.connect(s.socket.path, { connect_timeout_ms: 500 }),
+              try: () => connectToLocator(s.locator.path, 500),
               catch: Protocol.toSemanticError,
             }).pipe(Effect.catch(() => Effect.succeed(undefined)))
             if (existing) {
-              yield* Effect.logInfo("reusing existing daemon", { socket: s.socket.path })
+              yield* Effect.logInfo("reusing existing daemon", { locator: s.locator.path })
               return existing
             }
-            // 连接失败但文件仍在：崩溃/退出残留的陈旧 socket，删除后再 spawn。
-            yield* Effect.promise(() => fs.unlink(s.socket.path).catch(() => {}))
-            const child = Process.spawn([...s.command, s.directory, s.socket.path], {
+            // 连接失败但 locator 仍在：崩溃/退出残留的陈旧 locator，删除后再 spawn。
+            yield* Effect.promise(() => fs.unlink(s.locator.path).catch(() => {}))
+            const env = {
+              ...(s.idleTimeoutMs === undefined ? {} : { OPENCODE_SEMANTIC_IDLE_TIMEOUT_MS: String(s.idleTimeoutMs) }),
+              // exclude 仅在非空时注入（契约：空列表不设置该环境变量）。
+              ...(s.exclude === undefined || s.exclude.length === 0
+                ? {}
+                : { OPENCODE_SEMANTIC_EXCLUDE: JSON.stringify(s.exclude) }),
+              // IDE/JDK 选择仅在显式配置时注入；ide="auto"（默认）交给守护自动发现。
+              ...(s.ide === undefined || s.ide === "" || s.ide === "auto" ? {} : { SEMANTIC_IDE: s.ide }),
+              ...(s.ideHome === undefined || s.ideHome === "" ? {} : { SEMANTIC_IDE_HOME: s.ideHome }),
+              ...(s.jdkHome === undefined || s.jdkHome === "" ? {} : { SEMANTIC_JDK_HOME: s.jdkHome }),
+            }
+            const child = Process.spawn([...s.command, s.directory, s.locator.path], {
               cwd: s.directory,
               stdin: "ignore",
               stdout: "ignore",
               stderr: "ignore",
-              env:
-                s.idleTimeoutMs === undefined ? undefined : { OPENCODE_SEMANTIC_IDLE_TIMEOUT_MS: String(s.idleTimeoutMs) },
+              env: Object.keys(env).length === 0 ? undefined : env,
             })
             s.child = child
             s.spawned = true
-            return yield* waitForClient(child, s.socket.path)
+            return yield* waitForClient(child, s.locator.path)
           }),
         )
         s.client = client
@@ -252,12 +268,20 @@ const layer = Layer.effect(
       Effect.fn("Semantic.state")(function* (ctx) {
         const scope = yield* Effect.scope
         const semantic = (yield* config.get()).semantic
-        const socket = socketPathFor(ctx.directory, semantic?.socket_dir)
+        const locator = locatorPathFor(
+          ctx.directory,
+          semantic?.socket_dir,
+          explicitIdeKey(semantic?.ide, semantic?.ide_home),
+        )
         const s: State = {
           directory: ctx.directory,
           command: semantic?.command ?? [],
-          socket,
+          locator,
           idleTimeoutMs: semantic?.idle_timeout_ms,
+          exclude: semantic?.exclude,
+          ide: semantic?.ide,
+          ideHome: semantic?.ide_home,
+          jdkHome: semantic?.jdk_home,
           scope,
           status: "idle",
           progress: 0,
@@ -274,7 +298,7 @@ const layer = Layer.effect(
           yield* publish(s)
           return s
         }
-        if (socket.dir) yield* fsutil.ensureDir(socket.dir).pipe(Effect.orDie)
+        if (locator.dir) yield* fsutil.ensureDir(locator.dir).pipe(Effect.orDie)
 
         // init/status 只物化状态，绝不启动守护——守护改由首个语义请求惰性拉起，
         // 避免恢复大量会话时每个目录并发冷启动一个平台实例。
@@ -285,7 +309,7 @@ const layer = Layer.effect(
             const child = s.child
             s.child = undefined
             const spawned = s.spawned
-            // 复用的守护归最先启动它的实例所有：dispose 只断开连接，不发 shutdown、不删 socket，
+            // 复用的守护归最先启动它的实例所有：dispose 只断开连接，不发 shutdown、不删 locator，
             // 留给它的主父进程或守护自身的空闲超时回收。
             if (client && spawned) {
               // Never let a hung daemon stall instance disposal; kill it via
@@ -295,7 +319,7 @@ const layer = Layer.effect(
             client?.close()
             if (!spawned) return
             if (child) await Process.stop(child)
-            if (socket.dir) await fs.unlink(socket.path).catch(() => {})
+            if (s.locator.dir) await fs.unlink(s.locator.path).catch(() => {})
           }),
         )
         return s
@@ -307,14 +331,15 @@ const layer = Layer.effect(
     })
 
     const status = Effect.fn("Semantic.status")(function* () {
+      return snapshot(yield* InstanceState.get(state))
+    })
+
+    // 手动预热入口：只触发惰性拉起（fire-and-forget），立即返回触发后的快照；
+    // 后续进度由 supervise 发布的 semantic.indexing 事件接管。
+    const warmup = Effect.fn("Semantic.warmup")(function* () {
       const s = yield* InstanceState.get(state)
-      return {
-        status: s.status,
-        progress: s.progress,
-        ...(s.phase === undefined ? {} : { phase: s.phase }),
-        ...(s.current === undefined ? {} : { current: s.current }),
-        ...(s.error === undefined ? {} : { error: s.error }),
-      }
+      yield* ensureDaemon(s)
+      return snapshot(s)
     })
 
     const readView = Effect.fn("Semantic.readView")(function* (input: Protocol.ReadViewRequest) {
@@ -347,11 +372,11 @@ const layer = Layer.effect(
       return yield* dispatch(s, "verify_test", (client) => client.verifyTest(input))
     })
 
-    return Service.of({ init, status, readView, blastRadius, editBatch, editTransaction, projectMap, verifyTest })
+    return Service.of({ init, status, warmup, readView, blastRadius, editBatch, editTransaction, projectMap, verifyTest })
   }),
 )
 
-const waitForClient = (child: Process.Child | undefined, socketPath: string) =>
+const waitForClient = (child: Process.Child | undefined, locatorPath: string) =>
   Effect.gen(function* () {
     let exitCode: number | undefined
     let spawnError: Error | undefined
@@ -377,8 +402,9 @@ const waitForClient = (child: Process.Child | undefined, socketPath: string) =>
           message: `semantic daemon exited with code ${exitCode} before becoming ready`,
         })
       }
+      // 每轮重新读 locator：守护可能还没写、或正写到一半，两种都按"未就绪"重试。
       const client = yield* Effect.tryPromise({
-        try: () => Client.connect(socketPath, { connect_timeout_ms: 500 }),
+        try: () => connectToLocator(locatorPath, Protocol.Defaults.connectTimeoutMs),
         catch: Protocol.toSemanticError,
       }).pipe(Effect.catch(() => Effect.succeed(undefined)))
       if (client) return client
@@ -390,6 +416,38 @@ const waitForClient = (child: Process.Child | undefined, socketPath: string) =>
       yield* Effect.sleep(Protocol.Defaults.socketRetryIntervalMs)
     }
   })
+
+// locator 是外部输入边界：缺失、JSON 损坏、字段类型不对一律视为"没有守护"，
+// 交给上层走删除 + spawn 的回退。
+async function readLocator(locatorPath: string): Promise<{ port: number; token: string } | undefined> {
+  const text = await fs.readFile(locatorPath, "utf8").catch(() => undefined)
+  if (text === undefined) return undefined
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    return undefined
+  }
+  if (typeof parsed !== "object" || parsed === null) return undefined
+  const record = parsed as { port?: unknown; token?: unknown }
+  if (typeof record.port !== "number" || !Number.isInteger(record.port) || record.port <= 0 || record.port > 65_535) {
+    return undefined
+  }
+  if (typeof record.token !== "string" || record.token.length === 0) return undefined
+  return { port: record.port, token: record.token }
+}
+
+async function connectToLocator(locatorPath: string, timeoutMs: number): Promise<Client.Client> {
+  const locator = await readLocator(locatorPath)
+  if (!locator) {
+    throw new Protocol.ConnectionError({ message: `no semantic daemon locator at ${locatorPath}` })
+  }
+  // 守护显式绑定 IPv4 loopback（不使用通配地址与 ::1）。
+  return Client.connect(
+    { host: "127.0.0.1", port: locator.port, token: locator.token },
+    { connect_timeout_ms: timeoutMs },
+  )
+}
 
 function applyPing(s: State, ping: Protocol.PingResult) {
   const status: Status = ping.indexing ? (s.status === "starting" ? "indexing" : s.status) : "ready"
@@ -411,21 +469,49 @@ function applyNotification(s: State, notification: Protocol.IndexingNotification
   return changed && s.status !== "failed"
 }
 
+// status 与 warmup 共用的对外快照：可选字段缺省时整体省略，保持响应形状稳定。
+function snapshot(s: State): StatusInfo {
+  return {
+    status: s.status,
+    progress: s.progress,
+    ...(s.phase === undefined ? {} : { phase: s.phase }),
+    ...(s.current === undefined ? {} : { current: s.current }),
+    ...(s.error === undefined ? {} : { error: s.error }),
+  }
+}
+
 function causeMessage(cause: Cause.Cause<Protocol.SemanticError>) {
   const error = Cause.squash(cause)
   return error instanceof Error ? error.message : String(error)
 }
 
-export function socketPathFor(directory: string, socketDir?: string): { path: string; dir?: string } {
-  // 稳定 per-directory socket 名（无 pid/counter）：同项目不同 opencode 进程可复用同一守护。
-  // 目录先 resolve/normalize，Windows 下统一小写，保证盘符/大小写/分隔符写法不同仍命中同一 socket。
+// 显式选择 IDE 的 locator 键：semantic.ide 优先（auto/空视为未指定），否则回退 semantic.ide_home。
+function explicitIdeKey(ide?: string, ideHome?: string): string | undefined {
+  const value = ide !== undefined && ide !== "" && ide !== "auto" ? ide : ideHome
+  if (value === undefined || value === "") return undefined
+  return ideKeyFor(value)
+}
+
+// ideKey = 规范化值（trim、反斜杠转正斜杠、win32 小写）的 SHA-1 前 6 位，风格与 locator 的 project hash 一致。
+function ideKeyFor(value: string): string {
+  const normalized = value.trim().replace(/\\/g, "/")
+  return createHash("sha1")
+    .update(process.platform === "win32" ? normalized.toLowerCase() : normalized)
+    .digest("hex")
+    .slice(0, 6)
+}
+
+export function locatorPathFor(directory: string, socketDir?: string, ideKey?: string): { path: string; dir?: string } {
+  // 稳定 per-directory locator 名（无 pid/counter）：同项目不同 opencode 进程可复用同一守护。
+  // 目录先 resolve/normalize，Windows 下统一小写，保证盘符/大小写/分隔符写法不同仍命中同一 locator。
   const resolved = path.normalize(path.resolve(directory))
   const normalized = process.platform === "win32" ? resolved.toLowerCase() : resolved
   const hash = createHash("sha1").update(normalized).digest("hex").slice(0, 10)
-  // Windows 下守护进程（Java AF_UNIX）不能绑定命名管道路径，只能绑文件路径；
-  // Bun 两端都支持文件路径，因此所有平台统一用 socket 文件。
+  // 显式指定 IDE 时追加 ideKey：同一项目的不同 IDE 守护使用各自的 locator，互不复用。
+  const suffix = ideKey === undefined ? "" : `-${ideKey}`
+  // socket_dir 配置含义不变，仍是 locator 文件所在目录（默认 os.tmpdir()）。
   const dir = socketDir ?? os.tmpdir()
-  return { path: path.join(dir, `opencode-semantic-${hash}.sock`), dir }
+  return { path: path.join(dir, `opencode-semantic-${hash}${suffix}.port`), dir }
 }
 
 export const node = LayerNode.make({

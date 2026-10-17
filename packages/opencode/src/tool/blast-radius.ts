@@ -3,6 +3,7 @@ import * as Tool from "./tool"
 import { Semantic } from "@/semantic/manager"
 import { renderBlastRadius } from "@/semantic/render"
 import { Protocol } from "@/semantic/protocol"
+import { FALLBACK_HINT } from "./fallback-option-direct"
 
 const DESCRIPTION = `Analyze the blast radius of a symbol: its definition, callers, callees, affected files, entry points that reach it, and the tests that reference it.
 
@@ -51,7 +52,13 @@ export const BlastRadiusTool = Tool.define(
             })
             .pipe(
               Effect.map((result) => ({ ok: true as const, result })),
-              Effect.catch((error) => Effect.succeed({ ok: false as const, message: Protocol.describeError(error) })),
+              Effect.catch((error) =>
+                Effect.succeed({
+                  ok: false as const,
+                  message: Protocol.describeError(error),
+                  fallback: error instanceof Protocol.RpcError && error.code === Protocol.ErrorCode.symbolNotFound,
+                }),
+              ),
             )
 
           if (!outcome.ok) {
@@ -63,7 +70,9 @@ export const BlastRadiusTool = Tool.define(
             return {
               title,
               metadata,
-              output: `blast_radius unavailable: ${outcome.message}`,
+              output: [`blast_radius unavailable: ${outcome.message}`, ...(outcome.fallback ? [FALLBACK_HINT] : [])].join(
+                "\n",
+              ),
             }
           }
 

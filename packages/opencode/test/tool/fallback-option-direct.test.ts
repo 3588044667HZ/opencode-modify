@@ -79,19 +79,26 @@ describe("tool.fallback_option_direct", () => {
       const result = yield* def.execute({}, ctx((yield* agents.defaultInfo()).name))
 
       expect(result.output).toBe(yield* Effect.promise(() => Bun.file(fixture).text()))
-      expect(result.metadata).toMatchObject({ tools: [] })
+      expect(result.metadata).toMatchObject({ tools: ["edit", "write", "apply_patch"] })
     }),
   )
 
-  it.instance("exposes the fallback entry point and the direct tools in the model catalog", () =>
+  it.instance("exposes the fallback entry point and hides the direct tools in the model catalog", () =>
     Effect.gen(function* () {
       const registry = yield* ToolRegistry.Service
       const agents = yield* Agent.Service
       const ids = (yield* registry.tools(modelInput(yield* agents.defaultInfo()))).map((tool) => tool.id)
 
       expect(ids).toContain(FallbackOptionDirectTool.NAME)
-      expect(ids).toContain("edit")
-      expect(ids).toContain("write")
+      expect(ids).not.toContain("edit")
+      expect(ids).not.toContain("write")
+      expect(ids).not.toContain("apply_patch")
+
+      // 隐藏只影响展示：注册表完整保留三个真实工具用于调用解析。
+      const all = (yield* registry.all()).map((tool) => tool.id)
+      expect(all).toContain("edit")
+      expect(all).toContain("write")
+      expect(all).toContain("apply_patch")
     }),
   )
 

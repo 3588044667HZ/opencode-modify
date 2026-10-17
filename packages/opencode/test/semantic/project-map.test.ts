@@ -196,7 +196,7 @@ describe("semantic project_map client", () => {
       requests.push(message)
       socket.write(frame({ jsonrpc: "2.0", id: message.id, result: results[requests.length - 1] }))
     })
-    const client = await Client.connect(server.path, { connect_timeout_ms: 2_000 })
+    const client = await Client.connect(server.endpoint, { connect_timeout_ms: 2_000 })
 
     expect(await client.projectMap({ view: "structure", scope: "module:core" })).toEqual(SAMPLE_PROJECT_MAP_STRUCTURE)
     expect(await client.projectMap({ view: "dependencies" })).toEqual(SAMPLE_PROJECT_MAP_DEPENDENCIES)
@@ -216,7 +216,7 @@ describe("semantic project_map client", () => {
       if (message.method !== "project_map") return
       socket.write(frame({ jsonrpc: "2.0", id: message.id, result: { ...SAMPLE_PROJECT_MAP_HOT, extra: true } }))
     })
-    const client = await Client.connect(server.path, { connect_timeout_ms: 2_000 })
+    const client = await Client.connect(server.endpoint, { connect_timeout_ms: 2_000 })
 
     const error = await client.projectMap({ view: "hot" }).catch((cause) => cause)
     expect(error).toBeInstanceOf(Protocol.RpcError)
@@ -234,7 +234,7 @@ describe("semantic project_map client", () => {
         frame({ jsonrpc: "2.0", id: message.id, error: { code: -32000, message: "indexing", data: { progress: 0.3 } } }),
       )
     })
-    const client = await Client.connect(server.path, { connect_timeout_ms: 2_000 })
+    const client = await Client.connect(server.endpoint, { connect_timeout_ms: 2_000 })
 
     const error = await client.projectMap({}).catch((cause) => cause)
     expect(error).toBeInstanceOf(Protocol.RpcError)
@@ -249,7 +249,7 @@ describe("semantic project_map client", () => {
       if (message.method !== "project_map") return
       socket.write(frame({ jsonrpc: "2.0", id: message.id, error: { code: -32603, message: "unknown view" } }))
     })
-    const client = await Client.connect(server.path, { connect_timeout_ms: 2_000 })
+    const client = await Client.connect(server.endpoint, { connect_timeout_ms: 2_000 })
 
     const error = await client.projectMap({ view: "hot" }).catch((cause) => cause)
     expect(error).toBeInstanceOf(Protocol.RpcError)

@@ -10,11 +10,16 @@ export interface Transport {
 
 const NEWLINE = 0x0a
 
-// Connects to a JSON-RPC endpoint. `path` is a unix domain socket path on POSIX
-// and a named pipe path (`\\.\pipe\name`) on Windows; node:net handles both.
-export function connect(path: string, options?: { timeout_ms?: number }): Promise<Transport> {
+export interface Endpoint {
+  readonly host: string
+  readonly port: number
+}
+
+// Connects to the daemon's loopback TCP endpoint; the frame contract (NDJSON
+// JSON-RPC 2.0) is identical to the former AF_UNIX transport.
+export function connect(endpoint: Endpoint, options?: { timeout_ms?: number }): Promise<Transport> {
   return new Promise((resolve, reject) => {
-    const socket = net.createConnection(path)
+    const socket = net.createConnection({ host: endpoint.host, port: endpoint.port })
     const timeout = options?.timeout_ms ?? Protocol.Defaults.connectTimeoutMs
     let settled = false
 
@@ -22,7 +27,11 @@ export function connect(path: string, options?: { timeout_ms?: number }): Promis
       if (settled) return
       settled = true
       socket.destroy()
-      reject(new Protocol.ConnectionError({ message: `timed out connecting to semantic socket ${path}` }))
+      reject(
+        new Protocol.ConnectionError({
+          message: `timed out connecting to semantic daemon ${endpoint.host}:${endpoint.port}`,
+        }),
+      )
     }, timeout)
 
     socket.once("connect", () => {
@@ -37,7 +46,9 @@ export function connect(path: string, options?: { timeout_ms?: number }): Promis
       settled = true
       clearTimeout(timer)
       reject(
-        new Protocol.ConnectionError({ message: `failed to connect to semantic socket ${path}: ${error.message}` }),
+        new Protocol.ConnectionError({
+          message: `failed to connect to semantic daemon ${endpoint.host}:${endpoint.port}: ${error.message}`,
+        }),
       )
     })
   })

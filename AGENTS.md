@@ -4,6 +4,11 @@
 - The default branch in this repo is `dev`.
 - Local `main` ref may not exist; use `dev` or `origin/dev` for diffs.
 
+## License Boundary (semantic engine)
+
+- Never add license detection, activation, ticket checkout, or license-bypass logic anywhere in the semantic engine. IDE discovery only answers "where is the installation"; it must not read or depend on licensing state.
+- The engine runs against a locally installed, properly licensed JetBrains IDE provided by the user. Never bundle, download, or redistribute JetBrains software, plugins, or license material.
+
 ## Branch Names
 
 Use a short branch name of at most three words, separated by hyphens. Do not use slashes or type prefixes such as `feat/` or `fix/`.

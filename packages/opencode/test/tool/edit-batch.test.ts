@@ -7,18 +7,27 @@ import path from "path"
 import { Agent } from "../../src/agent/agent"
 import { Semantic } from "@/semantic/manager"
 import { SessionID, MessageID } from "../../src/session/schema"
+import { SessionLedger } from "../../src/session/ledger"
 import { EditBatchTool, Parameters } from "../../src/tool/edit-batch"
+import { FALLBACK_HINT } from "@/tool/fallback-option-direct"
 import { Truncate } from "@/tool/truncate"
 import { Tool } from "@/tool/tool"
 import { provideInstance, testInstanceStoreLayer, tmpdirScoped } from "../fixture/fixture"
 import { pollWithTimeout, testEffect } from "../lib/effect"
-import { SAMPLE_EDIT_BATCH_FAILURE_RENDER, SAMPLE_EDIT_BATCH_SUCCESS_RENDER } from "../semantic/fixture"
+import {
+  SAMPLE_EDIT_BATCH_FAILURE_RENDER,
+  SAMPLE_EDIT_BATCH_MISMATCH_FULL_RENDER,
+  SAMPLE_EDIT_BATCH_MISMATCH_RENDER,
+  SAMPLE_EDIT_BATCH_SUCCESS_RENDER,
+} from "../semantic/fixture"
 
 const fakeDaemon = path.join(import.meta.dir, "..", "semantic", "fake-daemon.ts")
 const command = (...flags: string[]) => [process.execPath, fakeDaemon, ...flags]
 
 const toolLayer = () =>
-  LayerNode.compile(LayerNode.group([Semantic.node, Agent.node, Truncate.node, CrossSpawnSpawner.node]))
+  LayerNode.compile(
+    LayerNode.group([Semantic.node, Agent.node, Truncate.node, CrossSpawnSpawner.node, SessionLedger.node]),
+  )
 const it = testEffect(Layer.mergeAll(toolLayer(), testInstanceStoreLayer))
 
 const ctx = {
@@ -105,8 +114,79 @@ describe("tool.edit_batch", () => {
 
         const result = yield* run(dir, args)
 
-        expect(result.output).toBe(SAMPLE_EDIT_BATCH_FAILURE_RENDER)
+        expect(result.output).toBe(`${SAMPLE_EDIT_BATCH_FAILURE_RENDER}\n${FALLBACK_HINT}`)
         expect(result.metadata).toMatchObject({ applied: false, error_code: -32011 })
+      }),
+    20_000,
+  )
+
+  it.live(
+    "appends the fallback hint on change conflicts",
+    () =>
+      Effect.gen(function* () {
+        const dir = yield* tmpdirScoped({
+          config: { semantic: { enabled: true, command: command("--edit-batch-error=conflict") } },
+        })
+
+        const result = yield* run(dir, args)
+
+        expect(result.output).toContain("change conflict")
+        expect(result.output).toBe(
+          ["edit_batch FAILED: change 3/3 change conflict", "  engine.ts: change 3 overlaps change 1", FALLBACK_HINT].join(
+            "\n",
+          ),
+        )
+        expect(result.metadata).toMatchObject({ applied: false, error_code: -32016 })
+      }),
+    20_000,
+  )
+
+  it.live(
+    "does not append the fallback hint for protected paths",
+    () =>
+      Effect.gen(function* () {
+        const dir = yield* tmpdirScoped({
+          config: { semantic: { enabled: true, command: command("--edit-batch-error=protected") } },
+        })
+
+        const result = yield* run(dir, args)
+
+        expect(result.output).toContain("path protected")
+        expect(result.output).not.toContain("fallback_option_direct")
+        expect(result.metadata).toMatchObject({ applied: false, error_code: -32013 })
+      }),
+    20_000,
+  )
+
+  it.live(
+    "surfaces a VERSION_MISMATCH delta reconciliation instead of a bare error",
+    () =>
+      Effect.gen(function* () {
+        const dir = yield* tmpdirScoped({
+          config: { semantic: { enabled: true, command: command("--edit-batch-error=mismatch") } },
+        })
+
+        const result = yield* run(dir, args)
+
+        expect(result.output).toBe(SAMPLE_EDIT_BATCH_MISMATCH_RENDER)
+        expect(result.output).not.toContain("fallback_option_direct")
+        expect(result.metadata).toMatchObject({ applied: false, error_code: -32012 })
+      }),
+    20_000,
+  )
+
+  it.live(
+    "surfaces a VERSION_MISMATCH full re-read hint instead of a bare error",
+    () =>
+      Effect.gen(function* () {
+        const dir = yield* tmpdirScoped({
+          config: { semantic: { enabled: true, command: command("--edit-batch-error=mismatch-full") } },
+        })
+
+        const result = yield* run(dir, args)
+
+        expect(result.output).toBe(SAMPLE_EDIT_BATCH_MISMATCH_FULL_RENDER)
+        expect(result.metadata).toMatchObject({ applied: false, error_code: -32012 })
       }),
     20_000,
   )
@@ -128,6 +208,7 @@ describe("tool.edit_batch", () => {
             "  hint: 文件正被其他写者占用。可稍后重试，或先 read_view 获取最新版本",
           ].join("\n"),
         )
+        expect(result.output).not.toContain("fallback_option_direct")
         expect(result.metadata).toMatchObject({ applied: false, error_code: -32017 })
       }),
     20_000,

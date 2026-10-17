@@ -153,7 +153,7 @@ final class IndexMonitor {
     boolean changed =
         indexing != lastPushedIndexing
             || !phase.equals(lastPushedPhase)
-            || Math.abs(progress - lastPushedProgress) >= 0.01;
+            || Math.abs(progress - lastPushedProgress) >= 0.005;
     if (!changed) return;
     lastPushedIndexing = indexing;
     lastPushedPhase = phase;

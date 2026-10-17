@@ -1,11 +1,38 @@
 import { describe, expect, test } from "bun:test"
 import * as Protocol from "@/semantic/protocol"
 import { render } from "@/semantic/render"
-import { SAMPLE_RENDER, SAMPLE_RESULT } from "./fixture"
+import {
+  SAMPLE_READ_DELTA,
+  SAMPLE_READ_DELTA_RENDER,
+  SAMPLE_READ_RECONCILE_FULL,
+  SAMPLE_READ_RECONCILE_FULL_RENDER,
+  SAMPLE_READ_WARNINGS,
+  SAMPLE_READ_WARNINGS_RENDER,
+  SAMPLE_RENDER,
+  SAMPLE_RESULT,
+  SAMPLE_RESULT_UNCHANGED,
+  SAMPLE_RESULT_UNCHANGED_RENDER,
+} from "./fixture"
 
 describe("semantic render", () => {
   test("renders the spec sample byte for byte", () => {
     expect(render(SAMPLE_RESULT)).toBe(SAMPLE_RENDER)
+  })
+
+  test("renders the unchanged micro response", () => {
+    expect(render(SAMPLE_RESULT_UNCHANGED)).toBe(SAMPLE_RESULT_UNCHANGED_RENDER)
+  })
+
+  test("renders a bounded delta with hunk markers instead of the content", () => {
+    expect(render(SAMPLE_READ_DELTA)).toBe(SAMPLE_READ_DELTA_RENDER)
+  })
+
+  test("appends the full-view reconciliation note after the content", () => {
+    expect(render(SAMPLE_READ_RECONCILE_FULL)).toBe(SAMPLE_READ_RECONCILE_FULL_RENDER)
+  })
+
+  test("renders degradation warnings as the final warning line", () => {
+    expect(render(SAMPLE_READ_WARNINGS)).toBe(SAMPLE_READ_WARNINGS_RENDER)
   })
 
   test("omits position, diagnostics, anchors, and empty coverage", () => {

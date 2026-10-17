@@ -1,20 +1,21 @@
 #!/usr/bin/env bun
-// edit_transaction 探针：raw NDJSON 连接 → ping/subscribe → 等 ready →
+// edit_transaction 探针：读 locator → TCP 连接（raw NDJSON）→ ping/subscribe → 等 ready →
 // 按请求把 fixtures/edit_transaction/templates/<basename> copy 回目标文件（重置样本）→
 // 逐文件 read_view 取 version 注入 baseVersion → 发送 edit_transaction →
 // 打印结果；--out 时把 result 美化落盘（fixtures 生成用），--normalize 把 files[].old_version/
 // new_version 归一为 "<version>"。
-// 用法: bun script/edit-txn-probe.ts [socket_path] [--params file.json] [--params-json '{...}']
+// 用法: bun script/edit-txn-probe.ts [locator_path] [--params file.json] [--params-json '{...}']
 //        [--base-version v | --base-version N=v] [--lock-timeout-ms n] [--out file] [--normalize]
 //        [--raw] [--copy|--no-copy] [--no-inject] [--no-wait] [--timeout secs] [--shutdown]
 //        [--parallel n]
 import net from "node:net"
 import path from "node:path"
 import fs from "node:fs"
+import { connectLocator } from "./connect"
 
 const argv = process.argv.slice(2)
 const options = {
-  socket: "",
+  locator: "",
   params: "",
   paramsJson: "",
   baseVersions: [] as string[],
@@ -57,7 +58,7 @@ if (!Number.isInteger(options.parallel) || options.parallel < 1) {
   process.exit(2)
 }
 const scriptDir = import.meta.dir
-options.socket = positional[0] ?? path.resolve(scriptDir, "../.tmp/txn.sock")
+options.locator = positional[0] ?? path.resolve(scriptDir, "../.tmp/txn.port")
 const projectRoot = path.resolve(scriptDir, "../sample-project")
 const templatesDir = path.resolve(scriptDir, "../fixtures/edit_transaction/templates")
 const defaultParamsPath = path.resolve(scriptDir, "../fixtures/edit_transaction/input.json")
@@ -130,23 +131,10 @@ function sleep(ms: number) {
 }
 
 async function connectWithRetry(deadlineMs: number): Promise<void> {
-  const started = Date.now()
-  for (;;) {
-    const candidate = net.createConnection({ path: options.socket })
-    try {
-      await new Promise<void>((resolve, reject) => {
-        candidate.once("connect", resolve)
-        candidate.once("error", reject)
-      })
-      socket = candidate
-      attach(socket)
-      return
-    } catch (error) {
-      candidate.destroy()
-      if (Date.now() - started > deadlineMs) throw error
-      await sleep(500)
-    }
-  }
+  const connection = await connectLocator(options.locator, { deadlineMs })
+  socket = connection.socket
+  buffer = connection.leftover
+  attach(socket)
 }
 
 async function reconnect(): Promise<void> {
@@ -248,7 +236,7 @@ function normalizeResult(result: any): any {
   return copy
 }
 
-// ---- 并发模式：N 个独立 socket，共用同一组 baseline 版本，barrier 后同时发送 ----
+// ---- 并发模式：N 个独立连接，共用同一组 baseline 版本，barrier 后同时发送 ----
 
 type WorkerConn = {
   index: number
@@ -258,27 +246,9 @@ type WorkerConn = {
   pending: Map<number, Pending>
 }
 
-function openSocket(): Promise<net.Socket> {
-  return new Promise((resolve, reject) => {
-    const candidate = net.createConnection({ path: options.socket })
-    candidate.once("connect", () => resolve(candidate))
-    candidate.once("error", (error) => {
-      candidate.destroy()
-      reject(error)
-    })
-  })
-}
-
-async function openSocketWithRetry(deadlineMs: number): Promise<net.Socket> {
-  const started = Date.now()
-  for (;;) {
-    try {
-      return await openSocket()
-    } catch (error) {
-      if (Date.now() - started > deadlineMs) throw error
-      await sleep(200)
-    }
-  }
+// 每个 worker 一条独立连接：locator + TCP + hello 同样走共享 helper（200ms 重试）
+function openSocketWithRetry(deadlineMs: number) {
+  return connectLocator(options.locator, { deadlineMs, retryDelayMs: 200 })
 }
 
 function attachWorker(worker: WorkerConn) {
@@ -349,7 +319,9 @@ async function runParallel(count: number): Promise<number> {
     workers.map(async (worker): Promise<{ index: number; ok: boolean; elapsedMs?: number; response?: any; error?: string }> => {
       const conn: WorkerConn = { index: worker.index, socket: null, buffer: "", nextId: 0, pending: new Map() }
       try {
-        conn.socket = await openSocketWithRetry(10_000)
+        const connection = await openSocketWithRetry(10_000)
+        conn.socket = connection.socket
+        conn.buffer = connection.leftover
         attachWorker(conn)
         markReady()
         await barrier
@@ -394,7 +366,7 @@ async function runParallel(count: number): Promise<number> {
 // ---- 主流程 ----
 
 await connectWithRetry(10_000)
-console.log("[edit-txn-probe] connected:", options.socket)
+console.log("[edit-txn-probe] connected:", options.locator)
 console.log("[edit-txn-probe] ping ->", JSON.stringify((await call("ping")).result ?? {}))
 await call("subscribe")
 

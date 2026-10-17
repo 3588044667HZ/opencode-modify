@@ -121,6 +121,359 @@
         ]
       }
     },
+    "/auth/{providerID}/keys": {
+      "get": {
+        "tags": ["control"],
+        "operationId": "auth.key.list",
+        "parameters": [
+          {
+            "name": "providerID",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "API keys stored for the provider with masked values",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "keys": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "preview": {
+                            "type": "string"
+                          },
+                          "active": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": ["id", "preview", "active"],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["keys"],
+                  "additionalProperties": false,
+                  "description": "API keys stored for the provider with masked values"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BadRequest | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/effect_HttpApiError_BadRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "description": "List the API keys stored for a provider. Key values are masked.",
+        "summary": "List API keys",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.auth.key.list({\n  ...\n})"
+          }
+        ]
+      },
+      "put": {
+        "tags": ["control"],
+        "operationId": "auth.key.add",
+        "parameters": [
+          {
+            "name": "providerID",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated API key list for the provider",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "keys": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "preview": {
+                            "type": "string"
+                          },
+                          "active": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": ["id", "preview", "active"],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["keys"],
+                  "additionalProperties": false,
+                  "description": "Updated API key list for the provider"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BadRequest | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/effect_HttpApiError_BadRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "description": "Add an API key for a provider and make it the active key.",
+        "summary": "Add API key",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  }
+                },
+                "required": ["key"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.auth.key.add({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/auth/{providerID}/keys/{keyID}/activate": {
+      "post": {
+        "tags": ["control"],
+        "operationId": "auth.key.activate",
+        "parameters": [
+          {
+            "name": "providerID",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "keyID",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated API key list for the provider",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "keys": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "preview": {
+                            "type": "string"
+                          },
+                          "active": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": ["id", "preview", "active"],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["keys"],
+                  "additionalProperties": false,
+                  "description": "Updated API key list for the provider"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BadRequest | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/effect_HttpApiError_BadRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "description": "Select which stored API key is used for provider requests.",
+        "summary": "Activate API key",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.auth.key.activate({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/auth/{providerID}/keys/{keyID}": {
+      "delete": {
+        "tags": ["control"],
+        "operationId": "auth.key.remove",
+        "parameters": [
+          {
+            "name": "providerID",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "keyID",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Remaining API keys for the provider",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "keys": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "preview": {
+                            "type": "string"
+                          },
+                          "active": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": ["id", "preview", "active"],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["keys"],
+                  "additionalProperties": false,
+                  "description": "Remaining API keys for the provider"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BadRequest | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/effect_HttpApiError_BadRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "description": "Remove a stored API key. Removing the last key disconnects the provider.",
+        "summary": "Remove API key",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.auth.key.remove({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/log": {
       "post": {
         "tags": ["control"],
@@ -291,9 +644,12 @@
                     },
                     "version": {
                       "type": "string"
+                    },
+                    "build": {
+                      "type": "string"
                     }
                   },
-                  "required": ["healthy", "version"],
+                  "required": ["healthy", "version", "build"],
                   "additionalProperties": false,
                   "description": "Health information"
                 }
@@ -5288,6 +5644,114 @@
         ]
       }
     },
+    "/semantic/status": {
+      "get": {
+        "tags": ["semantic"],
+        "operationId": "semantic.status",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Semantic engine status snapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticStatusInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Get the current semantic engine status snapshot for the active project directory without starting the daemon.",
+        "summary": "Get semantic engine status",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.semantic.status({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/semantic/warmup": {
+      "post": {
+        "tags": ["semantic"],
+        "operationId": "semantic.warmup",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Semantic engine status snapshot after warmup trigger",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticStatusInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Trigger a lazy cold start of the semantic engine daemon for the active project directory and return the post-trigger status snapshot. Ongoing progress continues through semantic.indexing events.",
+        "summary": "Warm up semantic engine",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.semantic.warmup({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/session": {
       "get": {
         "tags": ["session"],
@@ -8051,6 +8515,371 @@
           {
             "lang": "js",
             "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.part.update({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/session/{sessionID}/blackboard": {
+      "get": {
+        "tags": ["session"],
+        "operationId": "session.blackboard",
+        "parameters": [
+          {
+            "name": "sessionID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Blackboard entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "rootSessionID": {
+                        "type": "string",
+                        "pattern": "^ses"
+                      },
+                      "key": {
+                        "type": "string"
+                      },
+                      "value": {
+                        "type": "string"
+                      },
+                      "authorSessionID": {
+                        "type": "string",
+                        "pattern": "^ses"
+                      },
+                      "authorAgent": {
+                        "type": "string"
+                      },
+                      "version": {
+                        "anyOf": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "string",
+                            "enum": ["NaN"]
+                          },
+                          {
+                            "type": "string",
+                            "enum": ["Infinity"]
+                          },
+                          {
+                            "type": "string",
+                            "enum": ["-Infinity"]
+                          },
+                          {
+                            "type": "string",
+                            "enum": ["Infinity", "-Infinity", "NaN"]
+                          }
+                        ]
+                      },
+                      "timeCreated": {
+                        "anyOf": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "string",
+                            "enum": ["NaN"]
+                          },
+                          {
+                            "type": "string",
+                            "enum": ["Infinity"]
+                          },
+                          {
+                            "type": "string",
+                            "enum": ["-Infinity"]
+                          },
+                          {
+                            "type": "string",
+                            "enum": ["Infinity", "-Infinity", "NaN"]
+                          }
+                        ]
+                      },
+                      "timeUpdated": {
+                        "anyOf": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "string",
+                            "enum": ["NaN"]
+                          },
+                          {
+                            "type": "string",
+                            "enum": ["Infinity"]
+                          },
+                          {
+                            "type": "string",
+                            "enum": ["-Infinity"]
+                          },
+                          {
+                            "type": "string",
+                            "enum": ["Infinity", "-Infinity", "NaN"]
+                          }
+                        ]
+                      }
+                    },
+                    "required": ["rootSessionID", "key", "value", "version", "timeCreated", "timeUpdated"],
+                    "additionalProperties": false
+                  },
+                  "description": "Blackboard entries"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BadRequest | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/effect_HttpApiError_BadRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFoundError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "description": "List shared blackboard key-value entries for the session tree (rooted at the top-level ancestor session).",
+        "summary": "Get session blackboard",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.blackboard({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/session/{sessionID}/inbox": {
+      "get": {
+        "tags": ["session"],
+        "operationId": "session.inbox",
+        "parameters": [
+          {
+            "name": "sessionID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "unread",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["true", "false"]
+            },
+            "required": false
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Peer messages",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "rootSessionID": {
+                        "type": "string",
+                        "pattern": "^ses"
+                      },
+                      "fromSessionID": {
+                        "type": "string",
+                        "pattern": "^ses"
+                      },
+                      "fromAgent": {
+                        "type": "string"
+                      },
+                      "toSessionID": {
+                        "type": "string",
+                        "pattern": "^ses"
+                      },
+                      "kind": {
+                        "type": "string"
+                      },
+                      "body": {
+                        "type": "string"
+                      },
+                      "hop": {
+                        "anyOf": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "string",
+                            "enum": ["NaN"]
+                          },
+                          {
+                            "type": "string",
+                            "enum": ["Infinity"]
+                          },
+                          {
+                            "type": "string",
+                            "enum": ["-Infinity"]
+                          },
+                          {
+                            "type": "string",
+                            "enum": ["Infinity", "-Infinity", "NaN"]
+                          }
+                        ]
+                      },
+                      "replyTo": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "type": "string"
+                      },
+                      "timeCreated": {
+                        "anyOf": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "string",
+                            "enum": ["NaN"]
+                          },
+                          {
+                            "type": "string",
+                            "enum": ["Infinity"]
+                          },
+                          {
+                            "type": "string",
+                            "enum": ["-Infinity"]
+                          },
+                          {
+                            "type": "string",
+                            "enum": ["Infinity", "-Infinity", "NaN"]
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "rootSessionID",
+                      "fromSessionID",
+                      "toSessionID",
+                      "kind",
+                      "body",
+                      "hop",
+                      "status",
+                      "timeCreated"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "description": "Peer messages"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BadRequest | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/effect_HttpApiError_BadRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFoundError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "description": "List peer messages delivered to the session within its session tree.",
+        "summary": "Get session peer inbox",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.inbox({\n  ...\n})"
           }
         ]
       }
@@ -15390,6 +16219,21 @@
             "$ref": "#/components/schemas/EventSessionNextRevertCommitted"
           },
           {
+            "$ref": "#/components/schemas/EventSessionNextTeamStarted"
+          },
+          {
+            "$ref": "#/components/schemas/EventSessionNextTeamMemberEnded"
+          },
+          {
+            "$ref": "#/components/schemas/EventSessionNextTeamEnded"
+          },
+          {
+            "$ref": "#/components/schemas/EventSessionNextBlackboardChanged"
+          },
+          {
+            "$ref": "#/components/schemas/EventSessionNextAgentMessageSent"
+          },
+          {
             "$ref": "#/components/schemas/EventMessagePartDelta"
           },
           {
@@ -15451,6 +16295,9 @@
           },
           {
             "$ref": "#/components/schemas/EventLspUpdated"
+          },
+          {
+            "$ref": "#/components/schemas/EventSemanticIndexing"
           },
           {
             "$ref": "#/components/schemas/EventPermissionAsked"
@@ -15592,6 +16439,22 @@
         "required": ["type", "refresh", "access", "expires"],
         "additionalProperties": false
       },
+      "ApiKey": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": ["id", "key"],
+        "additionalProperties": false
+      },
       "ApiAuth": {
         "type": "object",
         "properties": {
@@ -15607,6 +16470,15 @@
             "additionalProperties": {
               "type": "string"
             }
+          },
+          "keys": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ApiKey"
+            }
+          },
+          "activeKeyID": {
+            "type": "string"
           }
         },
         "required": ["type", "key"],
@@ -19027,6 +19899,237 @@
                   },
                   "type": {
                     "type": "string",
+                    "enum": ["session.next.team.started"]
+                  },
+                  "properties": {
+                    "type": "object",
+                    "properties": {
+                      "timestamp": {
+                        "type": "number"
+                      },
+                      "sessionID": {
+                        "type": "string",
+                        "pattern": "^ses"
+                      },
+                      "team": {
+                        "type": "string"
+                      },
+                      "parentSessionID": {
+                        "type": "string",
+                        "pattern": "^ses"
+                      },
+                      "members": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "sessionID": {
+                              "type": "string",
+                              "pattern": "^ses"
+                            },
+                            "agent": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["sessionID", "agent", "name"],
+                          "additionalProperties": false
+                        }
+                      }
+                    },
+                    "required": ["timestamp", "sessionID", "team", "parentSessionID", "members"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["id", "type", "properties"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^evt_"
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": ["session.next.team.member.ended"]
+                  },
+                  "properties": {
+                    "type": "object",
+                    "properties": {
+                      "timestamp": {
+                        "type": "number"
+                      },
+                      "sessionID": {
+                        "type": "string",
+                        "pattern": "^ses"
+                      },
+                      "parentSessionID": {
+                        "type": "string",
+                        "pattern": "^ses"
+                      },
+                      "agent": {
+                        "type": "string"
+                      },
+                      "state": {
+                        "type": "string",
+                        "enum": ["completed", "error", "cancelled"]
+                      },
+                      "error": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["timestamp", "sessionID", "parentSessionID", "agent", "state"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["id", "type", "properties"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^evt_"
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": ["session.next.team.ended"]
+                  },
+                  "properties": {
+                    "type": "object",
+                    "properties": {
+                      "timestamp": {
+                        "type": "number"
+                      },
+                      "sessionID": {
+                        "type": "string",
+                        "pattern": "^ses"
+                      },
+                      "parentSessionID": {
+                        "type": "string",
+                        "pattern": "^ses"
+                      },
+                      "team": {
+                        "type": "string"
+                      },
+                      "state": {
+                        "type": "string",
+                        "enum": ["completed", "partial"]
+                      }
+                    },
+                    "required": ["timestamp", "sessionID", "parentSessionID", "team", "state"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["id", "type", "properties"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^evt_"
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": ["session.next.blackboard.changed"]
+                  },
+                  "properties": {
+                    "type": "object",
+                    "properties": {
+                      "timestamp": {
+                        "type": "number"
+                      },
+                      "sessionID": {
+                        "type": "string",
+                        "pattern": "^ses"
+                      },
+                      "key": {
+                        "type": "string"
+                      },
+                      "version": {
+                        "type": "integer"
+                      },
+                      "authorSessionID": {
+                        "type": "string",
+                        "pattern": "^ses"
+                      },
+                      "authorAgent": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["timestamp", "sessionID", "key", "version"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["id", "type", "properties"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^evt_"
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": ["session.next.agent.message.sent"]
+                  },
+                  "properties": {
+                    "type": "object",
+                    "properties": {
+                      "timestamp": {
+                        "type": "number"
+                      },
+                      "sessionID": {
+                        "type": "string",
+                        "pattern": "^ses"
+                      },
+                      "messageID": {
+                        "type": "string"
+                      },
+                      "from": {
+                        "type": "string",
+                        "pattern": "^ses"
+                      },
+                      "fromAgent": {
+                        "type": "string"
+                      },
+                      "to": {
+                        "type": "string",
+                        "pattern": "^ses"
+                      },
+                      "kind": {
+                        "type": "string"
+                      },
+                      "hop": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    },
+                    "required": ["timestamp", "sessionID", "messageID", "from", "to", "kind", "hop"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["id", "type", "properties"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^evt_"
+                  },
+                  "type": {
+                    "type": "string",
                     "enum": ["message.part.delta"]
                   },
                   "properties": {
@@ -19658,6 +20761,64 @@
                   "properties": {
                     "type": "object",
                     "properties": {}
+                  }
+                },
+                "required": ["id", "type", "properties"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^evt_"
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": ["semantic.indexing"]
+                  },
+                  "properties": {
+                    "type": "object",
+                    "properties": {
+                      "status": {
+                        "type": "string",
+                        "enum": ["starting", "indexing", "ready", "failed"]
+                      },
+                      "progress": {
+                        "anyOf": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "string",
+                            "enum": ["NaN"]
+                          },
+                          {
+                            "type": "string",
+                            "enum": ["Infinity"]
+                          },
+                          {
+                            "type": "string",
+                            "enum": ["-Infinity"]
+                          },
+                          {
+                            "type": "string",
+                            "enum": ["Infinity", "-Infinity", "NaN"]
+                          }
+                        ]
+                      },
+                      "current": {
+                        "type": "string"
+                      },
+                      "phase": {
+                        "type": "string"
+                      },
+                      "error": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["status", "progress"],
+                    "additionalProperties": false
                   }
                 },
                 "required": ["id", "type", "properties"],
@@ -21290,6 +22451,93 @@
             "type": "integer",
             "minimum": 0
           },
+          "team": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "members": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "agent": {
+                        "type": "string"
+                      },
+                      "role": {
+                        "type": "string"
+                      },
+                      "description": {
+                        "type": "string"
+                      },
+                      "prompt": {
+                        "type": "string"
+                      },
+                      "variant": {
+                        "type": "string"
+                      },
+                      "autonomy": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": ["agent"],
+                    "additionalProperties": false
+                  }
+                },
+                "max_parallel": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                },
+                "aggregate": {
+                  "type": "string",
+                  "enum": ["concat", "none"]
+                }
+              },
+              "required": ["members"],
+              "additionalProperties": false
+            }
+          },
+          "agent_message": {
+            "type": "object",
+            "properties": {
+              "max_hop": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              "max_body_bytes": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              "max_per_minute": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              "wake_idle": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          },
+          "blackboard": {
+            "type": "object",
+            "properties": {
+              "max_value_bytes": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              "max_keys": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              }
+            },
+            "additionalProperties": false
+          },
           "username": {
             "type": "string"
           },
@@ -21459,6 +22707,34 @@
               }
             ],
             "description": "Enable or configure LSP servers. Omit or set to false to disable, true to enable built-ins, or an object to enable built-ins with overrides."
+          },
+          "semantic": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "command": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "socket_dir": {
+                "type": "string"
+              },
+              "idle_timeout_ms": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "exclude": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
           },
           "instructions": {
             "type": "array",
@@ -23073,6 +24349,49 @@
         "required": ["name", "data"],
         "additionalProperties": false
       },
+      "SemanticStatusInfo": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["disabled", "idle", "starting", "indexing", "ready", "failed"]
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "enum": ["NaN"]
+              },
+              {
+                "type": "string",
+                "enum": ["Infinity"]
+              },
+              {
+                "type": "string",
+                "enum": ["-Infinity"]
+              },
+              {
+                "type": "string",
+                "enum": ["Infinity", "-Infinity", "NaN"]
+              }
+            ]
+          },
+          "phase": {
+            "type": "string"
+          },
+          "current": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": ["status", "progress"],
+        "additionalProperties": false
+      },
       "NotFoundError": {
         "type": "object",
         "required": ["name", "data"],
@@ -24142,6 +25461,21 @@
             "$ref": "#/components/schemas/SessionNextRevertCommitted"
           },
           {
+            "$ref": "#/components/schemas/SessionNextTeamStarted"
+          },
+          {
+            "$ref": "#/components/schemas/SessionNextTeamMemberEnded"
+          },
+          {
+            "$ref": "#/components/schemas/SessionNextTeamEnded"
+          },
+          {
+            "$ref": "#/components/schemas/SessionNextBlackboardChanged"
+          },
+          {
+            "$ref": "#/components/schemas/SessionNextAgentMessageSent"
+          },
+          {
             "$ref": "#/components/schemas/MessagePartDelta"
           },
           {
@@ -24203,6 +25537,9 @@
           },
           {
             "$ref": "#/components/schemas/LspUpdated"
+          },
+          {
+            "$ref": "#/components/schemas/SemanticIndexing"
           },
           {
             "$ref": "#/components/schemas/PermissionAsked"
@@ -31483,6 +32820,347 @@
         "required": ["id", "type", "data"],
         "additionalProperties": false
       },
+      "SessionNextTeamStarted": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["session.next.team.started"]
+          },
+          "durable": {
+            "type": "object",
+            "properties": {
+              "aggregateID": {
+                "type": "string"
+              },
+              "seq": {
+                "type": "integer"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "required": ["aggregateID", "seq", "version"],
+            "additionalProperties": false
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationRef"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "timestamp": {
+                "type": "number"
+              },
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses"
+              },
+              "team": {
+                "type": "string"
+              },
+              "parentSessionID": {
+                "type": "string",
+                "pattern": "^ses"
+              },
+              "members": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "sessionID": {
+                      "type": "string",
+                      "pattern": "^ses"
+                    },
+                    "agent": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["sessionID", "agent", "name"],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": ["timestamp", "sessionID", "team", "parentSessionID", "members"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "data"],
+        "additionalProperties": false
+      },
+      "SessionNextTeamMemberEnded": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["session.next.team.member.ended"]
+          },
+          "durable": {
+            "type": "object",
+            "properties": {
+              "aggregateID": {
+                "type": "string"
+              },
+              "seq": {
+                "type": "integer"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "required": ["aggregateID", "seq", "version"],
+            "additionalProperties": false
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationRef"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "timestamp": {
+                "type": "number"
+              },
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses"
+              },
+              "parentSessionID": {
+                "type": "string",
+                "pattern": "^ses"
+              },
+              "agent": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": ["completed", "error", "cancelled"]
+              },
+              "error": {
+                "type": "string"
+              }
+            },
+            "required": ["timestamp", "sessionID", "parentSessionID", "agent", "state"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "data"],
+        "additionalProperties": false
+      },
+      "SessionNextTeamEnded": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["session.next.team.ended"]
+          },
+          "durable": {
+            "type": "object",
+            "properties": {
+              "aggregateID": {
+                "type": "string"
+              },
+              "seq": {
+                "type": "integer"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "required": ["aggregateID", "seq", "version"],
+            "additionalProperties": false
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationRef"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "timestamp": {
+                "type": "number"
+              },
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses"
+              },
+              "parentSessionID": {
+                "type": "string",
+                "pattern": "^ses"
+              },
+              "team": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": ["completed", "partial"]
+              }
+            },
+            "required": ["timestamp", "sessionID", "parentSessionID", "team", "state"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "data"],
+        "additionalProperties": false
+      },
+      "SessionNextBlackboardChanged": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["session.next.blackboard.changed"]
+          },
+          "durable": {
+            "type": "object",
+            "properties": {
+              "aggregateID": {
+                "type": "string"
+              },
+              "seq": {
+                "type": "integer"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "required": ["aggregateID", "seq", "version"],
+            "additionalProperties": false
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationRef"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "timestamp": {
+                "type": "number"
+              },
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses"
+              },
+              "key": {
+                "type": "string"
+              },
+              "version": {
+                "type": "integer"
+              },
+              "authorSessionID": {
+                "type": "string",
+                "pattern": "^ses"
+              },
+              "authorAgent": {
+                "type": "string"
+              }
+            },
+            "required": ["timestamp", "sessionID", "key", "version"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "data"],
+        "additionalProperties": false
+      },
+      "SessionNextAgentMessageSent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["session.next.agent.message.sent"]
+          },
+          "durable": {
+            "type": "object",
+            "properties": {
+              "aggregateID": {
+                "type": "string"
+              },
+              "seq": {
+                "type": "integer"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "required": ["aggregateID", "seq", "version"],
+            "additionalProperties": false
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationRef"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "timestamp": {
+                "type": "number"
+              },
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses"
+              },
+              "messageID": {
+                "type": "string"
+              },
+              "from": {
+                "type": "string",
+                "pattern": "^ses"
+              },
+              "fromAgent": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string",
+                "pattern": "^ses"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "hop": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": ["timestamp", "sessionID", "messageID", "from", "to", "kind", "hop"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "data"],
+        "additionalProperties": false
+      },
       "MessagePartDelta": {
         "type": "object",
         "properties": {
@@ -32585,6 +34263,84 @@
           "data": {
             "type": "object",
             "properties": {}
+          }
+        },
+        "required": ["id", "type", "data"],
+        "additionalProperties": false
+      },
+      "SemanticIndexing": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["semantic.indexing"]
+          },
+          "durable": {
+            "type": "object",
+            "properties": {
+              "aggregateID": {
+                "type": "string"
+              },
+              "seq": {
+                "type": "integer"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "required": ["aggregateID", "seq", "version"],
+            "additionalProperties": false
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationRef"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": ["starting", "indexing", "ready", "failed"]
+              },
+              "progress": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "string",
+                    "enum": ["NaN"]
+                  },
+                  {
+                    "type": "string",
+                    "enum": ["Infinity"]
+                  },
+                  {
+                    "type": "string",
+                    "enum": ["-Infinity"]
+                  }
+                ],
+                "minimum": 0,
+                "maximum": 1
+              },
+              "current": {
+                "type": "string"
+              },
+              "phase": {
+                "type": "string"
+              },
+              "error": {
+                "type": "string"
+              }
+            },
+            "required": ["status", "progress"],
+            "additionalProperties": false
           }
         },
         "required": ["id", "type", "data"],
@@ -35430,6 +37186,237 @@
         "required": ["id", "type", "properties"],
         "additionalProperties": false
       },
+      "EventSessionNextTeamStarted": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["session.next.team.started"]
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "timestamp": {
+                "type": "number"
+              },
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses"
+              },
+              "team": {
+                "type": "string"
+              },
+              "parentSessionID": {
+                "type": "string",
+                "pattern": "^ses"
+              },
+              "members": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "sessionID": {
+                      "type": "string",
+                      "pattern": "^ses"
+                    },
+                    "agent": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["sessionID", "agent", "name"],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": ["timestamp", "sessionID", "team", "parentSessionID", "members"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "properties"],
+        "additionalProperties": false
+      },
+      "EventSessionNextTeamMemberEnded": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["session.next.team.member.ended"]
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "timestamp": {
+                "type": "number"
+              },
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses"
+              },
+              "parentSessionID": {
+                "type": "string",
+                "pattern": "^ses"
+              },
+              "agent": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": ["completed", "error", "cancelled"]
+              },
+              "error": {
+                "type": "string"
+              }
+            },
+            "required": ["timestamp", "sessionID", "parentSessionID", "agent", "state"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "properties"],
+        "additionalProperties": false
+      },
+      "EventSessionNextTeamEnded": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["session.next.team.ended"]
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "timestamp": {
+                "type": "number"
+              },
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses"
+              },
+              "parentSessionID": {
+                "type": "string",
+                "pattern": "^ses"
+              },
+              "team": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": ["completed", "partial"]
+              }
+            },
+            "required": ["timestamp", "sessionID", "parentSessionID", "team", "state"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "properties"],
+        "additionalProperties": false
+      },
+      "EventSessionNextBlackboardChanged": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["session.next.blackboard.changed"]
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "timestamp": {
+                "type": "number"
+              },
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses"
+              },
+              "key": {
+                "type": "string"
+              },
+              "version": {
+                "type": "integer"
+              },
+              "authorSessionID": {
+                "type": "string",
+                "pattern": "^ses"
+              },
+              "authorAgent": {
+                "type": "string"
+              }
+            },
+            "required": ["timestamp", "sessionID", "key", "version"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "properties"],
+        "additionalProperties": false
+      },
+      "EventSessionNextAgentMessageSent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["session.next.agent.message.sent"]
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "timestamp": {
+                "type": "number"
+              },
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses"
+              },
+              "messageID": {
+                "type": "string"
+              },
+              "from": {
+                "type": "string",
+                "pattern": "^ses"
+              },
+              "fromAgent": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string",
+                "pattern": "^ses"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "hop": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": ["timestamp", "sessionID", "messageID", "from", "to", "kind", "hop"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "properties"],
+        "additionalProperties": false
+      },
       "EventMessagePartDelta": {
         "type": "object",
         "properties": {
@@ -36070,6 +38057,62 @@
           "properties": {
             "type": "object",
             "properties": {}
+          }
+        },
+        "required": ["id", "type", "properties"],
+        "additionalProperties": false
+      },
+      "EventSemanticIndexing": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["semantic.indexing"]
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": ["starting", "indexing", "ready", "failed"]
+              },
+              "progress": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "string",
+                    "enum": ["NaN"]
+                  },
+                  {
+                    "type": "string",
+                    "enum": ["Infinity"]
+                  },
+                  {
+                    "type": "string",
+                    "enum": ["-Infinity"]
+                  }
+                ],
+                "minimum": 0,
+                "maximum": 1
+              },
+              "current": {
+                "type": "string"
+              },
+              "phase": {
+                "type": "string"
+              },
+              "error": {
+                "type": "string"
+              }
+            },
+            "required": ["status", "progress"],
+            "additionalProperties": false
           }
         },
         "required": ["id", "type", "properties"],
@@ -36862,6 +38905,10 @@
     {
       "name": "provider",
       "description": "Experimental HttpApi provider routes."
+    },
+    {
+      "name": "semantic",
+      "description": "Experimental HttpApi semantic routes."
     },
     {
       "name": "session",

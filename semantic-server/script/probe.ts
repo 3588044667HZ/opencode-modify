@@ -1,11 +1,12 @@
 #!/usr/bin/env bun
-// Bun 探针：连接 semantic-server 的 unix socket，依次发送 ping / subscribe / read_view / shutdown
-// 用法: bun script/probe.ts [socket_path] [--file path] [--symbol name] [--shutdown] [--timeout secs] [--no-wait]
+// Bun 探针：读 locator 文件，TCP 连接 semantic-server，依次发送 ping / subscribe / read_view / shutdown
+// 用法: bun script/probe.ts [locator_path] [--file path] [--symbol name] [--shutdown] [--timeout secs] [--no-wait]
 import net from "node:net"
 import path from "node:path"
+import { connectLocator } from "./connect"
 
 const argv = process.argv.slice(2)
-const options = { socket: "", file: "", symbol: "", shutdown: false, timeout: 300, wait: true, earlyRead: false }
+const options = { locator: "", file: "", symbol: "", shutdown: false, timeout: 300, wait: true, earlyRead: false }
 const positional: string[] = []
 for (let i = 0; i < argv.length; i++) {
   const arg = argv[i]
@@ -18,7 +19,7 @@ for (let i = 0; i < argv.length; i++) {
   else positional.push(arg)
 }
 const scriptDir = import.meta.dir
-options.socket = positional[0] ?? path.resolve(scriptDir, "../.tmp/semantic.sock")
+options.locator = positional[0] ?? path.resolve(scriptDir, "../.tmp/semantic.port")
 options.file = options.file || path.resolve(scriptDir, "../sample-project/src/main/java/demo/Main.java")
 
 type Pending = { resolve: (message: any) => void; timer: ReturnType<typeof setTimeout> }
@@ -79,23 +80,11 @@ function sleep(ms: number) {
 }
 
 async function connectWithRetry(deadlineMs: number): Promise<void> {
-  const started = Date.now()
-  for (;;) {
-    const candidate = net.createConnection({ path: options.socket })
-    try {
-      await new Promise<void>((resolve, reject) => {
-        candidate.once("connect", resolve)
-        candidate.once("error", reject)
-      })
-      socket = candidate
-      attach(socket)
-      return
-    } catch (error) {
-      candidate.destroy()
-      if (Date.now() - started > deadlineMs) throw error
-      await sleep(500)
-    }
-  }
+  // locator 读取 + TCP 连接 + hello 由共享 helper 完成；重试节奏与探针原有 500ms 一致
+  const connection = await connectLocator(options.locator, { deadlineMs })
+  socket = connection.socket
+  buffer = connection.leftover
+  attach(socket)
 }
 
 function printResult(label: string, message: any) {
@@ -104,7 +93,7 @@ function printResult(label: string, message: any) {
 }
 
 await connectWithRetry(10_000)
-console.log("[probe] connected:", options.socket)
+console.log("[probe] connected:", options.locator)
 
 printResult("ping", await call("ping"))
 printResult("subscribe", await call("subscribe"))

@@ -25,6 +25,7 @@ import { AgentInboxTool } from "./agent-inbox"
 import { BlackboardTool } from "./blackboard"
 import { Blackboard } from "@/session/blackboard"
 import { Mailbox } from "@/session/mailbox"
+import { SessionLedger } from "@/session/ledger"
 import { Database } from "@opencode-ai/core/database/database"
 import { TodoWriteTool } from "./todo"
 import { WebFetchTool } from "./webfetch"
@@ -371,11 +372,6 @@ const layer = Layer.effect(
           return webSearchEnabled(input.providerID, { exa: flags.enableExa, parallel: flags.enableParallel })
         }
 
-        const usePatch =
-          input.modelID.includes("gpt-") && !input.modelID.includes("oss") && !input.modelID.includes("gpt-4")
-        if (tool.id === ApplyPatchTool.id) return usePatch
-        if (tool.id === EditTool.id || tool.id === WriteTool.id) return !usePatch
-
         return true
       })
 
@@ -518,6 +514,7 @@ export const node = LayerNode.make({
     Permission.node,
     Blackboard.node,
     Mailbox.node,
+    SessionLedger.node,
     BackgroundJob.node,
     Provider.node,
     LSP.node,

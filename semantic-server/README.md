@@ -1,9 +1,16 @@
 # semantic-server —— IntelliJ 无头语义守护（MVP）
 
-按 `LLM-IDE-SPEC/`（main / intellij-headless / jsonrpc-channel / adapter-layer）实现的 IntelliJ
-无头语义守护：JSON-RPC 2.0 over AF_UNIX（NDJSON），提供 `ping` / `subscribe` / `read_view` /
+按 `LLM-IDE-SPEC/`（main / intellij-headless / jsonrpc-channel / adapter-layer / tcp-transport）
+实现的 IntelliJ 无头语义守护：JSON-RPC 2.0 over TCP `127.0.0.1`（NDJSON + `hello` 握手），
+提供 `ping` / `subscribe` / `read_view` /
 `blast_radius` / `edit_batch` / `edit_transaction` / `verify_test` / `project_map` / `shutdown`。
 Java 实现，无 Kotlin，可在无 Gradle、无网络的条件下用本地 IDEA 平台 jar 直接构建。
+
+## 授权与支持范围
+
+本项目需要你本机安装并**合法授权**的 JetBrains IDE（IDE 与授权均由使用者自行提供）。
+本项目不捆绑、不下载、不修改、不绕过任何 JetBrains 软件与授权，也不会添加此类功能；
+任何"配合未授权/破解版 IDE 使用"的支持请求不在受理范围。与 JetBrains 无官方关联。
 
 ## 目录
 
@@ -11,8 +18,10 @@ Java 实现，无 Kotlin，可在无 Gradle、无网络的条件下用本地 IDE
 semantic-server/
 ├── src/main/java/opencode/semantic/
 │   ├── SemanticServerStarter.java   # appStarter 入口（command: semantic-server），继承 ModernApplicationStarter
-│   ├── Launcher.java                # 可执行 jar 入口：定位 IDEA/JBR、自装插件到 sandbox、拉起平台
-│   ├── JsonRpcServer.java           # AF_UNIX JSON-RPC 服务（accept/读线程/推送/空闲超时/socket 清理）
+│   ├── Launcher.java                # 可执行 jar 入口：多源发现/选择 IDE、自装插件到 sandbox、拉起平台
+│   ├── JavaSupport.java             # Java 能力探测（Class.forName 缓存）+ 项目 SDK 指派（semantic-jdk）
+│   ├── JdkDiscovery.java            # JDK 发现：SEMANTIC_JDK_HOME > JAVA_HOME > 常见安装目录
+│   ├── JsonRpcServer.java           # TCP JSON-RPC 服务（accept/读线程/hello 握手/推送/空闲超时/locator 读写）
 │   ├── IndexMonitor.java            # DumbService 轮询 → notifications/indexing（阶段近似进度）
 │   ├── ReadViewService.java         # read_view 聚合：PSI/VFS/引用 resolve/诊断
 │   ├── BlastRadiusService.java      # blast_radius 聚合：定义/引用分类/入口/测试/callees/风险 + 缓存
@@ -23,15 +32,19 @@ semantic-server/
 │   ├── ProjectMapService.java       # project_map：项目级地图（模块/入口/依赖/环 + 项目级缓存/异步构建）
 │   └── Log.java
 ├── src/main/resources/META-INF/plugin.xml   # appStarter EP + 最小依赖
+├── script/resolve-env.sh            # 共享 IDE/JDK 发现（环境变量覆盖 + 注册表/Toolbox/常见路径）
 ├── script/build-local.sh            # javac + jar 打包 + 安装到 .sandbox/plugins
 ├── script/gradle-build.sh           # Gradle 离线构建（依赖固化在 .gradle-home/）
 ├── script/run-local.sh              # 用本地 IDEA 平台 + JBR 启动守护（镜像 bin/idea.bat）
+├── script/connect.ts                # 共享连接入口：读 locator + TCP 连接 + hello 握手（各探针共用）
 ├── script/probe.ts                  # Bun 探针：ping/subscribe/read_view/shutdown
 ├── script/blast-probe.ts            # Bun 探针：blast_radius（fixtures 生成/缓存/scope 证据）
 ├── script/edit-probe.ts             # Bun 探针：edit_batch（模板块 copy/版本注入/并发 N 路/锁超时/fixtures 生成/raw NDJSON）
 ├── script/edit-txn-probe.ts         # Bun 探针：edit_transaction（模板重置/逐文件版本注入/并发 N 路/fixtures 归一/raw NDJSON）
 ├── script/verify-probe.ts           # Bun 探针：verify_test（raw NDJSON/超时/cwd 错误/fixtures 归一）
 ├── script/map-probe.ts              # Bun 探针：project_map（building 轮询/并发比较/fixtures 归一）
+├── script/python-probe.ts           # Bun 探针：Python project_map/blast_radius（PyCharm + fixtures/python-project）
+├── script/js-probe.ts               # Bun 探针：JS/TS project_map/blast_radius（IDEA/WebStorm + fixtures/js-project）
 ├── script/protocol-conformance.ts   # 跨实现协议一致性测试（真实守护 ↔ OC 客户端）
 ├── fixtures/blast_radius/           # 协议 fixtures：input.json + output.json（真实守护响应）
 ├── fixtures/edit_batch/             # 协议 fixtures：template.java + input.json + output.json（版本归一）+ lock_timeout.json（手写）
@@ -64,9 +77,10 @@ GRADLE_ONLINE=1 bash script/gradle-build.sh   # 仅首次拉取依赖时需要
 ```
 
 - 产物：`build/distributions/semantic-server.zip`（IntelliJ Platform Gradle Plugin 2.2.1 打包）；
-- Gradle 8.5 运行在 JBR 21（`D:/Android Studio/jbr`，可用 `GRADLE_JAVA_HOME` 覆盖），
-  编译由 `build.gradle.kts` fork `D:/jdk25` 的 javac 完成——IDEA 2026.2 平台类文件是
-  Java 25（class file 69），Java 21 的 javac 读不了，而 Gradle 8.5 自身又不能跑在 Java 25 上；
+- Gradle 8.5 需要 Java 8–21 运行（不能跑在 Java 25 上）：缺省在 `SEMANTIC_JDK_HOME`/`JAVA_HOME`/
+  常见 JDK 目录/IDE 自带 JBR 中发现，可用 `GRADLE_JAVA_HOME` 覆盖；编译由 `build.gradle.kts`
+  fork 编译 JDK（`SEMANTIC_JDK_HOME` > `JAVA_HOME`，缺省当前 Gradle JVM）的 javac 完成——
+  IDEA 2026.2 平台类文件是 Java 25（class file 69），低版本 javac 读不了；
 - `buildSearchableOptions` 在无头构建环境禁用（不需要拉起 IDE 界面）；
 - 已实测：`rm -rf build && bash script/gradle-build.sh` → 离线 `BUILD SUCCESSFUL`（约 2 分钟）。
 
@@ -75,32 +89,113 @@ GRADLE_ONLINE=1 bash script/gradle-build.sh   # 仅首次拉取依赖时需要
 ### 方式 A：脚本（推荐，插件在仓库 `.sandbox`）
 
 ```bash
-bash script/run-local.sh [project_path] [socket_path] [--idle-seconds N]
-# 默认: sample-project  .tmp/semantic.sock  1800s
+bash script/run-local.sh [project_path] [locator_path] [--idle-seconds N]
+# 默认: sample-project  .tmp/semantic.port  1800s
 ```
 
-### 方式 B：冻结接口 CLI 形式（插件自装到按项目隔离的 sandbox）
+### 方式 B：冻结接口 CLI 形式（插件自装到按项目+发行版隔离的 sandbox）
 
 ```bash
-java -Djava.awt.headless=true -jar build-local/semantic-server.jar <project> <socket> [--idle-seconds N]
-# sandbox: ~/.opencode-semantic/sandbox-<hash10>（hash10 = SHA-1(canonical project path) 前 10 位十六进制；
-#          可用 SEMANTIC_SANDBOX 覆盖；IDEA 位置用 IDEA_HOME，默认 D:/IntelliJ IDEA 2026.2.0.1）
+java -Djava.awt.headless=true -jar build-local/semantic-server.jar <project> <locator> [--idle-seconds N]
+# IDE 发现与选择见下节；sandbox 命名为
+#   ~/.opencode-semantic/sandbox-<hash10>-<productCode><platformMajor>（如 -IU262 / -PY261），
+#   可用 SEMANTIC_SANDBOX 覆盖（覆盖值原样使用）
 ```
 
-**每项目一个沙箱**：sandbox 目录按项目路径哈希隔离（四个路径 config/system/plugins/log 都在该目录下，
-插件也安装到该项目自己的 sandbox）。多个项目并发拉起守护时不再共享同一个平台沙箱，避免 IDEA 平台
-单实例锁把后启动的实例当成 `External instance command received` 转发后秒退。canonical 规则：
-`Path.of(project).toAbsolutePath().normalize()`，Windows 下统一小写（盘符/大小写写法不同仍命中同一沙箱）。
+**每项目 + 每发行版一个沙箱**：sandbox 目录按项目路径哈希（`hash10 = SHA-1(canonical project path)`
+前 10 位十六进制，Windows 下 canonical 统一小写）与发行版后缀（`productCode` + `buildNumber` 前导数字段，
+如 `IU262`）隔离；四个路径 config/system/plugins/log 都在该目录下，插件也装到该项目自己的 sandbox。
+多个项目并发拉起守护时不再共享同一个平台沙箱，避免 IDEA 平台单实例锁把后启动的实例当成
+`External instance command received` 转发后秒退；不同平台版本（261 vs 262）混用同一个 system
+缓存会损坏，隔离是硬要求。
 
-**迁移备注**：旧版本使用的共享 sandbox `~/.opencode-semantic/sandbox` 已不再被 CLI 形式引用，可直接删除；
-新目录首次启动会自动重建（含 jdk.table.xml 与插件安装）。
+**迁移备注**：旧的 `sandbox-<hash10>`（无产品后缀）与更早的共享 `~/.opencode-semantic/sandbox`
+都不再被 CLI/Launcher 引用，可直接删除；新目录首次启动会自动重建（含 jdk.table.xml 与插件安装）。
+dev 直启（不经 Launcher，因而没有注入 `SEMANTIC_SANDBOX_PATH`）时 `exclusionsSandbox()` 仍回退旧命名
+`sandbox-<hash10>`，仅作开发用途。
 
-两者最终都以 `com.intellij.idea.Main semantic-server <project> <socket> --idle-seconds N` 启动平台并加载本插件。
+### IDE 发现与选择（Launcher）
+
+优先级（冻结，高→低）：
+
+1. 显式路径：`SEMANTIC_IDE_HOME` > `IDEA_HOME` > `IDEA_DIR`（legacy 别名）；`SEMANTIC_IDE` 的值含
+   路径分隔符（`/` 或 `\`）时也按路径处理；
+2. 产品选择器：`SEMANTIC_IDE` = `auto | idea | pycharm | webstorm | clion | goland | phpstorm | datagrip |
+   rider | rubymine`（映射 `idea→IU/IC`、`pycharm→PY/PC`、`webstorm→WS`、`clion→CL`、`goland→GO`、
+   `phpstorm→PS`、`datagrip→DG`、`rider→RD`、`rubymine→RM`；未装对应产品时报错并列出全部候选）；
+3. 自动发现 + 按项目语言自动选择：分层信号扫描（有界：跳过隐藏目录与排除默认目录
+   `venv/node_modules/build/out/target/dist/__pycache__`，深度 ≤4，条目上限 5000）：
+   - **tier-1 决定性信号**（任一命中即定性，优先于计数）：标准布局根 `src/main/java`/
+     `src/test/java`/`src/main/kotlin`；根 `*.iml` 或 `.idea/*.iml` 中 `type="JAVA_MODULE"`；
+     构建清单 `pom.xml`/`build.gradle*`/`settings.gradle*`→Java，`pyproject.toml`/`setup.py`/
+     `requirements*.txt`→Python，`package.json`/`tsconfig.json`→JS/TS（`*.html` 单独不作数，弱信号）；
+   - **tier-2 回退/补充**：无 tier-1 命中时按合并扩展名计数取主导语言（`.java`/`.py`/`.ts,.tsx`/
+     `.js,.jsx`/`.html`）；计数同时进入日志证据。
+   能力校验按发行版 `plugins/` 目录（python* / javascript-plugin / java / html-tools）。决策：
+   tier-1 命中直接决定语言集合，否则取主导计数语言；选"覆盖语言数最多"的发行版，平票按偏好序
+   `IU > PY > WS > PC`（JS/TS/HTML: `IU>WS`；Python: `PY>PC`；Java: `IU`）；无单一发行版能全覆盖
+   （混合仓库）时按偏好序选靠前者，并在日志提示"可用 `semantic.ide` 显式指定"。stderr 日志给出完整
+   证据（tier-1 命中、各语言计数、选中产品与原因），如
+   `auto: tier1=[java: src/main/java] counts={java=2} needed=[java] -> IU covers 1/1 (reason=tier-1 evidence)`。
+
+发现源（Windows 优先，其余平台为轻量兜底）：Windows 卸载表注册项（HKLM + HKCU
+`SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall`，`DisplayName` 匹配 JetBrains 产品族，取
+`InstallLocation`；本机实测为主可靠源）、Toolbox（`%LOCALAPPDATA%\JetBrains\Toolbox\apps\*\*\`
+与 `scripts\*.cmd` 垫片提示）、常见路径（`C:\Program Files\JetBrains\*`、
+`%LOCALAPPDATA%\Programs\JetBrains\*`）；macOS `/Applications/*.app`；Linux
+`~/.local/share/JetBrains/Toolbox/apps`。每个候选都必须通过 `product-info.json`（可读
+`productCode`/`buildNumber`）与 `<dir>/lib` 校验；发现/选择过程会把全部候选与选中原因打到 stderr 日志。
+发现逻辑只回答"装在哪"，不读取任何授权状态。
+
+**项目 SDK 指派**：Java 能力可用的发行版打开项目后，若项目尚无 SDK（裸目录项目没有 `.idea/misc.xml`），
+按 `SEMANTIC_JDK_HOME` > `JAVA_HOME` > 常见 JDK 目录（`C:\Program Files\Java\*`、
+`C:\Program Files\Eclipse Adoptium\*` 等）发现 JDK，在 `ProjectJdkTable` 查找/创建 `semantic-jdk`
+（与 Launcher 生成 `jdk.table.xml` 的名字一致，可直接复用）并 `setProjectSdk`（EDT + WriteAction，
+失败仅警告）。SDK 指派是必要而非充分条件：`PsiShortNamesCache` 只遍历 Java source root，SDK 已指派
+但模块没有 source root（仓库根 `WEB_MODULE` iml、裸目录默认模块）时项目类仍不可解析——所以同一
+步骤还会补齐 source root（见下）。无 Java 模块的发行版
+（PyCharm/WebStorm）下 `com.intellij.modules.java` 为 optional 依赖：`blast_radius` /
+`project_map` 在 Java、Python 或 JS/TS 能力任一可用时开放（按被分析对象语言分派，W7/W8）；
+三者都不可用才返回
+`-32603 java/python/javascript support unavailable in this IDE distribution`；read_view 语言无关
+（见"偏差与已知限制"的语言支持条目），其余功能不受影响。
+
+**Java source root 补齐**：打开项目后（与 SDK 指派同一步）对每个模块 content entry：已有 source root
+的不动；否则在 content root 下（有界：深度 ≤4、跳过隐藏与排除默认目录、最多访问 50 个目录）搜索
+`src/main/java` / `src/test/java`，命中即 `addSourceFolder`（`src/test/java` 标记为测试源）；找不到
+布局根但存在 `.java` 文件时把 content root 本身加为 source root（覆盖裸 A.java/B.java 目录）。不做
+模块类型转换、不触碰既有 source root；EDT + WriteAction、幂等、失败仅告警。失败/新增情况在守护日志
+`java source roots ensured` / `java source root added` 可见。
+
+两者最终都以 `com.intellij.idea.Main semantic-server <project> <locator> --idle-seconds N` 启动平台并加载本插件。
+
+### 传输与握手（locator / hello）
+
+- 传输：JSON-RPC 2.0 over TCP `127.0.0.1`（ephemeral port，port 0 由系统分配；无 TLS），
+  NDJSON 帧（一行一个对象，UTF-8）；方法语义、错误码、事件推送与 AF_UNIX 时代一致；
+- locator 文件：守护绑定成功后**原子写入**（同目录临时文件 + `ATOMIC_MOVE`），单行 JSON：
+
+  ```json
+  {"v":1,"port":51337,"token":"<32 hex>","pid":12345}
+  ```
+
+  token 每次守护启动由 `SecureRandom` 生成 128-bit（32 hex），只写入 locator 文件；
+  优雅退出（`shutdown` / 空闲超时）删除 locator；硬杀残留由客户端在连接失败后删除；
+- 握手：每条连接的**第一个**请求必须是
+
+  ```json
+  {"jsonrpc":"2.0","id":1,"method":"hello","params":{"token":"<32 hex>"}}
+  ```
+
+  成功回 `{"jsonrpc":"2.0","id":1,"result":{"ok":true}}`，此后该连接可调用全部方法；
+  token 不匹配或 hello 之前调用任何其他方法 → `{"code":-32019,"message":"unauthorized"}`
+  并在响应发出后关闭连接；`hello` 幂等；`notifications/indexing` 只推送给已握手的连接
+  （`subscribe` 语义不变）。
 
 ### Bun 探针
 
 ```bash
-bun script/probe.ts [socket_path] [--file path] [--symbol Name] [--early-read] [--shutdown] [--timeout secs] [--no-wait]
+bun script/probe.ts [locator_path] [--file path] [--symbol Name] [--early-read] [--shutdown] [--timeout secs] [--no-wait]
 ```
 
 探针内置 OC 客户端的预期行为：`-32000` 轮询重试；连接卡住 15s 超时后重连重试。
@@ -108,14 +203,30 @@ bun script/probe.ts [socket_path] [--file path] [--symbol Name] [--early-read] [
 ### sample-project 的 JDK
 
 `sample-project/.idea/misc.xml` 引用名为 `semantic-jdk` 的项目 SDK；`run-local.sh` / `Launcher`
-首次运行会在 sandbox `config/options/jdk.table.xml` 生成该 JDK（home 默认 `D:/jdk25`，可用
-`SEMANTIC_JDK_HOME` 覆盖）。**注意**：改过项目模型（.idea/iml）后要删除 `<sandbox>/system`
-才能让平台重建 workspace model，否则沿用旧缓存。
+首次运行会在 sandbox `config/options/jdk.table.xml` 生成该 JDK（JDK 按 `SEMANTIC_JDK_HOME` >
+`JAVA_HOME` > 常见目录发现，见"IDE 发现与选择"；Launcher 未发现或无 jmods 时跳过生成，改由插件
+打开项目后经 `ProjectJdkTable` API 指派）。**注意**：改过项目模型（.idea/iml）后要删除
+`<sandbox>/system` 才能让平台重建 workspace model，否则沿用旧缓存。
+
+### 目录排除与空闲超时（环境变量）
+
+- `OPENCODE_SEMANTIC_EXCLUDE`：JSON 字符串数组（opencode manager 在 `semantic.exclude` 非空时
+  注入）；与内置 defaults（`venv node_modules build out target __pycache__ dist`）取并集。
+  模式语义：不含 `/` 且不含 glob 元字符（`*?[{`）的条目按目录名匹配（任意层级；Windows 忽略
+  大小写）；其余按项目相对路径（`/` 分隔）做 `PathMatcher` `glob:` 匹配（支持 `**`；Windows 下
+  模式与路径先转小写）。只匹配目录、从不匹配文件；`.` 开头的隐藏目录与目录符号链接天然跳过。
+  作用：① 项目模型——所有模块 content root 下的命中目录在打开项目后自动加为 Exclude Folder，
+  并按 `<sandbox>/exclusions.json`（sandbox = `SEMANTIC_SANDBOX_PATH`，Launcher 注入；
+  dev 直启缺省回退 `~/.opencode-semantic/sandbox-<sha1-10(小写 canonical 项目路径)>`）对账（不再命中且仍存在的
+  移除、新命中的新增）；② `project_map` 扫描与失效指纹（命中目录不入模块、不下钻、目录项集合
+  不记录）。显式 `read_view` / `edit_batch` / `edit_transaction` 仍可读写被排除文件（IntelliJ 语义）。
+- `OPENCODE_SEMANTIC_IDLE_TIMEOUT_MS`：整数毫秒，仅在未传 `--idle-seconds` 时生效
+  （idleSeconds = ceil(ms/1000)）；缺失/非法回退默认 1800s。
 
 ## 已验证（本机，Windows + JBR 25）
 
 - `bash script/build-local.sh`：编译通过，无错误（仅 build-local 后 jar 无警告）。
-- 启动：socket 绑定后平台继续启动，项目打开约 1.3s，索引/扫描完成后 ready。
+- 启动：TCP 绑定 + locator 写入后平台继续启动，项目打开约 1.3s，索引/扫描完成后 ready。
 - `ping`：索引期 `{"indexing":true,"progress":0.2,"phase":"indexing","eta":45}` → ready
   `{"indexing":false,"progress":1,"phase":"ready"}`（进度为阶段近似，见"偏差"）。
 - `subscribe`：`{"ok":true}`，随后持续收到 `notifications/indexing`
@@ -149,8 +260,8 @@ bun script/probe.ts [socket_path] [--file path] [--symbol Name] [--early-read] [
   `position.current: 3`，`in_symbol: Greeter`（跨文件定位正确）。
 - 版本戳变化：同一文件读两次（中间磁盘追加一行）`version: "1a1393ac8f5"` → `"c"`，
   `size.lines: 11 → 12`。
-- `shutdown` → `{"ok":true}`，进程退出、socket 文件删除。
-- 空闲超时：`--idle-seconds 10`，10s 无请求后日志 `idle timeout (10s)` → 进程退出、socket 删除。
+- `shutdown` → `{"ok":true}`，进程退出、locator 文件删除。
+- 空闲超时：`--idle-seconds 10`，10s 无请求后日志 `idle timeout (10s)` → 进程退出、locator 删除。
 - 诊断（headless best-effort）可用：行内诊断（如 `Unused import statement`）对齐到 content，
   `status.errors` 计数正确。
 
@@ -163,12 +274,35 @@ bun script/probe.ts [socket_path] [--file path] [--symbol Name] [--early-read] [
 bun run semantic-server/script/protocol-conformance.ts
 ```
 
-覆盖 24 类用例 / 111 条断言：ping 与索引期解码、subscribe 推送、索引未就绪 -32000、
+覆盖 43 类用例 / 162 条断言：ping 与索引期解码、subscribe 推送、索引未就绪 -32000、
 entry 的 size.lines/覆盖/诊断/锚点对齐（含与磁盘逐行比对）、error 级诊断（`Broken.java`）、
 -32001、definition 跨文件、edit_batch、verify_test（真 pytest 与 fixture 归一后深度一致、
 未知命令降级、超时杀进程、失败/输出截断、cwd -32013/-32001、渲染逐字节）、shutdown 后
-socket 关闭、原始帧 id 回显/顶层字段精确/严格解码。
-当前状态：**CONFORMANCE PASS 111/111**。
+连接关闭、原始帧 id 回显/顶层字段精确/严格解码、读时对账与 warnings。
+当前状态：**CONFORMANCE PASS 162/162**。
+
+Python 语义工具（project_map / blast_radius）用独立探针验证（不依赖 Java 夹具）：
+
+```bash
+SEMANTIC_IDE=pycharm SEMANTIC_JAR=semantic-server/.tmp/semantic-server-w7.jar \
+  bun semantic-server/script/python-probe.ts
+```
+
+探针启动 PyCharm 守护（默认 `SEMANTIC_IDE=pycharm`，可用 `--ide-home` 覆盖），对
+`fixtures/python-project` 校验目录模块、路由/main 入口、import 依赖、定义/调用者/callees/
+测试标记、`file:` scope 与未知符号 -32002；当前状态 **PYTHON PROBE PASS 15/15**。
+
+JS/TS 语义工具同样有独立探针（默认 `SEMANTIC_IDE=idea`，可设 `webstorm` 验证无 Java/Python
+发行版）：
+
+```bash
+SEMANTIC_IDE=idea SEMANTIC_JAR=semantic-server/.tmp/semantic-server-w7.jar \
+  bun semantic-server/script/js-probe.ts
+```
+
+覆盖 `package.json` main、Express 路由、`main` 入口、tsconfig 别名依赖、名称级调用者/测试标记、
+`file:` scope、未知符号 -32002 与“< 30s 无卡死”；当前状态 **JS PROBE PASS 16/16**（IDEA 与
+WebStorm 均通过）。
 
 ## blast_radius（符号影响面）
 
@@ -205,8 +339,8 @@ scope 非字符串 → `-32603`）。
 - fixtures：`fixtures/blast_radius/input.json`（`{"symbol":"run"}`）+
   `fixtures/blast_radius/output.json`（真实响应原样美化落盘）；
   生成命令：`bash script/build-local.sh` →
-  `bash script/run-local.sh sample-project .tmp/blast.sock --idle-seconds 600` →
-  `bun script/blast-probe.ts .tmp/blast.sock --early --out fixtures/blast_radius/output.json`；
+  `bash script/run-local.sh sample-project .tmp/blast.port --idle-seconds 600` →
+  `bun script/blast-probe.ts .tmp/blast.port --early --out fixtures/blast_radius/output.json`；
 - `{"symbol":"run"}` → definition `TaskEngine.java:4 method`；callers 全量 23（ManyCallers 21 +
   TaskWorker 1 + TaskEngineTest 1）截断为 20，`callers_total=23`；callees `format @ TaskEngine.java:8`；
   affected 3 files（ManyCallers/TaskEngine/TaskWorker）；entry `TaskRunner.java:5 main`；
@@ -332,7 +466,7 @@ PSI/诊断基于新内容重算；诊断计数复用 ReadViewService 的 `collec
   `file` + `changes_total`，`detail.waited_ms` 固定 30000，hint 为 spec 原文），由协议一致性
   测试做客户端严格解码 + 渲染逐字节校验。
 
-并发验收证据（真实守护 + 独立 socket raw 探针 + 真实 OC 客户端复刻）：
+并发验收证据（真实守护 + 独立连接 raw 探针 + 真实 OC 客户端复刻）：
 
 - 同版本 10 路并发：先读版本 v，10 个独立连接同时提交 `baseVersion=v` → 恰好 1 个
   `applied:true`、9 个 -32012，磁盘内容只生效一次（实测 summary `applied=1
@@ -365,17 +499,17 @@ baseVersion**，由探针/契约测试经 read_view 注入）＋ `output.json`�
 
 ```bash
 bash script/build-local.sh
-bash script/run-local.sh sample-project .tmp/edit.sock --idle-seconds 600
-bun script/edit-probe.ts .tmp/edit.sock --normalize-versions --out fixtures/edit_batch/output.json
+bash script/run-local.sh sample-project .tmp/edit.port --idle-seconds 600
+bun script/edit-probe.ts .tmp/edit.port --normalize-versions --out fixtures/edit_batch/output.json
 ```
 
-探针：`bun script/edit-probe.ts [socket] [--params file | --params-json '{...}'] [--file path]
+探针：`bun script/edit-probe.ts [locator] [--params file | --params-json '{...}'] [--file path]
 [--changes-json '[{...}]'] [--lock-timeout-ms n] [--parallel n] [--base-version v] [--out file]
 [--normalize-versions] [--raw] [--copy|--no-copy] [--no-inject] [--no-wait] [--timeout secs]
 [--shutdown] [--cleanup]`；默认 copy template → 目标、read_view 取 version、注入 baseVersion 后
 发送；`--file/--changes-json/--lock-timeout-ms` 为免 params 文件的薄覆盖（后两者分别覆盖
 `changes` 与 `options.lock_timeout_ms`，0/负数会原样发出以验证 -32603）；`--parallel N` 开 N 个
-独立 socket，所有 worker 先并发取版本（或共用 `--base-version`），就绪后同时发送同一请求，
+独立连接，所有 worker 先并发取版本（或共用 `--base-version`），就绪后同时发送同一请求，
 请求 JSON 中的 `{i}` 替换为 worker 序号（1 起，便于一次对 N 个不同文件并发），逐路打印
 `applied`/错误码/耗时并输出 summary；`--raw` 打印原始 NDJSON 请求/响应帧。
 
@@ -478,12 +612,12 @@ fixtures / 探针：
   归一为 `"<version>"`，其余原样；
 - `fixtures/edit_transaction/templates/{Alpha,Beta}.java`：与 `sample-project` 样本初始内容
   **逐字节一致**，供每轮测试重置与恢复重跑；
-- `bun script/edit-txn-probe.ts [socket] [--params file.json | --params-json '{...}']
+- `bun script/edit-txn-probe.ts [locator] [--params file.json | --params-json '{...}']
   [--base-version v | --base-version N=v] [--lock-timeout-ms n] [--out file] [--normalize]
   [--raw] [--copy|--no-copy] [--no-inject] [--no-wait] [--timeout secs] [--parallel n]
   [--shutdown]`：默认按请求把 templates copy 回目标（重置），逐文件 read_view 取版本并注入
   baseVersion，发送事务；`--out` 落盘、`--normalize` 归一版本；`--base-version N=v` 覆盖第 N 个
-  文件（1 起）用于制造 stale；`--parallel N` 开 N 个独立 socket、共享同一组 baseline 版本后
+  文件（1 起）用于制造 stale；`--parallel N` 开 N 个独立连接、共享同一组 baseline 版本后
   barrier 同时发送（并发争用验证）；`--no-inject` 跳过 read_view（用于不存在/保护路径用例）。
 
 验收证据（真实守护 + sample-project，raw NDJSON；每轮开始前用 templates 重置样本）：
@@ -500,7 +634,7 @@ fixtures / 探针：
 - `-32019`（同一文件两次，detail.file）；`-32603`（11 个文件 →
   `invalid params: changes: at most 10 files`）；`-32013`（`node_modules/x.js`，保护先于存在性）；
   `-32001`（`NoSuch.java`，RPC 错误）；
-- 并发：`--parallel 2`（同组文件、同一 baseline 版本、独立 socket）→
+- 并发：`--parallel 2`（同组文件、同一 baseline 版本、独立连接）→
   `summary total=2 applied=1 codes={"-32012":1,"applied":1}`、elapsed 667..672ms，无死锁、
   journal 无残留；
 - journal 恢复 a)（手工编排 rename 中途崩溃：两个 tmp 就绪、只 rename Alpha、写对应 journal）→
@@ -572,11 +706,11 @@ fixtures：`fixtures/verify_test/input.json`（`{"command":"python -m pytest tes
 
 ```bash
 bash script/build-local.sh
-bash script/run-local.sh sample-project .tmp/verify.sock --idle-seconds 1800
-bun script/verify-probe.ts .tmp/verify.sock --normalize --out fixtures/verify_test/output.json
+bash script/run-local.sh sample-project .tmp/verify.port --idle-seconds 1800
+bun script/verify-probe.ts .tmp/verify.port --normalize --out fixtures/verify_test/output.json
 ```
 
-探针：`bun script/verify-probe.ts [socket] [--params file | --params-json '{...}']
+探针：`bun script/verify-probe.ts [locator] [--params file | --params-json '{...}']
 [--command cmd] [--cwd dir] [--timeout-ms n] [--out file] [--normalize] [--raw] [--no-wait]
 [--timeout secs] [--shutdown]`。
 
@@ -626,8 +760,8 @@ modules / 根文件 / 依赖边 / 入口点均升序。错误：索引未就绪 
 - hot：`{project:{root,total_files}, hot_files:[], hot_modules:[]}`（v1 恒空，作者选 A）
 
 模块划分：多 IntelliJ 模块项目用模块；单模块项目（sample-project）降级为目录约定——每个
-直接包含文件的目录是一个模块（隐藏目录与 `.git/.idea/.venv/venv/env/node_modules/build/out/
-target/__pycache__/.pytest_cache/.mypy_cache/dist` 排除；目录符号链接不跟随），`name=` 路径末段、
+直接包含文件的目录是一个模块（隐藏目录与 `node_modules/venv/build/out/target/__pycache__/dist`
+排除；目录符号链接不跟随），`name=` 路径末段、
 `path=` 项目相对目录；`files` 只含该目录直接子文件（不递归、升序；显示上限 200，`total_files`
 计全量）；项目根常规文件（不含隐藏）列入 `root_files`；`total_files = 模块文件数 + root_files 数`；
 模块数 >20 时只返回前 20（升序），`total_modules` 仍为全量。
@@ -656,7 +790,7 @@ root_files 空），project 计数仍为全量；dependencies 只返回涉及该
 hot 忽略 scope。构建在后台线程 `ReadAction.computeBlocking` 内扫描 VFS/PSI；`project.root` 取
 CLI 项目路径的绝对规范化形式。
 
-探针：`bun script/map-probe.ts [socket] [--view ...] [--scope s] [--out file] [--normalize-root]
+探针：`bun script/map-probe.ts [locator] [--view ...] [--scope s] [--out file] [--normalize-root]
 [--wait-ready] [--parallel N] [--raw] [--params-json '{...}'] [--fail-fast] [--timeout secs]
 [--no-wait] [--shutdown]`；`--wait-ready` 对 `building:true` 轮询到 ready；`--parallel N` 开 N 条
 连接并发同一请求并比较结果；`--fail-fast` 跳过就绪等待且不重试（用于采集 -32000 原始帧）。
@@ -666,8 +800,8 @@ fixtures：`fixtures/project_map/input.json`（`{"view":"structure"}`）+ `outpu
 
 ```bash
 bash script/build-local.sh
-bash script/run-local.sh sample-project .tmp/map.sock --idle-seconds 1800
-bun script/map-probe.ts .tmp/map.sock --normalize-root --wait-ready --out fixtures/project_map/output.json
+bash script/run-local.sh sample-project .tmp/map.port --idle-seconds 1800
+bun script/map-probe.ts .tmp/map.port --normalize-root --wait-ready --out fixtures/project_map/output.json
 ```
 
 验收证据（真实守护 + sample-project，raw NDJSON）：
@@ -698,8 +832,10 @@ bun script/map-probe.ts .tmp/map.sock --normalize-root --wait-ready --out fixtur
 
 偏差与注记：
 
-- spec 的 Python/JS/Go 入口规则与 `register/route/app.get` 调用识别未实现（本机 Java PSI 场景），
-  路由只按注解识别（`RequestMapping`/`Path` 精确名；Spring `@GetMapping` 等派生注解不计）；
+- Python 入口/依赖已实现（W7）：模块级 `main` / `if __name__ == "__main__"` 守卫 /
+  `@*.get/post/...` 路由装饰器；`import` / `from ... import`（含相对导入与 `src/` 源根折算）。
+  JS/Go 入口规则仍未实现；Java 路由只按注解识别（`RequestMapping`/`Path` 精确名；
+  Spring `@GetMapping` 等派生注解不计）；
 - `dependencies.from/to` 与 `cycles` 使用模块 `path`（spec 样例口径），而非 name；
 - scope 过滤按上文的展示口径（spec 只写了 `module:core`）；未匹配模块返回空而非错误；
 - 内容修改仅失效 dependencies（无法廉价区分 import 变化；spec 的“符号增删失效 structure”未单独实现）；
@@ -742,13 +878,41 @@ bun script/map-probe.ts .tmp/map.sock --normalize-root --wait-ready --out fixtur
   `location` 为项目相对路径:行号。
 - **`in_symbol` / `remaining_symbols`**：PSI 声明（类/方法/字段）近似；`in_symbol` 取最近的
   方法>类>字段，无声明时取文件名。
-- **socket 路径**：Windows AF_UNIX 上限约 108 字符；CLI 会告警。
-- Java PSI 依赖 `com.intellij.modules.java`（本机 IDEA 自带 Java 插件，已验证加载）。
+- **传输**：TCP `127.0.0.1`（ephemeral port），不再使用 AF_UNIX；locator 文件为单行 JSON
+  （`{v,port,token,pid}`）原子写入、优雅退出删除，token 为每守护 128-bit 随机值（32 hex），
+  握手契约见「传输与握手（locator / hello）」。
+- Java PSI 依赖 `com.intellij.modules.java`（plugin.xml 中为 `optional=true`；IDEA 自带 Java 插件，
+  已验证加载；PyCharm/WebStorm 等无 Java 模块的发行版下 Java 专有功能（blast_radius /
+  project_map / 项目 SDK 指派 / read_view 的 Java 定义解析）自动降级，见下条）。
+- **语言支持与降级（W4 定稿）**：read_view 语言无关（跨发行版可用：PyCharm/WebStorm 只要
+  语言能力即可返回内容/位置/覆盖/符号）；手动高亮与 PSI 锚点解析（含 2s 锚点预算）仅对
+  `JAVA` 与 `Python` 语言执行。TS/HTML/CSS 等仍降级：其 resolve/检查经语言服务（跨进程）
+  完成，headless 冷启动可阻塞数十秒且持读许可（W3 线程 dump 证据），这些文件 `anchors`
+  不可用、`diagnostics` 仅取 daemon 缓存（repo 根 TS 文件实测 p50 5ms、p95 453ms、无 >30s）。
+  Python（PyCharm 2026.1 / PY-261 实测）：符号 + 跨文件锚点 + 跨文件 definition 正常，
+  冷启 1.2s、p50 3ms、无 >30s；诊断可达语法级注解（含语法错误）与本地检查（如
+  `Unused import statement`）；undefined-name 检查在 2026.1 由 Python LSP 异步提供，
+  headless 手动 passes 不产出（环境限制，非语言门槛）。锚点跳过项目外目标（JDK/.class、
+  Python typeshed 等，`location` 保持项目相对路径语义）；261 平台无 262 的 additional
+  highlighting session API，按旧版重载反射回退。`blast_radius`/`project_map` 的 Python 路径
+  （W7）：project_map 按目录模块 + Python 入口/import 依赖；blast_radius 用词索引找声明、
+  `ReferencesSearch` 找引用，索引不覆盖时退化为项目内 `.py` 有界扫描；无解释器的裸项目
+  （Python 类型推断不可用，引用无法 resolve）再退化为名称级匹配（精确标识符、跳过声明名），
+  并在日志记录 fallback。`blast_radius`/`project_map` 的 JS/TS 路径（W8）：project_map 按目录
+  模块 + `package.json` main/bin + 路由调用/装饰器入口 + import/export/require + 最近
+  `tsconfig.json` 的 `baseUrl`/`paths` 依赖（不处理 `extends`）；blast_radius **禁用**
+  `ReferencesSearch`/`resolve`（TS 语言服务会阻塞），定义/引用/callees 全部走
+  词索引 + 文本预筛选 + PSI 名称匹配，索引损坏时退化扫描。语法级近似精度低于 Java/Python，
+  且在健康索引缺失时首次查询更慢（repo 根 TS 实测约 2.6s），但不会卡死。Java/Python 不可用的
+  WebStorm 上 JS/TS 工具正常工作；PyCharm 有 JS 插件时同样可用；三者都没有才返回
+  `-32603 java/python/javascript support unavailable in this IDE distribution`。
 
 ## 对 OC 客户端的集成要点
 
-- 启动：`bash semantic-server/script/run-local.sh <项目> <socket> --idle-seconds N`
-  或 `java -Djava.awt.headless=true -jar semantic-server.jar <项目> <socket> --idle-seconds N`。
-- 连接后先 `subscribe`（收到 `{ok:true}` 与首个 `notifications/indexing`），
+- 启动：`bash semantic-server/script/run-local.sh <项目> <locator> --idle-seconds N`
+  或 `java -Djava.awt.headless=true -jar semantic-server.jar <项目> <locator> --idle-seconds N`。
+- 客户侧：读 locator（缺失/解析失败视为无守护）→ TCP 连接 `127.0.0.1:<port>` → 发送
+  `hello {token}`；成功（`{ok:true}`）即复用/可用，token 错误或首请求非 hello → `-32019` 且连接关闭。
+- 握手后先 `subscribe`（收到 `{ok:true}` 与首个 `notifications/indexing`），
   以 `ping.indexing==false` 作为可读信号；`read_view` 返回 -32000 时按 `data.progress` 等待重试。
-- 空闲 N 秒（默认 1800）自动退出并删除 socket；`shutdown` 可显式退出。
+- 空闲 N 秒（默认 1800）自动退出并删除 locator；`shutdown` 可显式退出。

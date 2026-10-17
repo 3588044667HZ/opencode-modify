@@ -126,6 +126,7 @@ describe("tool.blast_radius", () => {
 
         expect(result.output).toContain("blast_radius unavailable:")
         expect(result.output).toContain("could not resolve symbol")
+        expect(result.output).toContain("hint: call fallback_option_direct")
       }),
     20_000,
   )
@@ -159,6 +160,7 @@ describe("tool.blast_radius", () => {
         expect(result.output).toContain("blast_radius unavailable:")
         expect(result.output).toContain("not ready yet")
         expect(result.output).toContain("42%")
+        expect(result.output).not.toContain("fallback_option_direct")
       }),
     20_000,
   )

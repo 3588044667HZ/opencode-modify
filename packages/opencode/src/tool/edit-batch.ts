@@ -5,9 +5,11 @@ import { Semantic } from "@/semantic/manager"
 import { renderEditBatch } from "@/semantic/render"
 import { Protocol } from "@/semantic/protocol"
 import { InstanceState } from "@/effect/instance-state"
+import { SessionLedger } from "@/session/ledger"
 import { assertExternalDirectoryEffect } from "./external-directory"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { PositiveInt } from "@opencode-ai/schema/schema"
+import { FALLBACK_HINT } from "./fallback-option-direct"
 
 const DESCRIPTION = `Apply multiple text changes to a single file atomically through the semantic engine.
 
@@ -44,6 +46,7 @@ export const EditBatchTool = Tool.define(
   "edit_batch",
   Effect.gen(function* () {
     const semantic = yield* Semantic.Service
+    const ledger = yield* SessionLedger.Service
     return {
       description: DESCRIPTION,
       parameters: Parameters,
@@ -75,7 +78,14 @@ export const EditBatchTool = Tool.define(
             })
             .pipe(
               Effect.map((result) => ({ ok: true as const, result })),
-              Effect.catch((error) => Effect.succeed({ ok: false as const, message: Protocol.describeError(error) })),
+              Effect.catch((error) =>
+                Effect.succeed({
+                  ok: false as const,
+                  message: Protocol.describeError(error),
+                  // 只有锚点冲突类错误同时可能出现在 RPC 错误与结果联合两条路径。
+                  fallback: error instanceof Protocol.RpcError && needsFallbackHint(error.code),
+                }),
+              ),
             )
 
           if (!outcome.ok) {
@@ -83,7 +93,9 @@ export const EditBatchTool = Tool.define(
             return {
               title: relative,
               metadata,
-              output: `edit_batch unavailable: ${outcome.message}`,
+              output: [`edit_batch unavailable: ${outcome.message}`, ...(outcome.fallback ? [FALLBACK_HINT] : [])].join(
+                "\n",
+              ),
             }
           }
 
@@ -97,9 +109,15 @@ export const EditBatchTool = Tool.define(
             return {
               title: relative,
               metadata,
-              output: renderEditBatch(outcome.result),
+              output: [
+                renderEditBatch(outcome.result),
+                ...(needsFallbackHint(outcome.result.error.code) ? [FALLBACK_HINT] : []),
+              ].join("\n"),
             }
           }
+
+          // D5：自身编辑落盘后，早先读取被新版本取代。
+          yield* ledger.noteEdit({ sessionID: ctx.sessionID, file: filepath, newVersion: outcome.result.new_version })
 
           const metadata: Metadata = {
             file: filepath,
@@ -116,3 +134,8 @@ export const EditBatchTool = Tool.define(
     }
   }),
 )
+
+// 仅锚点不唯一与变更冲突提示 fallback；保护路径/内容不纯/版本失配应先重试或重新读取。
+function needsFallbackHint(code: number): boolean {
+  return code === Protocol.EditBatchErrorCode.anchorNotUnique || code === Protocol.EditBatchErrorCode.changeConflict
+}

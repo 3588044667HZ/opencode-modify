@@ -33,6 +33,7 @@ export const WriteTool = Tool.define(
     const format = yield* Format.Service
 
     return {
+      hide: true,
       description: DESCRIPTION,
       parameters: Parameters,
       execute: (params: { content: string; filePath: string }, ctx: Tool.Context) =>

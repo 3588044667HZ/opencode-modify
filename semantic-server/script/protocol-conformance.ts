@@ -2,17 +2,21 @@
 // 跨实现协议一致性测试：真实 IntelliJ 无头语义守护 ↔ TS 协议层（packages/opencode/src/semantic）
 // 用法（任意 cwd）：bun run E:/opencode-source/semantic-server/script/protocol-conformance.ts
 //
-// 流程：spawn 守护（bash script/run-local.sh）→ 轮询连接 → 用例 1-4（raw transport）→
-// 用例 10（raw NDJSON 帧）→ 用例 5-8（typed client）→ 用例 9（shutdown + 连接失败）→ 清理。
+// 流程：spawn 守护（bash script/run-local.sh）→ 轮询连接（locator + TCP + hello）→
+// 用例 1-4（raw NDJSON）→ 用例 10（raw NDJSON 帧）→ 用例 5-8（typed client）→
+// 用例 9（shutdown + 连接失败）→ 清理。
+//
+// 读时对账（D4）用例 41-42 位于 40 之后、9 之前。
 import net from "node:net"
 import fs from "node:fs"
 import path from "node:path"
 import { pathToFileURL } from "node:url"
+import { connectLocator, readLocator, type Connection } from "./connect"
 
 const SERVER_DIR = path.resolve(import.meta.dir, "..")
 const ROOT = path.resolve(SERVER_DIR, "..")
 const TMP_DIR = path.join(SERVER_DIR, ".tmp")
-const SOCKET = path.join(TMP_DIR, "conformance.sock")
+const LOCATOR = path.join(TMP_DIR, "conformance.port")
 const LOG = path.join(TMP_DIR, "conformance-server.log")
 const FIXTURE_DIR = path.join(SERVER_DIR, "sample-project", "src", "main", "java", "demo")
 const MAIN = path.join(FIXTURE_DIR, "Main.java")
@@ -28,9 +32,9 @@ const MAP_DIR = path.join(SERVER_DIR, "fixtures", "project_map")
 const TXN_DIR = path.join(SERVER_DIR, "fixtures", "edit_transaction")
 const TXN_TEMPLATES = path.join(TXN_DIR, "templates")
 const TXN_JOURNAL = path.join(SERVER_DIR, "sample-project", ".opencode", "txn-journal")
+const READVIEW_DIR = path.join(SERVER_DIR, "fixtures", "read_view")
 
 const clientModule = await import(pathToFileURL(path.join(ROOT, "packages/opencode/src/semantic/client.ts")).href)
-const transportModule = await import(pathToFileURL(path.join(ROOT, "packages/opencode/src/semantic/transport.ts")).href)
 const protocol = await import(pathToFileURL(path.join(ROOT, "packages/opencode/src/semantic/protocol.ts")).href)
 const renderModule = await import(pathToFileURL(path.join(ROOT, "packages/opencode/src/semantic/render.ts")).href)
 // 与 protocol.ts 解析到同一个 effect 实例；用于对原始帧做严格解码（多余字段报错）
@@ -44,7 +48,12 @@ function strictDecode(schema: unknown, value: unknown): unknown {
   }
 }
 
-type Transport = Awaited<ReturnType<typeof transportModule.connect>>
+// 原始帧层：共享 helper 已完成 TCP 连接 + hello，这里只做 NDJSON 分帧（用例 1-4/10 用）
+type Transport = {
+  write: (message: unknown) => void
+  onMessage: (listener: (message: RawFrame) => void) => () => void
+  close: () => void
+}
 type RawFrame = {
   jsonrpc?: unknown
   id?: unknown
@@ -61,6 +70,17 @@ type ReadViewEntry = {
   diagnostic?: { severity: string; message: string }
   anchor?: { symbol: string; location: string }
 }
+type DeltaLine = { op: string; old_line?: number; new_line?: number; text: string }
+type DeltaHunk = { lines: DeltaLine[] }
+type ReconciliationDelta = {
+  mode: string
+  from_version: string
+  to_version: string
+  hunks: DeltaHunk[]
+  current_version?: string
+}
+type ReconciliationFull = { mode: string; current_version?: string }
+type Reconciliation = ReconciliationDelta | ReconciliationFull
 type ReadViewResult = {
   file: string
   version: string
@@ -70,6 +90,9 @@ type ReadViewResult = {
   content: ReadViewEntry[]
   coverage: { read: Array<[number, number]>; unread: Array<[number, number]> }
   diagnostics: Array<{ line: number; severity: string; message: string }>
+  warnings?: string[]
+  unchanged?: boolean
+  reconciliation?: Reconciliation
 }
 type BlastRadiusResult = {
   symbol: string
@@ -96,10 +119,19 @@ type EditBatchResult = {
   changes_total?: number
   old_version?: string
   new_version?: string
+  version?: string
+  changed?: { start_line: number; end_line: number; text: string; truncated: boolean }
+  position_map?: Array<{ old_start: number; old_end: number; delta: number }>
   diagnostics_delta?: { errors: number; warnings: number }
   diagnostics_after?: { errors: number; warnings: number }
   line_changes?: Array<{ line: number; action: string }>
-  error?: { code?: number; message?: string; detail?: Record<string, unknown>; hint?: string }
+  error?: {
+    code?: number
+    message?: string
+    detail?: Record<string, unknown>
+    hint?: string
+    reconciliation?: Reconciliation
+  }
 }
 
 type VerifyTestResult = {
@@ -141,12 +173,21 @@ type EditTransactionResult = {
     file: string
     old_version: string
     new_version: string
+    version?: string
+    changed?: { start_line: number; end_line: number; text: string; truncated: boolean }
+    position_map?: Array<{ old_start: number; old_end: number; delta: number }>
     changes_applied: number
     line_changes: Array<{ line: number; action: string }>
   }>
   diagnostics_delta?: Record<string, { errors: number; warnings: number }>
   diagnostics_after?: Record<string, { errors: number; warnings: number }>
-  error?: { code?: number; message?: string; detail?: Record<string, unknown>; hint?: string }
+  error?: {
+    code?: number
+    message?: string
+    detail?: Record<string, unknown>
+    hint?: string
+    reconciliation?: Reconciliation
+  }
 }
 
 const checks: Array<{ name: string; ok: boolean; detail: string }> = []
@@ -185,9 +226,10 @@ async function waitUntil(predicate: () => boolean, timeoutMs: number): Promise<b
   return predicate()
 }
 
-function tryConnect(timeoutMs: number): Promise<{ ok: true; socket: net.Socket } | { ok: false; error: string }> {
+// 纯 TCP 存活探测（不握手）：用于确认端口已关闭/仍未关闭（清理与 [9] 用例）
+function tryTcp(port: number, timeoutMs: number): Promise<{ ok: true; socket: net.Socket } | { ok: false; error: string }> {
   return new Promise((resolve) => {
-    const socket = net.createConnection(SOCKET)
+    const socket = net.createConnection({ host: "127.0.0.1", port })
     let settled = false
     const timer = setTimeout(() => {
       if (settled) return
@@ -211,16 +253,56 @@ function tryConnect(timeoutMs: number): Promise<{ ok: true; socket: net.Socket }
   })
 }
 
+let daemonPort = 0
+
+// 读 locator → 共享 helper 完成 TCP + hello；失败按 200ms 重试直到 deadline
 async function connectWithRetry(deadlineMs: number): Promise<Transport> {
-  const started = Date.now()
-  for (;;) {
-    try {
-      return await transportModule.connect(SOCKET, { timeout_ms: 1_000 })
-    } catch (error) {
-      if (Date.now() - started >= deadlineMs) throw error
-      await sleep(200)
+  const connection = await connectLocator(LOCATOR, { deadlineMs, attemptTimeoutMs: 1_000, retryDelayMs: 200 })
+  daemonPort = connection.locator.port
+  return transportFromConnection(connection)
+}
+
+// helper 连接（已握手）→ 用例所需的 write/onMessage/close 形状；leftover 在首个订阅者注册时派发
+function transportFromConnection(connection: Connection): Transport {
+  const listeners = new Set<(message: RawFrame) => void>()
+  let buffer = connection.leftover
+  const drain = () => {
+    let index: number
+    while ((index = buffer.indexOf("\n")) >= 0) {
+      const line = buffer.slice(0, index)
+      buffer = buffer.slice(index + 1)
+      if (!line.trim()) continue
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(line)
+      } catch {
+        continue
+      }
+      if (typeof parsed !== "object" || parsed === null) continue
+      for (const listener of [...listeners]) listener(parsed as RawFrame)
     }
   }
+  connection.socket.on("data", (chunk) => {
+    buffer += chunk.toString("utf8")
+    drain()
+  })
+  connection.socket.on("error", () => {})
+  return {
+    write: (message) => connection.socket.write(JSON.stringify(message) + "\n"),
+    onMessage: (listener) => {
+      listeners.add(listener)
+      drain()
+      return () => listeners.delete(listener)
+    },
+    close: () => connection.socket.destroy(),
+  }
+}
+
+// typed client 连接用的 endpoint（token 从 locator 读，连接后由 client 自己发 hello）
+function requireEndpoint(): { host: string; port: number; token: string } {
+  const locator = readLocator(LOCATOR)
+  if (locator === undefined) throw new Error(`locator 缺失或损坏: ${LOCATOR}`)
+  return { host: "127.0.0.1", port: locator.port, token: locator.token }
 }
 
 interface RawRpc {
@@ -232,7 +314,7 @@ function makeRawRpc(transport: Transport): RawRpc {
   let nextId = 100
   const pending = new Map<number, { resolve: (frame: RawFrame) => void; timer: ReturnType<typeof setTimeout> }>()
   const notifications: RawFrame[] = []
-  const write = transport.write as unknown as (message: Record<string, unknown>) => void
+  const write = transport.write
   transport.onMessage((message) => {
     const frame = message as RawFrame
     if (typeof frame.id === "number") {
@@ -387,42 +469,52 @@ async function validateReadView(
 }
 
 async function cleanupStaleServer(): Promise<void> {
-  const probe = await tryConnect(300)
-  if (!probe.ok) {
-    fs.rmSync(SOCKET, { force: true })
+  const locator = readLocator(LOCATOR)
+  const connection =
+    locator === undefined
+      ? undefined
+      : await connectLocator(LOCATOR, { deadlineMs: 1_000, attemptTimeoutMs: 800, retryDelayMs: 100 }).catch(
+          () => undefined,
+        )
+  if (locator === undefined || connection === undefined) {
+    // 无 locator 或连接/握手失败 → 陈旧 locator 不阻塞启动，删除后继续
+    fs.rmSync(LOCATOR, { force: true })
     return
   }
-  console.log(`检测到残留守护，发送 shutdown：${SOCKET}`)
-  probe.socket.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "shutdown" }) + "\n")
+  console.log(`检测到残留守护，发送 shutdown：${LOCATOR}`)
+  connection.socket.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "shutdown" }) + "\n")
   await sleep(300)
-  probe.socket.destroy()
+  connection.socket.destroy()
   for (let attempt = 0; attempt < 25; attempt++) {
-    const again = await tryConnect(200)
-    if (!again.ok) {
-  fs.rmSync(EDIT_TARGET, { force: true })
-  fs.rmSync(`${EDIT_TARGET}.tmp`, { force: true })
-  fs.rmSync(SOCKET, { force: true })
+    const alive = await tryTcp(locator.port, 200)
+    if (!alive.ok) {
+      fs.rmSync(EDIT_TARGET, { force: true })
+      fs.rmSync(`${EDIT_TARGET}.tmp`, { force: true })
+      fs.rmSync(LOCATOR, { force: true })
       return
     }
-    again.socket.destroy()
+    alive.socket.destroy()
     await sleep(200)
   }
-  throw new Error(`残留守护未退出，无法继续：${SOCKET}`)
+  throw new Error(`残留守护未退出，无法继续：${LOCATOR}`)
 }
 
 async function shutdownBestEffort(): Promise<void> {
-  const probe = await tryConnect(300)
-  if (!probe.ok) return
-  probe.socket.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "shutdown" }) + "\n")
-  await sleep(300)
-  probe.socket.destroy()
+  try {
+    const connection = await connectLocator(LOCATOR, { deadlineMs: 500, attemptTimeoutMs: 400, retryDelayMs: 100 })
+    connection.socket.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "shutdown" }) + "\n")
+    await sleep(300)
+    connection.socket.destroy()
+  } catch {
+    // 守护已不可连接：视为已退出
+  }
 }
 
 fs.mkdirSync(TMP_DIR, { recursive: true })
 await cleanupStaleServer()
 
 const logFd = fs.openSync(LOG, "w")
-const server = Bun.spawn(["bash", "script/run-local.sh", "sample-project", ".tmp/conformance.sock", "--idle-seconds", "600"], {
+const server = Bun.spawn(["bash", "script/run-local.sh", "sample-project", ".tmp/conformance.port", "--idle-seconds", "600"], {
   cwd: SERVER_DIR,
   stdout: logFd,
   stderr: logFd,
@@ -437,7 +529,7 @@ let typed: Awaited<ReturnType<typeof clientModule.connect>> | undefined
 try {
   // ---- 用例 1：连接（重试至成功）+ 首 ping ----
   r1 = await connectWithRetry(90_000)
-  check("[1] 守护 socket 可连接（重试成功）", true, SOCKET)
+  check("[1] 守护 TCP 可连接且 hello 握手成功（重试成功）", true, LOCATOR)
   const rpc1 = makeRawRpc(r1)
   const firstPing = await rpc1.call("ping")
   const firstPingResult = decodePing(firstPing.frame)
@@ -573,7 +665,7 @@ try {
   )
 
   // ---- 用例 5-8：typed client ----
-  typed = await clientModule.connect(SOCKET, { connect_timeout_ms: 10_000, request_timeout_ms: 120_000 })
+  typed = await clientModule.connect(requireEndpoint(), { connect_timeout_ms: 10_000, request_timeout_ms: 120_000 })
 
   // 用例 5：read_view(Main.java, entry)
   try {
@@ -726,6 +818,12 @@ try {
     strictDecode(protocol.EditBatchResult, editGolden) !== undefined,
     `applied=${editGolden.applied} changes=${editGolden.changes_applied}/${editGolden.changes_total}`,
   )
+  const mismatchGolden = (await Bun.file(path.join(EDIT_DIR, "version_mismatch.json")).json()) as EditBatchResult
+  check(
+    "[16] 客户端严格解码 fixtures/edit_batch/version_mismatch.json（含 reconciliation）",
+    strictDecode(protocol.EditBatchResult, mismatchGolden) !== undefined,
+    `code=${mismatchGolden.error?.code} reconciliation=${clip(JSON.stringify(mismatchGolden.error?.reconciliation))}`,
+  )
 
   fs.mkdirSync(path.dirname(EDIT_TARGET), { recursive: true })
   const editTemplate = await Bun.file(path.join(EDIT_DIR, "template.java")).text()
@@ -771,6 +869,32 @@ try {
         typeof mismatchDetail?.content === "string" &&
         mismatchDetail.content.length > 0,
       `detail=${clip(JSON.stringify(mismatch?.error?.detail))}`,
+    )
+    // 未知 known_version 必然缓存未命中 → full 再读提示；载荷与 fixture 深度一致（版本/内容归一）。
+    const mismatchReconciliation = mismatch?.error?.reconciliation
+    const normalizedMismatch =
+      mismatch === undefined
+        ? undefined
+        : {
+            ...mismatch,
+            error: {
+              ...(mismatch.error ?? {}),
+              detail: { current_version: "<version>", content: "<content>" },
+              reconciliation:
+                mismatchReconciliation === undefined
+                  ? undefined
+                  : { mode: "full", current_version: "<version>" },
+            },
+          }
+    check(
+      "[17] -32012 reconciliation 为 full 且与 version_mismatch.json 深度一致",
+      normalizedMismatch !== undefined &&
+        mismatchReconciliation !== undefined &&
+        "mode" in mismatchReconciliation &&
+        mismatchReconciliation.mode === "full" &&
+        JSON.stringify(canonical(normalizedMismatch)) === JSON.stringify(canonical(mismatchGolden)),
+      `reconciliation=${clip(JSON.stringify(mismatchReconciliation ?? null))}`,
+      mismatch,
     )
 
     const impure = await failEdit("[17] newString 含元语 → -32014", {
@@ -870,7 +994,13 @@ try {
         result.applied === true,
         `applied=${result.applied} error=${clip(JSON.stringify(result.error ?? null))}`,
       )
-      const normalizedActual = { ...result, old_version: "<version>", new_version: "<version>" }
+      const normalizedActual = {
+        ...result,
+        old_version: "<version>",
+        new_version: "<version>",
+        ...(result.version === undefined ? {} : { version: "<version>" }),
+        ...(result.changed === undefined ? {} : { changed: { ...result.changed, text: "<changed>" } }),
+      }
       check(
         "[19] 与 fixtures output.json 深度一致（版本归一）",
         JSON.stringify(canonical(normalizedActual)) === JSON.stringify(canonical(editGolden)),
@@ -900,12 +1030,24 @@ try {
         disk.replace(/\n/g, " ⏎ "),
       )
       const successRendered = renderModule.renderEditBatch(result)
+      const positionMap = result.position_map
+      const expectedPositionLine =
+        positionMap === undefined
+          ? undefined
+          : `  position_map: ${positionMap
+              .map((entry) => `old ${entry.old_start}-${entry.old_end} → delta ${entry.delta >= 0 ? "+" : ""}${entry.delta}`)
+              .join(", ")}`
       check(
-        "[19] 成功渲染格式（含 1 err → 0 err 与版本行）",
+        "[19] 成功渲染格式（1 err → 0 err、版本行、changed 与 position_map）",
         successRendered.startsWith(
           `edit_batch applied 2/2 changes\n  ${editInput.file}: L4 (modified), L6 (modified)\n  diagnostics: 1 err → 0 err\n  version: `,
-        ) && successRendered.endsWith(`${editBaseVersion} → ${result.new_version}`),
-        clip(successRendered.replace(/\n/g, " ⏎ "), 260),
+        ) &&
+          successRendered.includes(`${editBaseVersion} → ${result.new_version}`) &&
+          result.changed !== undefined &&
+          expectedPositionLine !== undefined &&
+          successRendered.includes("  changed: L") &&
+          successRendered.includes(expectedPositionLine),
+        clip(successRendered.replace(/\n/g, " ⏎ "), 320),
       )
       const stale = await failEdit("[19] 成功后旧 baseVersion 重发 → -32012", {
         file: editInput.file,
@@ -913,6 +1055,16 @@ try {
         baseVersion: editBaseVersion,
       })
       check("[19] 版本已更新（stale 拒绝）", stale?.error?.code === -32012, `error=${clip(JSON.stringify(stale?.error))}`)
+      const staleReconciliation = stale?.error?.reconciliation
+      check(
+        "[19] stale 拒绝附 reconciliation（delta 回显旧版本，或 full 指向新版本）",
+        stale?.error?.code === -32012 &&
+          staleReconciliation !== undefined &&
+          (staleReconciliation.mode === "delta"
+            ? staleReconciliation.from_version === editBaseVersion && staleReconciliation.hunks.length > 0
+            : staleReconciliation.current_version === result.new_version),
+        `reconciliation=${clip(JSON.stringify(staleReconciliation ?? null))}`,
+      )
     } catch (error) {
       check("[19] edit_batch applied 成功", false, `${(error as Error).name}: ${(error as Error).message}`)
     }
@@ -1180,7 +1332,7 @@ try {
   const concurrencyCleanup: string[] = []
   const concurrencyTemplate = (className: string) => `class ${className} {\n  int value = 0;\n}\n`
   const concurrencyChange = { oldString: "int value = 0;", newString: "int value = 1;" }
-  const openClient = () => clientModule.connect(SOCKET, { connect_timeout_ms: 10_000, request_timeout_ms: 120_000 })
+  const openClient = () => clientModule.connect(requireEndpoint(), { connect_timeout_ms: 10_000, request_timeout_ms: 120_000 })
   const prepareFile = async (name: string): Promise<{ rel: string; abs: string; version: string }> => {
     const rel = `src/main/java/demo/tasks/${name}.java`
     const abs = path.join(FIXTURE_DIR, "tasks", `${name}.java`)
@@ -1422,7 +1574,13 @@ try {
     check("[36] 跨文件事务 applied", txnActual.applied === true, `error=${clip(JSON.stringify(txnActual.error ?? null))}`)
     const normalizedTxn = {
       ...txnActual,
-      files: (txnActual.files ?? []).map((file) => ({ ...file, old_version: "<version>", new_version: "<version>" })),
+      files: (txnActual.files ?? []).map((file) => ({
+        ...file,
+        old_version: "<version>",
+        new_version: "<version>",
+        ...(file.version === undefined ? {} : { version: "<version>" }),
+        ...(file.changed === undefined ? {} : { changed: { ...file.changed, text: "<changed>" } }),
+      })),
     }
     check(
       "[36] 与 output.json 深度一致（版本归一）",
@@ -1456,6 +1614,20 @@ try {
         `edit_transaction applied ${txnActual.changes_applied}/${txnActual.changes_total} changes across ${txnActual.files_changed} files\n`,
       ) && txnRendered.includes(`(${(txnActual.files ?? [])[0]?.changes_applied ?? 0} changes)`),
       clip(txnRendered.replace(/\n/g, " ⏎ "), 240),
+    )
+    check(
+      "[36] 成功渲染逐文件 version/position_map（changed 存在）",
+      (txnActual.files ?? []).length > 0 &&
+        (txnActual.files ?? []).every(
+          (file) =>
+            file.version !== undefined &&
+            file.changed !== undefined &&
+            file.position_map !== undefined &&
+            txnRendered.includes(` v:${file.version}`) &&
+            txnRendered.includes("    position_map: old ") &&
+            txnRendered.includes("    changed: L"),
+        ),
+      clip(txnRendered.replace(/\n/g, " ⏎ "), 320),
     )
   } catch (error) {
     check("[36] 跨文件事务 applied", false, `${(error as Error).name}: ${(error as Error).message}`)
@@ -1612,6 +1784,108 @@ try {
     }
   }
 
+  // ---- 用例 41-42：D4 读时对账（unchanged 微响应 + 有界 delta / full 降级） ----
+  try {
+    const firstView = (await typed.readView({ file: MAIN, view: "entry" })) as ReadViewResult
+    const sameView = (await typed.readView({
+      file: MAIN,
+      view: "entry",
+      known_version: firstView.version,
+    })) as ReadViewResult
+    check(
+      "[41] read_view(known_version=当前版本) → unchanged 微响应",
+      sameView.unchanged === true &&
+        sameView.version === firstView.version &&
+        (sameView as { content?: unknown }).content === undefined,
+      `result=${clip(JSON.stringify(sameView), 200)}`,
+      sameView,
+    )
+  } catch (error) {
+    check("[41] read_view(known_version=当前版本) → unchanged 微响应", false, `${(error as Error).name}: ${(error as Error).message}`)
+  }
+
+  try {
+    const probe = await prepareFile("EditReconcile")
+    try {
+      const before = (await typed.readView({ file: probe.rel, view: "entry" })) as ReadViewResult
+      const write = (await typed.editBatch({
+        file: probe.rel,
+        changes: [concurrencyChange],
+        baseVersion: before.version,
+      })) as EditBatchResult
+      check("[42] 前置：探针文件增量编辑成功", write.applied === true, `error=${clip(JSON.stringify(write.error ?? null))}`)
+      const reconciled = (await typed.readView({
+        file: probe.rel,
+        view: "entry",
+        known_version: before.version,
+      })) as ReadViewResult
+      const reconciliation = reconciled.reconciliation
+      if (reconciliation?.mode === "delta") {
+        const ops = new Set(["context", "added", "removed"])
+        const validLines = reconciliation.hunks.every(
+          (hunk) =>
+            hunk.lines.length > 0 &&
+            hunk.lines.every(
+              (line) =>
+                ops.has(line.op) &&
+                (line.old_line === undefined || (Number.isInteger(line.old_line) && line.old_line >= 1)) &&
+                (line.new_line === undefined || (Number.isInteger(line.new_line) && line.new_line >= 1)) &&
+                (line.op !== "removed" || line.old_line !== undefined) &&
+                (line.op !== "added" || line.new_line !== undefined),
+            ),
+        )
+        check(
+          "[42] read_view(known_version) 返回有界 delta（旧版本回显、hunk 合法、新版本一致）",
+          reconciliation.from_version === before.version &&
+            reconciliation.to_version === reconciled.version &&
+            reconciled.version === write.new_version &&
+            reconciliation.hunks.length >= 1 &&
+            reconciliation.hunks.length <= 64 &&
+            validLines,
+          `reconciliation=${clip(JSON.stringify(reconciliation), 240)}`,
+          reconciliation,
+        )
+      } else {
+        check(
+          "[42] delta 缺失时降级为 full（缓存未命中）",
+          reconciliation?.mode === "full",
+          `reconciliation=${clip(JSON.stringify(reconciliation ?? null))}`,
+          reconciled,
+        )
+      }
+    } finally {
+      fs.rmSync(probe.abs, { force: true })
+      fs.rmSync(`${probe.abs}.tmp`, { force: true })
+    }
+  } catch (error) {
+    check("[42] read_view(known_version) 返回有界 delta", false, `${(error as Error).name}: ${(error as Error).message}`)
+  }
+
+  // ---- 用例 43：read_view warnings（不完整发行版的分析降级载荷） ----
+  const warningsFixture = (await Bun.file(path.join(READVIEW_DIR, "warnings.json")).json()) as ReadViewResult
+  check(
+    "[43] 客户端严格解码 fixtures/read_view/warnings.json（warnings 附加字段）",
+    strictDecode(protocol.ReadViewResult, warningsFixture) !== undefined &&
+      Array.isArray(warningsFixture.warnings) &&
+      warningsFixture.warnings.length >= 1 &&
+      warningsFixture.warnings.every(
+        (warning) => typeof warning === "string" && warning.startsWith("analysis unavailable: "),
+      ),
+    `warnings=${clip(JSON.stringify(warningsFixture.warnings))}`,
+  )
+  try {
+    const warningsRendered = renderModule.render(warningsFixture)
+    const warningsList = warningsFixture.warnings ?? []
+    check(
+      "[43] 渲染 warnings 为最后的 warning: 行",
+      warningsList.length >= 1 &&
+        warningsRendered.split("\n").at(-1) === `warning: ${warningsList[warningsList.length - 1]}`,
+      clip(warningsRendered.split("\n").slice(-2).join(" ⏎ "), 240),
+    )
+  } catch (error) {
+    check("[43] 渲染 warnings 为最后的 warning: 行", false, `${(error as Error).name}: ${(error as Error).message}`)
+  }
+
   // ---- 用例 9：shutdown + 连接失败 ----
   const shutdown = await rpc2.call("shutdown", undefined, 15_000)
   const shutdownResult = shutdown.frame.result as { ok?: unknown } | undefined
@@ -1625,7 +1899,7 @@ try {
   let lastConnectError = ""
   const failDeadline = Date.now() + 2_000
   while (Date.now() < failDeadline) {
-    const probe = await tryConnect(300)
+    const probe = await tryTcp(daemonPort, 300)
     if (!probe.ok) {
       connectFailed = true
       lastConnectError = probe.error
@@ -1634,7 +1908,7 @@ try {
     probe.socket.destroy()
     await sleep(100)
   }
-  check("[9] shutdown 后 2s 内对同一 socket connect 失败", connectFailed, connectFailed ? `错误=${lastConnectError}` : "2s 内仍可连接")
+  check("[9] shutdown 后 2s 内对同一 locator 端口 connect 失败", connectFailed, connectFailed ? `错误=${lastConnectError}` : "2s 内仍可连接")
 } catch (error) {
   check("[run] 用例执行未捕获异常", false, `${(error as Error).stack ?? String(error)}`)
 } finally {
@@ -1666,7 +1940,7 @@ try {
       // ignore
     }
   }
-  fs.rmSync(SOCKET, { force: true })
+  fs.rmSync(LOCATOR, { force: true })
 }
 
 const failed = checks.filter((item) => !item.ok)

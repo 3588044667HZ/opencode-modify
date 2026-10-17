@@ -1,0 +1,18 @@
+{
+  "applied": false,
+  "file": "src/main/java/demo/tasks/EditableSample.java",
+  "changes_total": 2,
+  "error": {
+    "code": -32012,
+    "message": "VERSION_MISMATCH",
+    "detail": {
+      "current_version": "<version>",
+      "content": "<content>"
+    },
+    "reconciliation": {
+      "mode": "full",
+      "current_version": "<version>"
+    },
+    "hint": "文件已变化：用返回的 current_version 与 content 重新读取后再提交"
+  }
+}

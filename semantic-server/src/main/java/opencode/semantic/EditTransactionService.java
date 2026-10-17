@@ -203,7 +203,8 @@ final class EditTransactionService {
         detail.addProperty("file", fileChange.requestFile);
         detail.addProperty("current_version", currentVersion);
         detail.addProperty("content", content);
-        return failure(VERSION_MISMATCH, "VERSION_MISMATCH", detail, HINT_VERSION_MISMATCH);
+        return failure(VERSION_MISMATCH, "VERSION_MISMATCH", detail, HINT_VERSION_MISMATCH,
+            Reconcile.mismatch(fileChange.path, fileChange.baseVersion, content, currentVersion));
       }
       fileChange.content = content;
     }
@@ -349,6 +350,9 @@ final class EditTransactionService {
       fileChange.virtualFile.refresh(false, false);
       EditBatchService.syncDocument(project, fileChange.virtualFile, fileChange.newContent);
       fileChange.newVersion = ReadViewService.versionOf(fileChange.virtualFile);
+      // D4：写时记录旧/新版本全文，供后续 read_view 与 VERSION_MISMATCH 对账（有界 LRU，不落盘）
+      Reconcile.remember(fileChange.path, fileChange.baseVersion, fileChange.content);
+      Reconcile.remember(fileChange.path, fileChange.newVersion, fileChange.newContent);
     }
 
     // ⑭ 诊断 after 与增量、line_changes
@@ -481,6 +485,8 @@ final class EditTransactionService {
       file.addProperty("new_version", fileChange.newVersion);
       file.addProperty("changes_applied", fileChange.changes.size());
       file.add("line_changes", EditBatchService.lineChanges(fileChange.newContent, fileChange.changes));
+      EditBatchService.addReconciliation(
+          file, fileChange.content, fileChange.newContent, fileChange.changes, fileChange.newVersion);
       files.add(file);
       delta.add(
           fileChange.requestFile,
@@ -496,10 +502,17 @@ final class EditTransactionService {
   }
 
   private static JsonObject failure(int code, String message, JsonObject detail, String hint) {
+    return failure(code, message, detail, hint, null);
+  }
+
+  /** failure 的 D4 扩展：error 内可附 reconciliation（VERSION_MISMATCH 用）。 */
+  private static JsonObject failure(
+      int code, String message, JsonObject detail, String hint, JsonObject reconciliation) {
     JsonObject error = new JsonObject();
     error.addProperty("code", code);
     error.addProperty("message", message);
     if (detail != null) error.add("detail", detail);
+    if (reconciliation != null) error.add("reconciliation", reconciliation);
     if (hint != null) error.addProperty("hint", hint);
     JsonObject result = new JsonObject();
     result.addProperty("applied", false);

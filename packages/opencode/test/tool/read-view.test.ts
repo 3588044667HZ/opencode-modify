@@ -7,18 +7,26 @@ import path from "path"
 import { Agent } from "../../src/agent/agent"
 import { Semantic } from "@/semantic/manager"
 import { SessionID, MessageID } from "../../src/session/schema"
+import { SessionLedger } from "../../src/session/ledger"
 import { ReadViewTool } from "../../src/tool/read-view"
 import { Truncate } from "@/tool/truncate"
 import { Tool } from "@/tool/tool"
 import { provideInstance, testInstanceStoreLayer, tmpdirScoped } from "../fixture/fixture"
 import { pollWithTimeout, testEffect } from "../lib/effect"
-import { SAMPLE_RENDER } from "../semantic/fixture"
+import {
+  SAMPLE_READ_DELTA_RENDER,
+  SAMPLE_READ_RECONCILE_FULL_RENDER,
+  SAMPLE_RENDER,
+  SAMPLE_RESULT_UNCHANGED_RENDER,
+} from "../semantic/fixture"
 
 const fakeDaemon = path.join(import.meta.dir, "..", "semantic", "fake-daemon.ts")
 const command = (...flags: string[]) => [process.execPath, fakeDaemon, ...flags]
 
 const toolLayer = () =>
-  LayerNode.compile(LayerNode.group([Semantic.node, Agent.node, Truncate.node, CrossSpawnSpawner.node]))
+  LayerNode.compile(
+    LayerNode.group([Semantic.node, Agent.node, Truncate.node, CrossSpawnSpawner.node, SessionLedger.node]),
+  )
 const it = testEffect(Layer.mergeAll(toolLayer(), testInstanceStoreLayer))
 
 const ctx = {
@@ -113,6 +121,52 @@ describe("tool.read_view", () => {
   )
 
   it.live(
+    "reconciles with known_version and renders the unchanged micro response",
+    () =>
+      Effect.gen(function* () {
+        const dir = yield* tmpdirScoped({
+          git: true,
+          config: { semantic: { enabled: true, command: command() } },
+        })
+        const result = yield* run(dir, { file: "engine.ts", view: "entry", known_version: "a3f9c2" })
+
+        expect(result.output).toBe(SAMPLE_RESULT_UNCHANGED_RENDER)
+        expect(result.metadata).toMatchObject({ version: "a3f9c2", unchanged: true })
+      }),
+    20_000,
+  )
+
+  it.live(
+    "renders a bounded delta when the file changed since known_version",
+    () =>
+      Effect.gen(function* () {
+        const dir = yield* tmpdirScoped({
+          config: { semantic: { enabled: true, command: command("--read-view-reconcile=delta") } },
+        })
+        const result = yield* run(dir, { file: "engine.ts", view: "entry", known_version: "a3f9c2" })
+
+        expect(result.output).toBe(SAMPLE_READ_DELTA_RENDER)
+        expect(result.metadata).toMatchObject({ version: "b7e1d4" })
+      }),
+    20_000,
+  )
+
+  it.live(
+    "notes the full-view fallback when the delta is too large",
+    () =>
+      Effect.gen(function* () {
+        const dir = yield* tmpdirScoped({
+          config: { semantic: { enabled: true, command: command("--read-view-reconcile=full") } },
+        })
+        const result = yield* run(dir, { file: "engine.ts", view: "entry", known_version: "a3f9c2" })
+
+        expect(result.output).toBe(SAMPLE_READ_RECONCILE_FULL_RENDER)
+        expect(result.output).toContain("reconciliation: full view (delta too large)")
+      }),
+    20_000,
+  )
+
+  it.live(
     "surfaces daemon errors as readable output",
     () =>
       Effect.gen(function* () {
@@ -123,6 +177,7 @@ describe("tool.read_view", () => {
 
         expect(result.output).toContain("read_view unavailable:")
         expect(result.output).toContain("could not find this file")
+        expect(result.output).toContain("hint: call fallback_option_direct")
       }),
     20_000,
   )
@@ -156,6 +211,7 @@ describe("tool.read_view", () => {
         expect(result.output).toContain("read_view unavailable:")
         expect(result.output).toContain("not ready yet")
         expect(result.output).toContain("42%")
+        expect(result.output).not.toContain("fallback_option_direct")
       }),
     20_000,
   )

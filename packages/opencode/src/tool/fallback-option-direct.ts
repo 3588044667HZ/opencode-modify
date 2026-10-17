@@ -3,6 +3,10 @@ import * as Tool from "./tool"
 
 export const NAME = "fallback_option_direct"
 
+// 语义工具失败时的统一回退提示；仅 edit_batch / blast_radius / read_view 在特定错误上追加。
+export const FALLBACK_HINT =
+  "hint: call fallback_option_direct to get the hidden direct text tools (edit, write, apply_patch)."
+
 const DESCRIPTION = `Reveal the definitions of hidden direct tools that operate on text and bypass the semantic engine.
 
 Call this when the semantic tools cannot handle a task. It returns each hidden tool's full description and parameter names so the tool can be called directly afterwards.`

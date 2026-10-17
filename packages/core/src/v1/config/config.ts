@@ -189,6 +189,20 @@ export const Info = Schema.Struct({
       idle_timeout_ms: Schema.optional(NonNegativeInt).annotate({
         description: "Idle timeout in milliseconds passed to the semantic daemon",
       }),
+      ide: Schema.optional(Schema.String).annotate({
+        description:
+          'JetBrains IDE for the semantic daemon: "auto", a product selector such as idea/pycharm/webstorm, or an install path (default: auto)',
+      }),
+      ide_home: Schema.optional(Schema.String).annotate({
+        description: "Explicit path to the JetBrains IDE installation used by the semantic daemon",
+      }),
+      jdk_home: Schema.optional(Schema.String).annotate({
+        description: "JDK home passed to the semantic daemon as SEMANTIC_JDK_HOME",
+      }),
+      exclude: Schema.optional(Schema.mutable(Schema.Array(Schema.String))).annotate({
+        description:
+          "Project-relative directory patterns excluded from semantic indexing, e.g. node_modules or packages/*/dist",
+      }),
     }),
   ).annotate({ description: "Semantic engine daemon configuration" }),
   instructions: Schema.optional(Schema.mutable(Schema.Array(Schema.String))).annotate({

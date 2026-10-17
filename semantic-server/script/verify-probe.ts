@@ -1,16 +1,17 @@
 #!/usr/bin/env bun
-// verify_test 探针：raw NDJSON 连接 → ping/subscribe → 等 ready → 发送 verify_test 参数 →
+// verify_test 探针：读 locator → TCP 连接（raw NDJSON）→ ping/subscribe → 等 ready → 发送 verify_test 参数 →
 // 打印结构化结果；--raw 打印原始请求/响应帧；--out 时把 result 美化落盘（fixtures 生成用）。
-// 用法: bun script/verify-probe.ts [socket_path] [--params file.json] [--params-json '{...}']
+// 用法: bun script/verify-probe.ts [locator_path] [--params file.json] [--params-json '{...}']
 //        [--command cmd] [--cwd dir] [--timeout-ms n] [--out file] [--normalize] [--raw]
 //        [--no-wait] [--timeout secs] [--shutdown]
 import net from "node:net"
 import path from "node:path"
 import fs from "node:fs"
+import { connectLocator } from "./connect"
 
 const argv = process.argv.slice(2)
 const options = {
-  socket: "",
+  locator: "",
   params: "",
   paramsJson: "",
   command: "",
@@ -40,7 +41,7 @@ for (let i = 0; i < argv.length; i++) {
   else positional.push(arg)
 }
 const scriptDir = import.meta.dir
-options.socket = positional[0] ?? path.resolve(scriptDir, "../.tmp/verify.sock")
+options.locator = positional[0] ?? path.resolve(scriptDir, "../.tmp/verify.port")
 const defaultParamsPath = path.resolve(scriptDir, "../fixtures/verify_test/input.json")
 
 function buildParams(): Record<string, unknown> {
@@ -114,23 +115,10 @@ function sleep(ms: number) {
 }
 
 async function connectWithRetry(deadlineMs: number): Promise<void> {
-  const started = Date.now()
-  for (;;) {
-    const candidate = net.createConnection({ path: options.socket })
-    try {
-      await new Promise<void>((resolve, reject) => {
-        candidate.once("connect", resolve)
-        candidate.once("error", reject)
-      })
-      socket = candidate
-      attach(socket)
-      return
-    } catch (error) {
-      candidate.destroy()
-      if (Date.now() - started > deadlineMs) throw error
-      await sleep(500)
-    }
-  }
+  const connection = await connectLocator(options.locator, { deadlineMs })
+  socket = connection.socket
+  buffer = connection.leftover
+  attach(socket)
 }
 
 function printResult(label: string, message: any) {
@@ -138,7 +126,7 @@ function printResult(label: string, message: any) {
 }
 
 await connectWithRetry(10_000)
-console.log("[verify-probe] connected:", options.socket)
+console.log("[verify-probe] connected:", options.locator)
 console.log("[verify-probe] params:", JSON.stringify(params))
 
 printResult("ping", await call("ping"))

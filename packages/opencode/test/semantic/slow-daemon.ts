@@ -1,5 +1,5 @@
 // 串行 spawn 测试夹具：进程启动先写 start 时间戳，延迟 500ms 后写 end 并转交 fake-daemon 监听。
-// manager 追加的参数：<marker_path> <project_dir> <socket_path>。
+// manager 追加的参数：<marker_path> <project_dir> <locator_path>。
 import fs from "node:fs"
 
 const marker = process.argv[2]
