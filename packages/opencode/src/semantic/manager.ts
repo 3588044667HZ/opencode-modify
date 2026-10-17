@@ -11,6 +11,7 @@ import fs from "node:fs/promises"
 import os from "os"
 import path from "path"
 import * as Client from "./client"
+import { Ide } from "./ide"
 import * as Protocol from "./protocol"
 
 export const Event = SemanticEvent
@@ -62,6 +63,7 @@ interface State {
   readonly exclude?: readonly string[]
   readonly ide?: string
   readonly ideHome?: string
+  readonly launchIdeHome?: string
   readonly jdkHome?: string
   readonly scope: Scope.Scope
   status: Status
@@ -139,6 +141,7 @@ const layer = Layer.effect(
             }
             // 连接失败但 locator 仍在：崩溃/退出残留的陈旧 locator，删除后再 spawn。
             yield* Effect.promise(() => fs.unlink(s.locator.path).catch(() => {}))
+            const daemonIdeHome = s.launchIdeHome ?? s.ideHome
             const env = {
               ...(s.idleTimeoutMs === undefined ? {} : { OPENCODE_SEMANTIC_IDLE_TIMEOUT_MS: String(s.idleTimeoutMs) }),
               // exclude 仅在非空时注入（契约：空列表不设置该环境变量）。
@@ -147,7 +150,9 @@ const layer = Layer.effect(
                 : { OPENCODE_SEMANTIC_EXCLUDE: JSON.stringify(s.exclude) }),
               // IDE/JDK 选择仅在显式配置时注入；ide="auto"（默认）交给守护自动发现。
               ...(s.ide === undefined || s.ide === "" || s.ide === "auto" ? {} : { SEMANTIC_IDE: s.ide }),
-              ...(s.ideHome === undefined || s.ideHome === "" ? {} : { SEMANTIC_IDE_HOME: s.ideHome }),
+              ...(daemonIdeHome === undefined || daemonIdeHome === ""
+                ? {}
+                : { SEMANTIC_IDE_HOME: daemonIdeHome }),
               ...(s.jdkHome === undefined || s.jdkHome === "" ? {} : { SEMANTIC_JDK_HOME: s.jdkHome }),
             }
             const child = Process.spawn([...s.command, s.directory, s.locator.path], {
@@ -268,19 +273,32 @@ const layer = Layer.effect(
       Effect.fn("Semantic.state")(function* (ctx) {
         const scope = yield* Effect.scope
         const semantic = (yield* config.get()).semantic
+        const configured = semantic?.command ?? []
+        // 未配置命令时用 App 侧发现的本机 IDE JBR 启动 jar（目标机无需系统 JDK）；
+        // 显式 semantic.command 完全保持原行为。
+        const plan =
+          semantic?.enabled === true && configured.length === 0
+            ? yield* Effect.promise(() =>
+                Ide.resolveLaunch({ directory: ctx.directory, semantic }),
+              )
+            : undefined
+        const command = plan?.ok ? plan.command : configured
+        const autoIdeHome = plan?.ok ? plan.ideHome : undefined
         const locator = locatorPathFor(
           ctx.directory,
           semantic?.socket_dir,
-          explicitIdeKey(semantic?.ide, semantic?.ide_home),
+          explicitIdeKey(semantic?.ide, semantic?.ide_home) ??
+            (autoIdeHome === undefined ? undefined : ideKeyFor(autoIdeHome)),
         )
         const s: State = {
           directory: ctx.directory,
-          command: semantic?.command ?? [],
+          command,
           locator,
           idleTimeoutMs: semantic?.idle_timeout_ms,
           exclude: semantic?.exclude,
           ide: semantic?.ide,
           ideHome: semantic?.ide_home,
+          launchIdeHome: autoIdeHome,
           jdkHome: semantic?.jdk_home,
           scope,
           status: "idle",
@@ -291,9 +309,9 @@ const layer = Layer.effect(
           s.status = "disabled"
           return s
         }
-        if (!semantic.command || semantic.command.length === 0) {
+        if (command.length === 0) {
           s.status = "failed"
-          s.error = "semantic.command is not configured"
+          s.error = plan && !plan.ok ? plan.error : "semantic.command is not configured"
           s.failureAt = Date.now()
           yield* publish(s)
           return s

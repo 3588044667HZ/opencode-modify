@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process"
+import { existsSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
@@ -9,6 +10,7 @@ const execFileAsync = promisify(execFile)
 const packageDir = path.dirname(fileURLToPath(import.meta.url))
 const rootDir = path.resolve(packageDir, "../..")
 const signScript = path.join(rootDir, "script", "sign-windows.ps1")
+const semanticJar = path.join(rootDir, "semantic-server", "build-local", "semantic-server.jar")
 // The Electron 42 packaging update briefly installed Linux launchers/icons under
 // "opencode-desktop". Keep that hidden desktop entry around so existing GNOME/KDE
 // pins still resolve after the canonical app id changes back to ai.opencode.desktop.
@@ -71,6 +73,10 @@ const getBase = (appId: string): Configuration => ({
       to: "native/",
       filter: ["index.js", "index.d.ts", "build/Release/mac_window.node", "swift-build/**"],
     },
+    // 语义引擎 jar 随包分发，运行时用用户自装 IDE 的 JBR 启动（不打包 JBR/IDE）。
+    ...(existsSync(semanticJar)
+      ? [{ from: semanticJar, to: "semantic-server/semantic-server.jar" }]
+      : []),
   ],
   mac: {
     category: "public.app-category.developer-tools",

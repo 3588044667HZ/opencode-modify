@@ -122,7 +122,7 @@ dev 直启（不经 Launcher，因而没有注入 `SEMANTIC_SANDBOX_PATH`）时 
    路径分隔符（`/` 或 `\`）时也按路径处理；
 2. 产品选择器：`SEMANTIC_IDE` = `auto | idea | pycharm | webstorm | clion | goland | phpstorm | datagrip |
    rider | rubymine`（映射 `idea→IU/IC`、`pycharm→PY/PC`、`webstorm→WS`、`clion→CL`、`goland→GO`、
-   `phpstorm→PS`、`datagrip→DG`、`rider→RD`、`rubymine→RM`；未装对应产品时报错并列出全部候选）；
+   `phpstorm→PS`、`datagrip→DB`、`rider→RD`、`rubymine→RM`；未装对应产品时报错并列出全部候选）；
 3. 自动发现 + 按项目语言自动选择：分层信号扫描（有界：跳过隐藏目录与排除默认目录
    `venv/node_modules/build/out/target/dist/__pycache__`，深度 ≤4，条目上限 5000）：
    - **tier-1 决定性信号**（任一命中即定性，优先于计数）：标准布局根 `src/main/java`/
@@ -146,6 +146,26 @@ dev 直启（不经 Launcher，因而没有注入 `SEMANTIC_SANDBOX_PATH`）时 
 `~/.local/share/JetBrains/Toolbox/apps`。每个候选都必须通过 `product-info.json`（可读
 `productCode`/`buildNumber`）与 `<dir>/lib` 校验；发现/选择过程会把全部候选与选中原因打到 stderr 日志。
 发现逻辑只回答"装在哪"，不读取任何授权状态。
+
+### App 侧自动发现与免 JDK 启动（客户端）
+
+目标机可能没有系统 JDK。用户配置 `semantic.enabled=true`（默认 false，可在全局
+`opencode.json` 或分发默认配置中开启）且**未配置 `semantic.command`** 时，客户端在
+实例物化阶段自动组装启动命令：
+
+1. **jar**：`semantic.jar` > `OPENCODE_SEMANTIC_JAR` / `SEMANTIC_JAR` > 打包资源
+   `resources/semantic-server/semantic-server.jar` > 开发目录 `semantic-server/build-local/`；
+2. **IDE**：发现源与 Launcher 相同（显式 `semantic.ide_home`/`semantic.ide` 路径 > 卸载表注册项 >
+   Toolbox > 常见路径），每个候选校验 `product-info.json`、`lib/` 与 `jbr/`；
+3. **选择**：显式 selector（`semantic.ide=idea|pycharm|webstorm|...`）优先，否则按项目语言
+   （tier-1 清单/布局优先，tier-2 扩展名计数回退）与固定偏好序 `IU > PY > WS > PC`；
+4. **命令**：`<IDE>/jbr/bin/java[.exe] -Djava.awt.headless=true -jar <jar>`，并把选中的
+   `SEMANTIC_IDE_HOME` 注入守护环境，Launcher 复用同一 IDE；目标机无需系统 JDK，但仍需用户
+   自行安装/授权 JetBrains IDE。
+
+自动选择会为 locator 追加 `-<ideKey>`（与显式 IDE 一致），避免自动选择变化时复用错误的守护；
+显式命令且未指定 IDE 时维持原名。发现结果进程内缓存 60s；新装 IDE 可等待缓存过期或重启应用。
+显式 `semantic.command` 完全保持原行为，不触发上述发现。
 
 **项目 SDK 指派**：Java 能力可用的发行版打开项目后，若项目尚无 SDK（裸目录项目没有 `.idea/misc.xml`），
 按 `SEMANTIC_JDK_HOME` > `JAVA_HOME` > 常见 JDK 目录（`C:\Program Files\Java\*`、

@@ -183,6 +183,10 @@ export const Info = Schema.Struct({
         description:
           "Base argv used to launch the semantic engine daemon. The manager appends the project directory and the socket path.",
       }),
+      jar: Schema.optional(Schema.String).annotate({
+        description:
+          "Path to semantic-server.jar used when semantic.command is not set; the daemon runs on a discovered JetBrains IDE JBR",
+      }),
       socket_dir: Schema.optional(Schema.String).annotate({
         description: "Directory for the semantic daemon socket (default: system temp directory)",
       }),

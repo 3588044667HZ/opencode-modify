@@ -32,8 +32,9 @@
 - 路径：`<socket_dir>/opencode-semantic-<hash>.port`
   - hash 规则与现行 `socketPathFor` 完全一致（resolve/normalize、Windows 小写、SHA-1 前 10 hex）
   - `semantic.socket_dir` 配置含义不变（默认 `os.tmpdir()`）
-  - 多语言批次起：显式指定 IDE 时追加 `-<ideKey>`（`opencode-semantic-<hash>-<ideKey>.port`，
-    ideKey 规则见 `multilang.md`；auto 时维持原名）
+  - 显式指定 IDE 时追加 `-<ideKey>`（`opencode-semantic-<hash>-<ideKey>.port`，ideKey 规则见
+    `multilang.md`）；App 侧无 `semantic.command` 自动发现并选定 IDE 时同样追加（避免自动选择
+    变化后复用错误守护）；显式命令且未指定 IDE 时维持原名
 - 内容：单行 JSON，守护绑定成功后**原子写入**（临时文件 + `ATOMIC_MOVE`）：
 
   ```json

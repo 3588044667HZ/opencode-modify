@@ -210,6 +210,26 @@ IDEA Ultimate / WebStorm 可用；仅 Java/Python 的发行版不受影响。
 **降级**：JS/TS 语言服务不可用/索引缺失时按上述扫描兜底；仍无法确定定义时返回 -32002。
 不因 JS/TS 支持改变 Java/Python 路径；WebStorm 上 Java/Python 工具照旧返回 -32603。
 
+### App 侧自动发现与免 JDK 启动（W9）
+
+目标是复制 `win-unpacked` 到没有系统 JDK 的机器时，语义引擎仍可启动。实现放在客户端
+`packages/opencode/src/semantic/ide.ts`（不是 Launcher，因为 Launcher 自身需要先有 JVM）：
+
+- 触发条件：`semantic.enabled=true` 且 `semantic.command` 为空；显式命令完全保持原行为。
+- jar 解析：`semantic.jar` > `OPENCODE_SEMANTIC_JAR`/`SEMANTIC_JAR` > Electron
+  `resources/semantic-server/semantic-server.jar` > 开发目录 `semantic-server/build-local/`。
+- IDE 发现：显式 `semantic.ide_home` / `semantic.ide`（路径）> Windows 卸载表（PowerShell
+  优先、`reg` 回退）> Toolbox > 常见安装目录；macOS `.app/Contents` 与 Linux Toolbox 兜底。
+  候选必须通过 `product-info.json`（`productCode`/`buildNumber`）、`lib/` 与
+  `jbr/bin/java[.exe]` 校验；只回答安装位置，不读取授权状态。
+- 选择：显式 selector 优先；否则项目 tier-1 清单/布局信号决定语言集合（否则 tier-2 计数），
+  按“覆盖语言数最多 + 固定偏好序 `IU>PY>WS>PC`”选择；同产品多版本取较新 build。
+- 启动：`<IDE>/jbr/bin/java[.exe] -Djava.awt.headless=true -jar <jar>`，并把选中的
+  `SEMANTIC_IDE_HOME` 注入守护环境；Launcher 复用同一 IDE。目标机仍必须由用户自行安装并
+  授权 JetBrains IDE（License Boundary 不变）。
+- 缓存与命名：发现结果进程内缓存 60s；自动选中的 IDE 参与 locator `-<ideKey>` 后缀，
+  防止自动选择变化后复用错误守护。
+
 ### 环境卫生（随本批）
 
 - 清理 14 处个人路径硬编码：`Launcher.java:20/38/115/160`、`script/build-local.sh:10/14`、
@@ -230,7 +250,8 @@ IDEA Ultimate / WebStorm 可用；仅 Java/Python 的发行版不受影响。
   独立探针（fixture 项目 + PyCharm dist），不改变 Java conformance 夹具。
 - **W8 JS/TS 语义工具**：project_map 入口/依赖 + blast_radius 语法级定义/引用/分类；
   禁止 TS 语言服务 resolve；独立探针（fixture 项目 + IDEA/WebStorm dist）。
-- 依赖：W4 在 W1-W3 后；W3 可先行并行；W7 在 W4 后；W8 在 W3/W7 后。
+- **W9 App 侧自动发现**：客户端发现 IDE + JBR + jar 自动组命令，免系统 JDK；显式 command 不变。
+- 依赖：W4 在 W1-W3 后；W3 可先行并行；W7 在 W4 后；W8 在 W3/W7 后；W9 在 W1/W7/W8 后。
 
 ## 验收标准
 
@@ -247,6 +268,8 @@ IDEA Ultimate / WebStorm 可用；仅 Java/Python 的发行版不受影响。
       sandbox 按 `-PY<major>` 隔离（与 `-IU<major>` 不混）
 - [ ] JS/TS：IDEA/WebStorm dist 下 project_map（package.json/路由入口、import/tsconfig
       依赖）与 blast_radius（不调用 TS 服务、无线程卡死）正常；精度取舍见 README
+- [ ] 分发：无系统 JDK 的 Windows 机器复制 `win-unpacked` + jar 后，语义引擎用用户自装 IDE
+      的 JBR 启动；无 IDE 时失败信息可操作（安装提示/`semantic.ide_home`）
 - [ ] HTML：read_view smoke 通过（内容/位置/覆盖）
 - [ ] 插件在 PC/WS dist 上可加载；无 Java 能力时 Java 功能优雅降级（不报错、不崩溃）
 - [ ] 卫生：`git grep` 个人路径为 0；无任何许可检测/绕过代码（AGENTS 不变量）

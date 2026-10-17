@@ -69,13 +69,14 @@ public final class Launcher {
           Map.entry("clion", List.of("CL")),
           Map.entry("goland", List.of("GO")),
           Map.entry("phpstorm", List.of("PS")),
-          Map.entry("datagrip", List.of("DG")),
+          Map.entry("datagrip", List.of("DB")),
+          Map.entry("android-studio", List.of("AI")),
           Map.entry("rider", List.of("RD")),
           Map.entry("rubymine", List.of("RM")));
 
   /** 自动选择全局偏好序（JS/TS/HTML: IU>WS；Python: PY>PC；Java: IU）。 */
   private static final List<String> PREFERENCE =
-      List.of("IU", "PY", "WS", "PC", "IC", "CL", "GO", "PS", "DG", "RD", "RM");
+      List.of("IU", "PY", "WS", "PC", "IC", "AI", "CL", "GO", "PS", "DB", "RD", "RM");
 
   /** 信号语言类别（固定顺序，保证日志与决策确定性）。 */
   private static final List<String> SIGNAL_LANGUAGES = List.of("java", "python", "javascript", "html");

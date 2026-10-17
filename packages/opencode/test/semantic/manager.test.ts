@@ -159,7 +159,7 @@ describe("semantic manager", () => {
   )
 
   it.instance(
-    "fails when command is not configured and publishes the failure",
+    "fails when neither command nor a usable IDE is configured and publishes the failure",
     () =>
       Effect.gen(function* () {
         const semantic = yield* Semantic.Service
@@ -179,10 +179,18 @@ describe("semantic manager", () => {
 
         const status = yield* semantic.status()
         expect(status.status).toBe("failed")
-        expect(status.error).toBe("semantic.command is not configured")
+        expect(status.error).toContain("IDE")
         expect(seen.at(-1)).toBe("failed")
       }),
-    { config: { semantic: { enabled: true } } },
+    {
+      config: {
+        semantic: {
+          enabled: true,
+          jar: path.join(import.meta.dir, "../../../package.json"),
+          ide_home: path.join(os.tmpdir(), "opencode-missing-ide"),
+        },
+      },
+    },
     20_000,
   )
 
