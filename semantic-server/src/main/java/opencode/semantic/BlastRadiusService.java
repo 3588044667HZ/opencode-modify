@@ -191,27 +191,31 @@ final class BlastRadiusService {
         Log.warn("references search failed: " + t);
       }
     }
-    // 词/引用索引在裸目录或未配置解释器的 Python 项目下可能为空：退化为有界文件扫描
+    // 词/引用索引在裸目录或未配置解释器的 Python 项目下可能为空：先做名称级扫描
+    // （不依赖解释器/类型推断，给独立预算），再尝试 resolve 级扫描。
     if (callers.isEmpty() && ReadViewService.isPythonElement(definition)) {
-      for (PsiReference reference :
-          scanPythonReferences(project, definition, scopeFile, deadlineNanos, 500)) {
-        Caller caller = describeReference(project, reference);
-        if (caller == null) continue;
-        if (callerKeys.add(caller.file + "|" + caller.line + "|" + caller.context)) {
-          callers.add(caller);
-        }
-      }
-      // 无解释器时 Python 引用无法 resolve（类型推断缺失）：再退化为名称级匹配
-      if (callers.isEmpty() && definition instanceof PsiNamedElement named) {
+      if (definition instanceof PsiNamedElement named) {
         String definitionName = named.getName();
         if (definitionName != null) {
+          long nameDeadline = System.nanoTime() + TIME_BUDGET_NANOS * 2;
           for (PsiElement occurrence :
-              scanPythonNameOccurrences(project, definitionName, scopeFile, deadlineNanos, 500)) {
+              scanPythonNameOccurrences(project, definitionName, scopeFile, nameDeadline, 1000)) {
             Caller caller = describeElement(project, occurrence);
             if (caller == null) continue;
             if (callerKeys.add(caller.file + "|" + caller.line + "|" + caller.context)) {
               callers.add(caller);
             }
+          }
+        }
+      }
+      if (callers.isEmpty()) {
+        long resolveDeadline = System.nanoTime() + TIME_BUDGET_NANOS;
+        for (PsiReference reference :
+            scanPythonReferences(project, definition, scopeFile, resolveDeadline, 500)) {
+          Caller caller = describeReference(project, reference);
+          if (caller == null) continue;
+          if (callerKeys.add(caller.file + "|" + caller.line + "|" + caller.context)) {
+            callers.add(caller);
           }
         }
       }
@@ -671,6 +675,12 @@ final class BlastRadiusService {
       long deadlineNanos,
       int limit,
       List<PsiElement> found) {
+    // 文本预筛选：大项目里大多数文件不包含符号名，避免逐文件构建 PSI 遍历
+    try {
+      if (!psiFile.getText().contains(name)) return;
+    } catch (Throwable ignored) {
+      // 文本不可用时继续尝试遍历
+    }
     psiFile.accept(
         new PsiRecursiveElementWalkingVisitor() {
           @Override
