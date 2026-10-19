@@ -95,6 +95,35 @@ const withEmptyCodeMode = testEffect(
 )
 const withBrokenPlugin = testEffect(LayerNode.compile(root, [...replacements, [Plugin.node, brokenPluginLayer]]))
 
+const semanticLayer = (tools?: string[]) =>
+  TestConfig.layer({
+    get: () => Effect.succeed({ semantic: { enabled: true, ...(tools ? { tools } : {}) } }),
+    directories: () => InstanceState.directory.pipe(Effect.map((dir) => [path.join(dir, ".opencode")])),
+  })
+
+const withSemanticDefault = testEffect(
+  LayerNode.compile(root, [
+    [Config.node, semanticLayer()],
+    [RuntimeFlags.node, RuntimeFlags.layer()],
+  ]),
+)
+const withSemanticAll = testEffect(
+  LayerNode.compile(root, [
+    [
+      Config.node,
+      semanticLayer([
+        "read_view",
+        "blast_radius",
+        "edit_batch",
+        "edit_transaction",
+        "project_map",
+        "verify_test",
+      ]),
+    ],
+    [RuntimeFlags.node, RuntimeFlags.layer()],
+  ]),
+)
+
 afterEach(async () => {
   await disposeAllInstances()
 })
@@ -147,6 +176,31 @@ describe("tool.registry", () => {
       })
 
       expect(tools.map((tool) => tool.id)).not.toContain("execute")
+    }),
+  )
+
+  withSemanticDefault.instance("exposes read_view but not optional semantic tools by default", () =>
+    Effect.gen(function* () {
+      const registry = yield* ToolRegistry.Service
+      const ids = yield* registry.ids()
+
+      expect(ids).toContain("read_view")
+      expect(ids).not.toContain("blast_radius")
+      expect(ids).not.toContain("project_map")
+      expect(ids).not.toContain("edit_batch")
+      expect(ids).not.toContain("edit_transaction")
+      expect(ids).not.toContain("verify_test")
+    }),
+  )
+
+  withSemanticAll.instance("exposes optional semantic tools listed in semantic.tools", () =>
+    Effect.gen(function* () {
+      const registry = yield* ToolRegistry.Service
+      const ids = yield* registry.ids()
+
+      for (const id of ["read_view", "blast_radius", "project_map", "edit_batch", "edit_transaction", "verify_test"]) {
+        expect(ids).toContain(id)
+      }
     }),
   )
 

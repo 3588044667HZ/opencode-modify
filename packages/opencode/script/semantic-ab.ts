@@ -21,6 +21,7 @@ const MODEL = process.env.SEMANTIC_AB_MODEL ?? "deepseek-2/deepseek-flash"
 const REAL_PYTHON = process.env.SEMANTIC_AB_PYTHON_PROJECT
 const REAL_TS = path.join(REPO, "packages", "opencode")
 const REAL_JAVA = process.env.SEMANTIC_AB_JAVA_PROJECT
+const SEMANTIC_TOOLS = ["read_view", "blast_radius", "edit_batch", "edit_transaction", "project_map", "verify_test"]
 const COPY_EXCLUDED = new Set([
   ".git",
   ".idea",
@@ -345,14 +346,19 @@ type RunResult = {
   readonly dir: string
 }
 
-function config(condition: Condition): string {
+function config(task: Task, condition: Condition): string {
   const javaHome = process.env.JAVA_HOME
   const java = javaHome
     ? path.join(javaHome, "bin", process.platform === "win32" ? "java.exe" : "java")
     : "java"
   const semantic =
     condition === "semantic"
-      ? { enabled: true, command: [java, "-Djava.awt.headless=true", "-jar", JAR] }
+      ? {
+          enabled: true,
+          command: [java, "-Djava.awt.headless=true", "-jar", JAR],
+          // 诊断任务按默认表面只开 read_view；其余任务显式开启全部工具做能力对比。
+          tools: task.expectedDiagnostics ? ["read_view"] : SEMANTIC_TOOLS,
+        }
       : { enabled: false }
   return JSON.stringify({
     $schema: "https://opencode.ai/config.json",
@@ -391,7 +397,7 @@ async function run(task: Task, condition: Condition, repeat: number): Promise<Ru
     {
       cwd: dir,
       // opencode run 用 PWD 优先解析项目根；Bun.spawn 只改 cwd 不改继承的 PWD。
-      env: { ...process.env, PWD: dir, OPENCODE_CONFIG_CONTENT: config(condition) },
+      env: { ...process.env, PWD: dir, OPENCODE_CONFIG_CONTENT: config(task, condition) },
       stdout: "pipe",
       stderr: "pipe",
     },

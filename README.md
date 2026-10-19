@@ -18,7 +18,7 @@
 | 共享状态 | `blackboard` | 树内 KV，版本化 + CAS + append |
 | 生命周期通知 | 自动 | background 完成唤醒、等权限/停滞看门狗 |
 | 桌面 UI | 内建 | Agent Teams 独立窗口：Team / Blackboard / Inbox 面板 |
-| 语义引擎 | `read_view` / `blast_radius` / `project_map` / `edit_batch` / `edit_transaction` / `verify_test` | 基于本机 JetBrains IDE 的无头分析：定义/引用/诊断/项目地图/事务编辑/读时对账 |
+| 语义引擎 | `read_view`（默认）/ `blast_radius` / `project_map` / `edit_batch` / `edit_transaction` / `verify_test` | 基于本机 JetBrains IDE 的无头分析：定义/引用/诊断/项目地图/事务编辑/读时对账；默认只暴露 read_view，其余经 `semantic.tools` 开启 |
 
 除此之外还有一批针对多代理场景的稳定性修复（见下文「稳定性修复」）。
 
@@ -118,6 +118,8 @@
 与 opencode 客户端通信。它把 IDE 的 PSI/索引能力暴露成工具，并额外提供上下文对账（读时 delta、
 编辑版本戳、会话 ledger/fold）：
 
+默认只向模型暴露 `read_view`（含 IDE 诊断）；其余工具需在 `semantic.tools` 中显式开启。
+
 | 工具 | 能力 |
 | --- | --- |
 | `read_view` | 内容/符号/覆盖/锚点/诊断；`known_version` 命中时返回 `unchanged`，过期时返回有界 delta |
@@ -160,6 +162,8 @@ jar 解析顺序：`semantic.jar` > `OPENCODE_SEMANTIC_JAR`/`SEMANTIC_JAR` > 打
 {
   "semantic": {
     "enabled": true,                    // 默认 false
+    // 默认只暴露 read_view（含诊断）；需要时加入 blast_radius/project_map/edit_batch/edit_transaction/verify_test
+    "tools": ["read_view"],
     // 省略 command：自动发现 IDE，用其 JBR 启动 jar（推荐）
     // "command": ["<IDE>/jbr/bin/java.exe", "-Djava.awt.headless=true", "-jar", "<jar>"],
     "jar": "<可选：semantic-server.jar 路径>",
@@ -175,7 +179,7 @@ jar 解析顺序：`semantic.jar` > `OPENCODE_SEMANTIC_JAR`/`SEMANTIC_JAR` > 打
 
 - 先运行 `bash semantic-server/script/build-local.sh` 生成引擎 jar，再执行
   `bun run build:local -- --package`，jar 会放进 `win-unpacked/resources/semantic-server/`；
-  对方机器只需**自己安装并授权 JetBrains IDE**，开启 `semantic.enabled` 即可（无需 JDK）。
+  对方机器只需**自己安装并授权 JetBrains IDE**，开启 `semantic.enabled` 即可（默认仅暴露 read_view，无需 JDK）。
 - 显式 `semantic.command` 仍完全优先，适合自定义运行时或已有 JDK 的环境。
 - 引擎**不打包、不下载、不修改** JetBrains IDE/JBR/插件，不读取授权状态；IDE 与授权均由使用者
   自行提供。IDE 安装不完整时按能力降级（`read_view` 返回 warnings），不会尝试修复。
@@ -232,7 +236,7 @@ bun run build:local  # 一次性构建服务端 bundle + 桌面 GUI（带防陈�
 桌面端/服务端验证前请先执行 `bun run build:local`（或 `bun run build:local -- --package --deploy D:/opencode-desktop-dev`），避免陈旧产物让改动"不生效"。
 
 语义引擎为可选能力：安装并授权 JetBrains IDE 后，在 `opencode.json` 设置
-`"semantic": { "enabled": true }`；未配置 `command` 时自动发现 IDE 并用其 JBR 启动，
+`"semantic": { "enabled": true }`（默认只暴露 `read_view`，其余工具用 `semantic.tools` 开启）；未配置 `command` 时自动发现 IDE 并用其 JBR 启动，
 无需系统 JDK。语言支持与降级见下文「语义引擎」。
 
 测试（必须在包目录内运行，禁止从仓库根运行）：

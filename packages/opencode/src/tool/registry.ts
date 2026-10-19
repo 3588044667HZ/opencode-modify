@@ -235,6 +235,10 @@ const layer = Layer.effect(
 
         const cfg = yield* config.get()
         const questionEnabled = ["app", "cli", "desktop"].includes(flags.client) || flags.enableQuestionTool
+        const semanticEnabled = cfg.semantic?.enabled === true
+        const semanticTools = new Set(cfg.semantic?.tools ?? ["read_view"])
+        const semanticTool = (id: string, value: Tool.Def) =>
+          semanticEnabled && semanticTools.has(id) ? [value] : []
 
         const tool = yield* Effect.all({
           invalid: Tool.init(invalid),
@@ -272,12 +276,12 @@ const layer = Layer.effect(
           ...(questionEnabled ? [tool.question] : []),
           tool.shell,
           tool.read,
-          ...(cfg.semantic?.enabled ? [tool.read_view] : []),
-          ...(cfg.semantic?.enabled ? [tool.blast_radius] : []),
-          ...(cfg.semantic?.enabled ? [tool.edit_batch] : []),
-          ...(cfg.semantic?.enabled ? [tool.edit_transaction] : []),
-          ...(cfg.semantic?.enabled ? [tool.project_map] : []),
-          ...(cfg.semantic?.enabled ? [tool.verify_test] : []),
+          ...semanticTool("read_view", tool.read_view),
+          ...semanticTool("blast_radius", tool.blast_radius),
+          ...semanticTool("edit_batch", tool.edit_batch),
+          ...semanticTool("edit_transaction", tool.edit_transaction),
+          ...semanticTool("project_map", tool.project_map),
+          ...semanticTool("verify_test", tool.verify_test),
           tool.glob,
           tool.grep,
           tool.edit,

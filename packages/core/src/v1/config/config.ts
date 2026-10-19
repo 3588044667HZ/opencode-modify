@@ -207,6 +207,11 @@ export const Info = Schema.Struct({
         description:
           "Project-relative directory patterns excluded from semantic indexing, e.g. node_modules or packages/*/dist",
       }),
+      tools: Schema.optional(Schema.mutable(Schema.Array(Schema.String))).annotate({
+        description:
+          'Semantic tools exposed to the model (default: ["read_view"]). read_view includes IDE diagnostics; ' +
+          "optional: blast_radius, project_map, edit_batch, edit_transaction, verify_test.",
+      }),
     }),
   ).annotate({ description: "Semantic engine daemon configuration" }),
   instructions: Schema.optional(Schema.mutable(Schema.Array(Schema.String))).annotate({
