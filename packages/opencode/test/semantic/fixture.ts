@@ -153,7 +153,7 @@ export const SAMPLE_BLAST_RENDER = [
   "load() @ engine.ts:40 (method)",
   "  callers: 3 [bar.ts:42 handleRequest, baz.ts:17 retry, test_engine.py:88 test_load]",
   "  callees: 2 [json.load @ json/__init__.py:120, transform @ engine.ts:55]",
-  "  affected: 3 files",
+  "  affected: 3 files [bar.ts, baz.ts, engine.ts]",
   "  entry: qux.ts:88 main ← reached_from_main",
   "  tests: 1 [test_engine.py::test_load]",
   "  risk: low",

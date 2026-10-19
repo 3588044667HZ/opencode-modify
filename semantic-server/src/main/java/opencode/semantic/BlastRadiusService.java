@@ -405,6 +405,22 @@ final class BlastRadiusService {
     PsiClass exactClass = findClass(project, symbol);
     if (exactClass != null) return exactClass;
 
+    // Java 惯用写法也接受 Class.method / pkg.Class.method（与 Python/JS 的限定符号一致）；
+    // 类全名优先，未命中时把最后一段当作成员名。
+    int dot = symbol.lastIndexOf('.');
+    if (dot > 0) {
+      PsiClass owner = findClass(project, symbol.substring(0, dot));
+      if (owner != null) {
+        String memberName = symbol.substring(dot + 1);
+        PsiMethod[] memberMethods = owner.findMethodsByName(memberName, false);
+        if (memberMethods.length > 0) return firstByLocation(memberMethods);
+        PsiField memberField = owner.findFieldByName(memberName, false);
+        if (memberField != null) return memberField;
+        PsiClass inner = owner.findInnerClassByName(memberName, false);
+        if (inner != null) return inner;
+      }
+    }
+
     PsiShortNamesCache shortNames = PsiShortNamesCache.getInstance(project);
     PsiMethod[] methods = shortNames.getMethodsByName(symbol, GlobalSearchScope.projectScope(project));
     if (methods.length > 0) return firstByLocation(methods);

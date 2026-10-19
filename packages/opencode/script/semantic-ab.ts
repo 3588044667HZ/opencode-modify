@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
 // 语义工具小规模 A/B：同一模型、同一任务，semantic.enabled=false（基线）与 true（语义工具）各跑一次。
-// 任务：Java/Python/TS 各一个定义+调用点检索，Python 一个编辑+测试任务。
+// 默认任务：Java/Python/TS 定义+调用点检索、Python 编辑+测试；设置 SEMANTIC_AB_JAVA_PROJECT /
+// SEMANTIC_AB_PYTHON_PROJECT 后追加 Java 影响面/重命名与 Python 诊断任务。
 // 用法（在 packages/opencode 下）：
-//   bun script/semantic-ab.ts [--model provider/model] [--only java,python,ts,edit] [--condition baseline,semantic]
+//   bun script/semantic-ab.ts [--model provider/model] [--only <task-id,...>] [--condition baseline,semantic] [--repeat N]
 // 结果写入 semantic-server/.tmp/semantic-ab-results.json，并打印汇总表。
 import fs from "node:fs/promises"
 import os from "node:os"
@@ -19,6 +20,7 @@ const OUT = path.join(REPO, "semantic-server", ".tmp", "semantic-ab-results.json
 const MODEL = process.env.SEMANTIC_AB_MODEL ?? "deepseek-2/deepseek-flash"
 const REAL_PYTHON = process.env.SEMANTIC_AB_PYTHON_PROJECT
 const REAL_TS = path.join(REPO, "packages", "opencode")
+const REAL_JAVA = process.env.SEMANTIC_AB_JAVA_PROJECT
 const COPY_EXCLUDED = new Set([
   ".git",
   ".idea",
@@ -73,6 +75,11 @@ type ImpactExpected = {
   readonly tests: readonly string[]
 }
 
+type DiagnosticsExpected = {
+  readonly file: string
+  readonly lines: readonly number[]
+}
+
 type Task = {
   readonly id: string
   readonly language: "java" | "python" | "ts" | "edit"
@@ -81,8 +88,11 @@ type Task = {
   /** 语义条件强制使用工具的提示（能力测试）；基线不提供该工具。 */
   readonly forcedPrompt?: string
   readonly copy?: boolean
+  readonly fresh?: boolean
+  readonly grade?: "java-rename"
   readonly expected?: RetrievalExpected
   readonly expectedImpact?: ImpactExpected
+  readonly expectedDiagnostics?: DiagnosticsExpected
 }
 
 const tasks: Task[] = [
@@ -236,6 +246,80 @@ const tasks: Task[] = [
       tests: ["test/semantic/project-map.test.ts"],
     },
   },
+  ...(REAL_JAVA
+    ? [
+        {
+          id: "java-large-impact",
+          language: "java" as const,
+          project: REAL_JAVA,
+          copy: true,
+          prompt: [
+            "In this project, find the definition of bench.Engine.run.",
+            "List the production files that call it and the test files that reference it. Do not modify files.",
+            "Do not include the definition file itself in production_files or test_files.",
+            "Return only JSON, no prose:",
+            '{"definition":{"file":"project-relative/path","line":N},"production_files":["..."],"test_files":["..."]}',
+          ].join("\n"),
+          forcedPrompt: [
+            'Use the blast_radius tool with symbol "bench.Engine.run" (or "Engine.run") to answer.',
+            "If it returns indexing, wait briefly and retry. Do not modify files.",
+            "Do not include the definition file itself in production_files or test_files.",
+            "Return only JSON, no prose:",
+            '{"definition":{"file":"project-relative/path","line":N},"production_files":["..."],"test_files":["..."]}',
+          ].join("\n"),
+          expectedImpact: {
+            definition: { file: "src/main/java/bench/Engine.java", line: 4 },
+            production: Array.from(
+              { length: 40 },
+              (_, index) => `src/main/java/bench/Caller${String(index + 1).padStart(3, "0")}.java`,
+            ),
+            tests: ["src/test/java/bench/EngineTest.java"],
+          },
+        },
+        {
+          id: "java-rename",
+          language: "java" as const,
+          project: REAL_JAVA,
+          copy: true,
+          fresh: true,
+          grade: "java-rename" as const,
+          prompt: [
+            "Rename the method run in class bench.Engine to execute, and update every call site (including tests).",
+            "Do NOT change the unrelated run() methods in Decoy* classes.",
+            "Compile all Java sources with javac and make sure compilation succeeds.",
+          ].join(" "),
+          forcedPrompt: [
+            'Use blast_radius with symbol "bench.Engine.run" to identify affected production and test files.',
+            "Then edit only those files: rename run to execute and update every call. Do NOT touch Decoy* classes.",
+            "Compile all Java sources with javac and make sure compilation succeeds.",
+          ].join(" "),
+        },
+      ]
+    : []),
+  ...(REAL_PYTHON
+    ? [
+        {
+          id: "python-diagnostics",
+          language: "python" as const,
+          project: REAL_PYTHON,
+          copy: false,
+          prompt: [
+            "Read core/loop.py and list every warning/error reported by the project tooling.",
+            "Return only JSON, no prose:",
+            '{"file":"core/loop.py","diagnostics":[{"line":N,"severity":"warning"}]}',
+          ].join("\n"),
+          forcedPrompt: [
+            'Use read_view with file "core/loop.py" (entry view) and report its diagnostics.',
+            "Return only JSON, no prose:",
+            '{"file":"core/loop.py","diagnostics":[{"line":N,"severity":"warning"}]}',
+          ].join("\n"),
+          expectedDiagnostics: {
+            file: "core/loop.py",
+            lines: [42, 59, 62, 71, 106, 248],
+          },
+        },
+      ]
+    : []),
 ]
 
 type RunResult = {
@@ -367,6 +451,31 @@ async function run(task: Task, condition: Condition, repeat: number): Promise<Ru
     }
   }
 
+  if (task.grade === "java-rename") {
+    const rename = await gradeJavaRename(dir)
+    return {
+      task: task.id,
+      repeat,
+      language: task.language,
+      condition,
+      ok: rename.score === 5,
+      score: rename.score,
+      definitionOk: rename.engineOk,
+      callerF1: rename.score / 5,
+      productionF1: rename.score / 5,
+      precision: 0,
+      recall: 0,
+      tokens,
+      cost,
+      elapsedMs,
+      tools,
+      answer,
+      ...(warm ? { warmupMs: warm.elapsedMs } : {}),
+      ...(rename.error ? { error: rename.error } : {}),
+      dir,
+    }
+  }
+
   if (task.language === "edit") {
     const edit = await gradeEdit(dir)
     return {
@@ -387,6 +496,31 @@ async function run(task: Task, condition: Condition, repeat: number): Promise<Ru
       answer,
       ...(warm ? { warmupMs: warm.elapsedMs } : {}),
       ...(edit.error ? { error: edit.error } : {}),
+      dir,
+    }
+  }
+
+  if (task.expectedDiagnostics) {
+    const diagnostics = gradeDiagnostics(answer, task.expectedDiagnostics)
+    return {
+      task: task.id,
+      repeat,
+      language: task.language,
+      condition,
+      ok: diagnostics.fileOk && diagnostics.lineF1 > 0.99,
+      score: (diagnostics.fileOk ? 1 : 0) + diagnostics.lineF1,
+      definitionOk: diagnostics.fileOk,
+      callerF1: diagnostics.lineF1,
+      productionF1: diagnostics.lineF1,
+      precision: diagnostics.precision,
+      recall: diagnostics.recall,
+      tokens,
+      cost,
+      elapsedMs,
+      tools,
+      answer: answer.slice(0, 4000),
+      ...(warm ? { warmupMs: warm.elapsedMs } : {}),
+      ...(diagnostics.error ? { error: diagnostics.error } : {}),
       dir,
     }
   }
@@ -549,7 +683,7 @@ function stopPid(pid: number | undefined) {
 
 async function copyFor(task: Task): Promise<string> {
   // 检索任务在同一副本上重复运行，避免每次复制整个项目；编辑任务每次用新副本。
-  if (task.language === "edit") return copyProject(task)
+  if (task.language === "edit" || task.fresh) return copyProject(task)
   const cached = copyCache.get(task.id)
   if (cached) return cached
   const dir = await copyProject(task)
@@ -579,7 +713,7 @@ function gradeRetrieval(answer: string, expected: RetrievalExpected) {
   const definitionOk =
     normalize(parsed.definition?.file) === normalize(expected.definition.file) &&
     Number(parsed.definition?.line) === expected.definition.line
-  const got = new Set(
+  const got = new Set<string>(
     (Array.isArray(parsed.callers) ? parsed.callers : [])
       .map((caller: any) => `${normalize(caller?.file)}:${Number(caller?.line)}`)
       .filter((value: string) => !value.startsWith("undefined:") && !value.endsWith("NaN")),
@@ -626,6 +760,29 @@ function gradeImpact(answer: string, expected: ImpactExpected) {
   }
 }
 
+function gradeDiagnostics(answer: string, expected: DiagnosticsExpected) {
+  const parsed = parseAnswer(answer)
+  if (!parsed) {
+    return { fileOk: false, lineF1: 0, precision: 0, recall: 0, error: "answer is not parseable JSON" }
+  }
+  const fileOk = normalize(parsed.file) === normalize(expected.file)
+  const got = new Set<number>(
+    (Array.isArray(parsed.diagnostics) ? parsed.diagnostics : [])
+      .map((entry: any) => Number(entry?.line))
+      .filter((line: number) => Number.isInteger(line)),
+  )
+  const want = new Set(expected.lines)
+  const truePositives = [...got].filter((line) => want.has(line)).length
+  const precision = got.size === 0 ? 0 : truePositives / got.size
+  const recall = want.size === 0 ? 1 : truePositives / want.size
+  return {
+    fileOk,
+    precision,
+    recall,
+    lineF1: precision + recall === 0 ? 0 : (2 * precision * recall) / (precision + recall),
+  }
+}
+
 function setF1(value: unknown, expected: readonly string[]) {
   const got = new Set(
     (Array.isArray(value) ? value : []).map((entry) => normalize(entry)).filter((entry) => entry.length > 0),
@@ -661,6 +818,75 @@ function parseAnswer(answer: string): any {
 function normalize(value: unknown): string {
   if (typeof value !== "string") return ""
   return value.trim().replace(/\\/g, "/").replace(/^\.\//, "")
+}
+
+async function gradeJavaRename(dir: string) {
+  const engine = await readText(path.join(dir, "src/main/java/bench/Engine.java"))
+  const engineOk =
+    /public\s+String\s+execute\s*\(/.test(engine) && !/public\s+String\s+run\s*\(/.test(engine)
+
+  let callersOk = 0
+  for (let index = 1; index <= 40; index++) {
+    const id = String(index).padStart(3, "0")
+    const text = await readText(path.join(dir, `src/main/java/bench/Caller${id}.java`))
+    if (text.includes(".execute(") && !text.includes(".run(")) callersOk++
+  }
+
+  let decoysOk = 0
+  for (let index = 1; index <= 40; index++) {
+    const id = String(index).padStart(3, "0")
+    const text = await readText(path.join(dir, `src/main/java/bench/Decoy${id}.java`))
+    if (/void\s+run\s*\(/.test(text) && /\.run\s*\(/.test(text) && !text.includes("execute")) decoysOk++
+  }
+
+  const test = await readText(path.join(dir, "src/test/java/bench/EngineTest.java"))
+  const testOk = test.includes(".execute(")
+  const compile = await compileJava(dir)
+  const score =
+    (engineOk ? 1 : 0) + (callersOk === 40 ? 1 : 0) + (decoysOk === 40 ? 1 : 0) + (testOk ? 1 : 0) + (compile.ok ? 1 : 0)
+  return {
+    engineOk,
+    callersOk,
+    decoysOk,
+    testOk,
+    compile: compile.ok,
+    score,
+    error: compile.ok
+      ? undefined
+      : `javac failed: ${(compile.stderr || compile.stdout).slice(0, 1200)}`,
+  }
+}
+
+async function compileJava(dir: string) {
+  const sources = await listJava(path.join(dir, "src"))
+  const javac = process.env.JAVA_HOME
+    ? path.join(process.env.JAVA_HOME, "bin", process.platform === "win32" ? "javac.exe" : "javac")
+    : "javac"
+  const result = Bun.spawnSync([javac, "-d", path.join(dir, ".ab-out"), ...sources], {
+    cwd: dir,
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  return {
+    ok: result.exitCode === 0,
+    stdout: result.stdout.toString(),
+    stderr: result.stderr.toString(),
+  }
+}
+
+async function listJava(dir: string): Promise<string[]> {
+  const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => [])
+  const files: string[] = []
+  for (const entry of entries) {
+    const file = path.join(dir, entry.name)
+    if (entry.isDirectory()) files.push(...(await listJava(file)))
+    else if (entry.name.endsWith(".java")) files.push(file)
+  }
+  return files
+}
+
+async function readText(file: string): Promise<string> {
+  return fs.readFile(file, "utf8").catch(() => "")
 }
 
 async function gradeEdit(dir: string) {

@@ -24,10 +24,12 @@ const argv = process.argv.slice(2)
 let jar = process.env.SEMANTIC_JAR ?? path.join(SERVER_DIR, "build-local", "semantic-server.jar")
 let ideHome = process.env.SEMANTIC_IDE_HOME ?? ""
 let keep = false
+let large = false
 for (let i = 0; i < argv.length; i++) {
   if (argv[i] === "--jar") jar = argv[++i] ?? jar
   else if (argv[i] === "--ide-home") ideHome = argv[++i] ?? ideHome
   else if (argv[i] === "--keep") keep = true
+  else if (argv[i] === "--large") large = true
 }
 if (!fs.existsSync(jar)) {
   console.error(`[python-probe] jar 不存在: ${jar}（先运行 build-local.sh，或用 SEMANTIC_JAR/--jar 指定）`)
@@ -44,6 +46,26 @@ fs.mkdirSync(TMP_DIR, { recursive: true })
 fs.rmSync(LOCATOR, { force: true })
 if (!keep) fs.rmSync(SANDBOX, { recursive: true, force: true })
 
+// 回归场景：用大量无关 .py 文件把名称级引用扫描推到预算边缘，验证 callers 仍能返回。
+let tempProject: string | undefined
+let project = PROJECT
+if (large) {
+  tempProject = fs.mkdtempSync(path.join(TMP_DIR, "python-probe-large-"))
+  fs.cpSync(PROJECT, tempProject, {
+    recursive: true,
+    filter: (source) => !source.includes("__pycache__") && !source.includes(".pytest_cache"),
+  })
+  const bulk = path.join(tempProject, "bulk")
+  fs.mkdirSync(bulk, { recursive: true })
+  for (let index = 1; index <= 300; index++) {
+    fs.writeFileSync(
+      path.join(bulk, `filler_${String(index).padStart(3, "0")}.py`),
+      `def filler_${String(index).padStart(3, "0")}():\n    return ${index}\n`,
+    )
+  }
+  project = tempProject
+}
+
 const env: Record<string, string | undefined> = {
   ...process.env,
   SEMANTIC_IDE: process.env.SEMANTIC_IDE ?? "pycharm",
@@ -57,7 +79,7 @@ const server = Bun.spawn(
     "-Djava.awt.headless=true",
     "-jar",
     jar,
-    PROJECT,
+    project,
     LOCATOR,
     "--idle-seconds",
     "300",
@@ -290,6 +312,7 @@ try {
     Bun.spawnSync(["taskkill", "/PID", String(server.pid), "/T", "/F"], { stdout: "ignore", stderr: "ignore" })
     await sleep(500)
     fs.rmSync(LOCATOR, { force: true })
+    if (tempProject) fs.rmSync(tempProject, { recursive: true, force: true })
   }
 }
 

@@ -111,7 +111,7 @@ export function renderBlastRadius(result: Protocol.BlastRadiusResult): string {
   const lines = [`${result.symbol}() @ ${definition.file}:${definition.line} (${definition.kind})`]
   lines.push(callersLine(result))
   lines.push(calleesLine(result))
-  lines.push(`  affected: ${result.summary.files_count} files`)
+  lines.push(affectedLine(result))
   if (result.entry_points.length === 0) lines.push("  entry: none")
   for (const entry of result.entry_points) {
     lines.push(`  entry: ${entry.file}:${entry.line} ${entry.context} ← ${entry.reason}`)
@@ -119,6 +119,17 @@ export function renderBlastRadius(result: Protocol.BlastRadiusResult): string {
   lines.push(testsLine(result))
   lines.push(`  risk: ${result.summary.risk}`)
   return lines.join("\n")
+}
+
+// 受影响文件是文件级影响面任务的直接答案；callers 可能被截断，但 affected_files 是完整的
+// （保序，最多展示 50 个，超出给计数）。显式列出可避免模型为了找文件名重复调用。
+function affectedLine(result: Protocol.BlastRadiusResult): string {
+  const files = result.affected_files
+  if (files.length === 0) return `  affected: ${result.summary.files_count} files`
+  const limit = 50
+  const shown = files.slice(0, limit)
+  const suffix = files.length > limit ? ` (+${files.length - limit} more)` : ""
+  return `  affected: ${result.summary.files_count} files [${shown.join(", ")}${suffix}]`
 }
 
 function callersLine(result: Protocol.BlastRadiusResult): string {
