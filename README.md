@@ -18,6 +18,7 @@
 | 共享状态 | `blackboard` | 树内 KV，版本化 + CAS + append |
 | 生命周期通知 | 自动 | background 完成唤醒、等权限/停滞看门狗 |
 | 桌面 UI | 内建 | Agent Teams 独立窗口：Team / Blackboard / Inbox 面板 |
+| 语义引擎 | `read_view` / `blast_radius` / `project_map` / `edit_batch` / `edit_transaction` / `verify_test` | 基于本机 JetBrains IDE 的无头分析：定义/引用/诊断/项目地图/事务编辑/读时对账 |
 
 除此之外还有一批针对多代理场景的稳定性修复（见下文「稳定性修复」）。
 
@@ -111,6 +112,77 @@
 
 ---
 
+## 语义引擎（JetBrains IDE 无头分析）
+
+仓库内置 `semantic-server`：一个无头启动本机 JetBrains IDE 平台的语义守护，通过 TCP + locator
+与 opencode 客户端通信。它把 IDE 的 PSI/索引能力暴露成工具，并额外提供上下文对账（读时 delta、
+编辑版本戳、会话 ledger/fold）：
+
+| 工具 | 能力 |
+| --- | --- |
+| `read_view` | 内容/符号/覆盖/锚点/诊断；`known_version` 命中时返回 `unchanged`，过期时返回有界 delta |
+| `blast_radius` | 定义、调用者、callees、受影响文件/测试、入口点、风险评级 |
+| `project_map` | 目录模块、入口点、模块依赖/环、hot（占位） |
+| `edit_batch` / `edit_transaction` | 锚点编辑、逐文件版本/changed/position_map、跨文件事务与崩溃恢复 |
+| `verify_test` | 运行项目测试并归一化结果 |
+
+### 支持矩阵（当前）
+
+| 语言 | read_view | project_map / blast_radius | 说明 |
+| --- | --- | --- | --- |
+| Java | 完整（锚点/诊断/跨文件定义） | 完整 | IDEA / IntelliJ 平台 |
+| Python | 完整（符号/锚点/诊断） | 可用 | PyCharm；未配置解释器时引用退化为名称级匹配 |
+| JS/TS | 内容/位置/符号；锚点与诊断降级 | 语法级可用 | 不调用 TS 语言服务 resolve，避免卡死；精度低于 Java/Python |
+| HTML/CSS | 内容/位置 | 不适用 | 仅文件视图 |
+
+### IDE 自动发现与选择
+
+**目标机不需要额外安装 JDK**：未显式配置 `semantic.command` 时，客户端自动发现已安装的
+JetBrains IDE，并用它自带的 JBR 启动 jar。发现源：
+
+- 显式配置：`semantic.ide_home`（路径）或 `semantic.ide`（`auto | idea | pycharm | webstorm | ...` 或路径）；
+- Windows 卸载表注册项（PowerShell 优先、`reg` 回退）、Toolbox、常见安装目录；
+- macOS `/Applications/*.app`、Linux Toolbox/`/opt` 兜底。
+
+每个候选都要通过 `product-info.json`（`productCode`/`buildNumber`）、`lib/` 与
+`jbr/bin/java[.exe]` 校验。选择顺序：显式配置 > 产品 selector > 按项目语言自动选择
+（`src/main/java`/`pom.xml`/`pyproject.toml`/`package.json` 等 tier-1 信号优先，扩展名计数回退），
+偏好序 `IU > PY > WS > PC`（Java: IU；Python: PY>PC；JS/TS: IU>WS）。混合仓库选覆盖语言最多者，
+也可用 `semantic.ide` 显式覆盖。
+
+jar 解析顺序：`semantic.jar` > `OPENCODE_SEMANTIC_JAR`/`SEMANTIC_JAR` > 打包资源
+`resources/semantic-server/semantic-server.jar` > 开发目录 `semantic-server/build-local/`。
+自动选中的 IDE 会注入 `SEMANTIC_IDE_HOME`，并参与 locator/sandbox 的按 IDE 隔离命名。
+
+### 配置示例
+
+```jsonc
+{
+  "semantic": {
+    "enabled": true,                    // 默认 false
+    // 省略 command：自动发现 IDE，用其 JBR 启动 jar（推荐）
+    // "command": ["<IDE>/jbr/bin/java.exe", "-Djava.awt.headless=true", "-jar", "<jar>"],
+    "jar": "<可选：semantic-server.jar 路径>",
+    "ide": "auto",                      // auto | idea | pycharm | webstorm | <安装路径>
+    "ide_home": "<可选：IDE 安装目录>",
+    "jdk_home": "<可选：项目 SDK/JDK>",
+    "exclude": ["node_modules", "packages/*/dist"]
+  }
+}
+```
+
+### 分发与许可边界
+
+- 先运行 `bash semantic-server/script/build-local.sh` 生成引擎 jar，再执行
+  `bun run build:local -- --package`，jar 会放进 `win-unpacked/resources/semantic-server/`；
+  对方机器只需**自己安装并授权 JetBrains IDE**，开启 `semantic.enabled` 即可（无需 JDK）。
+- 显式 `semantic.command` 仍完全优先，适合自定义运行时或已有 JDK 的环境。
+- 引擎**不打包、不下载、不修改** JetBrains IDE/JBR/插件，不读取授权状态；IDE 与授权均由使用者
+  自行提供。IDE 安装不完整时按能力降级（`read_view` 返回 warnings），不会尝试修复。
+- 详细协议与降级取舍见 `LLM-IDE-SPEC/` 与 `semantic-server/README.md`。
+
+---
+
 ## 配置
 
 ```jsonc
@@ -159,6 +231,10 @@ bun run build:local  # 一次性构建服务端 bundle + 桌面 GUI（带防陈�
 
 桌面端/服务端验证前请先执行 `bun run build:local`（或 `bun run build:local -- --package --deploy D:/opencode-desktop-dev`），避免陈旧产物让改动"不生效"。
 
+语义引擎为可选能力：安装并授权 JetBrains IDE 后，在 `opencode.json` 设置
+`"semantic": { "enabled": true }`；未配置 `command` 时自动发现 IDE 并用其 JBR 启动，
+无需系统 JDK。语言支持与降级见下文「语义引擎」。
+
 测试（必须在包目录内运行，禁止从仓库根运行）：
 
 ```bash
@@ -194,6 +270,8 @@ bun test --timeout 30000 test/tool/agent-send.test.ts test/session/collaboration
 | `packages/core` | 服务层：`BackgroundJob`、mailbox、blackboard 存储、配置 schema |
 | `packages/app`、`packages/desktop` | Web/桌面 UI（Agent Teams 窗口与面板） |
 | `packages/schema`、`packages/session-ui` | 事件协议与共享会话 UI |
+| `semantic-server` | 无头 JetBrains IDE 语义守护（协议实现、fixtures、探针、conformance） |
+| `LLM-IDE-SPEC` | 语义引擎设计：传输、多语言/IDE 选择、对账、LSP 路线 |
 | `specs/` | 中文设计文档（见下） |
 
 ## 设计文档
@@ -206,6 +284,11 @@ bun test --timeout 30000 test/tool/agent-send.test.ts test/session/collaboration
 - `specs/agent-teams-backlog.md` — 后续计划（任务板、广播、成员超时等）
 - `specs/independent-maintenance.md` — 独立维护：切断上游运行时/构建时联系
 - `specs/build-markers.md` — 构建标记：`BUILD.md` 记录、GUI/服务端双标记与不匹配告警
+- `LLM-IDE-SPEC/main.md` — 语义引擎总体架构与工具契约
+- `LLM-IDE-SPEC/multilang.md` — 多语言支持、IDE 自动发现/选择与发行闸门
+- `LLM-IDE-SPEC/context-reconciliation.md` — 读时对账、编辑版本戳与会话 ledger/fold
+- `LLM-IDE-SPEC/tcp-transport.md` — TCP + locator + hello 传输契约
+- `semantic-server/README.md` — 语义守护运行、sandbox、探针与降级说明
 
 ---
 
