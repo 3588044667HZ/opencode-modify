@@ -2,6 +2,7 @@ import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
 import { Ripgrep } from "@opencode-ai/core/ripgrep"
 import { PlanExitTool } from "./plan"
+import { OutputTool } from "./output"
 import { Session } from "@/session/session"
 import { SessionStatus } from "@/session/status"
 import { SessionRunState } from "@/session/run-state"
@@ -132,6 +133,7 @@ const layer = Layer.effect(
     const projectmap = yield* ProjectMapTool
     const verifytest = yield* VerifyTestTool
     const question = yield* QuestionTool
+    const output = yield* OutputTool
     const todo = yield* TodoWriteTool
     const lsptool = yield* LspTool
     const plan = yield* PlanExitTool
@@ -261,6 +263,7 @@ const layer = Layer.effect(
           skill: Tool.init(skilltool),
           patch: Tool.init(patchtool),
           question: Tool.init(question),
+          output: Tool.init(output),
           lsp: Tool.init(lsptool),
           plan: Tool.init(plan),
           ...(dispatch ? { dispatch: Tool.init(dispatch) } : {}),
@@ -274,6 +277,7 @@ const layer = Layer.effect(
         const base: Tool.Def[] = [
           tool.invalid,
           ...(questionEnabled ? [tool.question] : []),
+          tool.output,
           tool.shell,
           tool.read,
           ...semanticTool("read_view", tool.read_view),

@@ -1,4 +1,4 @@
-import { onMount } from "solid-js"
+import { createSignal, onMount } from "solid-js"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import type { PromptInputV2Attachment, PromptInputV2Prompt } from "./types"
 
@@ -90,13 +90,25 @@ export function createPromptInputV2Attachments(
     setDraggingType: (type: "image" | "@mention" | null) => void
   },
 ) {
+  const [pending, setPending] = createSignal(0)
+  let pendingCount = 0
+  const track = async <T>(task: () => Promise<T>): Promise<T> => {
+    pendingCount++
+    setPending(pendingCount)
+    try {
+      return await task()
+    } finally {
+      pendingCount--
+      setPending(pendingCount)
+    }
+  }
   const capture = () => {
     const prompt = input.capture()
     const editor = input.editor()
     if (!editor) return
     return { prompt, cursor: prompt.cursor() ?? cursorPosition(editor) }
   }
-  const add = async (file: File, toast = true, target = capture(), clipboard = false) => {
+  const add = (file: File, toast = true, target = capture(), clipboard = false) => track(async () => {
     if (!target) return false
     const mime = await attachmentMime(file)
     if (!mime) {
@@ -131,15 +143,15 @@ export function createPromptInputV2Attachments(
     }
     target.prompt.set([...target.prompt.current(), attachment], target.cursor)
     return true
-  }
-  const addAttachments = async (files: File[], toast = true, target = capture()) => {
+  })
+  const addAttachments = (files: File[], toast = true, target = capture()) => track(async () => {
     const found = await files.reduce(async (result, file) => {
       const previous = await result
       return (await add(file, false, target)) || previous
     }, Promise.resolve(false))
     if (!found && files.length > 0 && toast) input.warn()
     return found
-  }
+  })
   const handlePaste = async (event: ClipboardEvent) => {
     const clipboardData = event.clipboardData
     if (!clipboardData) return
@@ -204,6 +216,7 @@ export function createPromptInputV2Attachments(
   })
 
   return {
+    pending,
     addAttachments,
     handlePaste,
     handleDrop,
@@ -222,10 +235,25 @@ export function createPromptInputV2Attachments(
 const imageMimes = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"])
 
 async function blobReference(file: File) {
-  const id = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", await file.arrayBuffer())))
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("")
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  const subtle = globalThis.crypto?.subtle
+  const id = subtle
+    ? Array.from(new Uint8Array(await subtle.digest("SHA-256", bytes)))
+        .map((byte) => byte.toString(16).padStart(2, "0"))
+        .join("")
+    : fallbackBlobID(bytes)
   return { id, url: URL.createObjectURL(file) }
+}
+
+function fallbackBlobID(bytes: Uint8Array) {
+  // LAN HTTP origins are not secure contexts, so WebCrypto is unavailable there.
+  let a = 0x811c9dc5
+  let b = 0x9e3779b1
+  for (const byte of bytes) {
+    a = Math.imul(a ^ byte, 0x01000193)
+    b = Math.imul(b ^ byte, 0x27d4eb2d)
+  }
+  return `fnv-${(a >>> 0).toString(16).padStart(8, "0")}${(b >>> 0).toString(16).padStart(8, "0")}-${bytes.length.toString(16)}`
 }
 const imageExtensions = new Map([
   ["gif", "image/gif"],

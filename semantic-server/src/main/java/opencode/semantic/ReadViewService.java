@@ -64,6 +64,8 @@ import java.util.function.Supplier;
 final class ReadViewService {
   /** 单次返回的行窗口大小（view 语义未在 spec 中细化，MVP 固定 80 行）。 */
   static final int CHUNK_LINES = 80;
+  /** 超过该大小的文件不做 PSI/语法分析，避免大文件把 IDE 守护拖崩；调用方回退到普通 read。 */
+  private static final long MAX_FILE_BYTES = maxFileBytes();
 
   JsonObject readView(Project project, String basePath, JsonObject params) throws JsonRpcServer.RpcException {
     String file = requireString(params, "file");
@@ -84,6 +86,13 @@ final class ReadViewService {
       if (virtualFile.getTimeStamp() != mtime) virtualFile.refresh(false, false);
     } catch (IOException e) {
       virtualFile.refresh(false, false);
+    }
+    long length = virtualFile.getLength();
+    if (length > MAX_FILE_BYTES) {
+      throw new JsonRpcServer.RpcException(
+          -32003,
+          "file too large for semantic analysis (" + length + " bytes > " + MAX_FILE_BYTES + "); use the plain read tool",
+          null);
     }
     if (DumbService.isDumb(project)) {
       throw new JsonRpcServer.RpcException(-32000, "indexing", null);
@@ -1039,4 +1048,17 @@ final class ReadViewService {
     if (value > max) return max;
     return value;
   }
+  private static long maxFileBytes() {
+    String raw = System.getenv("OPENCODE_SEMANTIC_MAX_FILE_BYTES");
+    if (raw != null && !raw.isBlank()) {
+      try {
+        long value = Long.parseLong(raw.trim());
+        if (value >= 1024) return value;
+      } catch (NumberFormatException ignored) {
+        // fall through to the default
+      }
+    }
+    return 5L * 1024 * 1024;
+  }
+
 }

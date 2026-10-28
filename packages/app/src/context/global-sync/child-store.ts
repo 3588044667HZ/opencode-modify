@@ -96,7 +96,8 @@ export function createChildStoreManager(input: {
         set.delete(directory)
         if (set.size === 0) ownerPins.delete(key)
       }
-      unpin(directory)
+      // memo 重新执行时会先清理旧 pin 再重新 pin；延迟 unpin，避免驱逐在重新 pin 前释放 store。
+      queueMicrotask(() => unpin(directory))
     })
   }
 
@@ -375,6 +376,7 @@ export function createChildStoreManager(input: {
 
   return {
     children,
+    has: (directory: string) => !!children[directoryKey(directory)],
     ensureChild,
     child,
     peek,

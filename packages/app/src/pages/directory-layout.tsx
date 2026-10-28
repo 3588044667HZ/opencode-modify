@@ -1,17 +1,19 @@
 import { DataProvider } from "@opencode-ai/session-ui/context"
+import { MarkdownProvider, type ReadMarkdownImage } from "@opencode-ai/session-ui/context/markdown"
 import { showToast } from "@/utils/toast"
 import { base64Encode } from "@opencode-ai/core/util/encode"
 import { useLocation, useNavigate, useParams } from "@solidjs/router"
 import { type Accessor, createEffect, createMemo, createResource, onCleanup, type ParentProps, Show } from "solid-js"
 import { useLanguage } from "@/context/language"
 import { LocalProvider } from "@/context/local"
-import { SDKProvider } from "@/context/sdk"
+import { SDKProvider, useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
 import { decode64 } from "@/utils/base64"
 import { Schema } from "effect"
 import type { ServerConnection } from "@/context/server"
 import { sessionHref } from "@/utils/session-route"
 import { useServerSync } from "@/context/server-sync"
+import { readLocalImage } from "@/utils/markdown-image"
 
 export function DirectoryDataProvider(
   props: ParentProps<{
@@ -25,8 +27,13 @@ export function DirectoryDataProvider(
   const params = useParams()
   const sync = useSync()
   const serverSync = useServerSync()
+  const sdk = useSDK()
   const directory = () => (typeof props.directory === "function" ? props.directory() : props.directory)
   const slug = createMemo(() => base64Encode(directory()))
+  const readImage = createMemo<ReadMarkdownImage>(() => {
+    const client = sdk().client
+    return (path, signal) => readLocalImage(client, path, signal)
+  })
   const href = (sessionID: string) => {
     const server = props.server?.()
     if (server) return sessionHref(server, sessionID)
@@ -67,7 +74,9 @@ export function DirectoryDataProvider(
           onNavigateToSession={(sessionID: string) => navigate(href(sessionID))}
           onSessionHref={href}
         >
-          <LocalProvider>{props.children}</LocalProvider>
+          <MarkdownProvider readImage={readImage()}>
+            <LocalProvider>{props.children}</LocalProvider>
+          </MarkdownProvider>
         </DataProvider>
       )}
     </Show>

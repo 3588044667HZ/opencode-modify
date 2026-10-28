@@ -255,9 +255,21 @@ function tail(text: string, maxLines: number, maxBytes: number) {
 }
 
 const parse = Effect.fn("ShellTool.parse")(function* (command: string, ps: boolean) {
-  const tree = yield* Effect.promise(() => parser().then((p) => (ps ? p.ps : p.bash).parse(command)))
-  if (!tree) throw new Error("Failed to parse command")
-  return tree
+  // tree-sitter 只用于权限前缀扫描，不能因为解析失败让 shell 命令本身失败。
+  // 解析器/ WASM 初始化异常或畸形语法都降级为“整条命令走一次权限确认”。
+  return yield* Effect.tryPromise({
+    try: () => Promise.resolve().then(() => parser()).then((p) => (ps ? p.ps : p.bash).parse(command)),
+    catch: (error) => error,
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.gen(function* () {
+        yield* Effect.logWarning("shell syntax parse failed; falling back to full-command permission", {
+          error: error instanceof Error ? error.message : String(error),
+        })
+        return undefined
+      }),
+    ),
+  )
 })
 
 const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan, input: { command: string }) {
@@ -631,15 +643,24 @@ export const ShellTool = Tool.define(
               }
               const timeout = params.timeout ?? defaultTimeoutMs
               const ps = Shell.ps(shell)
-              yield* Effect.scoped(
-                Effect.gen(function* () {
-                  const tree = yield* Effect.acquireRelease(parse(params.command, ps), (tree) =>
-                    Effect.sync(() => tree.delete()),
-                  )
+              const scan = yield* Effect.gen(function* () {
+                const tree = yield* parse(params.command, ps)
+                if (!tree) return
+                return yield* Effect.gen(function* () {
                   const scan = yield* collect(tree.rootNode, cwd, ps, shell, instanceCtx)
                   if (!containsPath(cwd, instanceCtx)) scan.dirs.add(cwd)
-                  yield* ask(ctx, scan, params)
-                }),
+                  return scan
+                }).pipe(Effect.ensuring(Effect.sync(() => tree.delete())))
+              }).pipe(Effect.catch(() => Effect.succeed(undefined)))
+
+              yield* ask(
+                ctx,
+                scan ?? {
+                  dirs: new Set<string>(),
+                  patterns: new Set([params.command]),
+                  always: new Set([params.command]),
+                },
+                params,
               )
 
               return yield* run(

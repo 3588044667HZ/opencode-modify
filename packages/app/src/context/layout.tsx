@@ -166,6 +166,9 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
     const server = useServer()
     const tabs = useTabs()
     const platform = usePlatform()
+    // Project colors/icons can be persisted server-side, but doing that for every
+    // project on a LAN web client creates one request and child store per project.
+    const persistProjectVisuals = () => platform.platform === "desktop" && server.isLocal()
     const location = useLocation()
     const route = createMemo(() => {
       const value = currentRoute(location.pathname, location.search)
@@ -444,17 +447,19 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
     }
 
     function enrich(project: { worktree: string; expanded: boolean }) {
-      const [childStore] = serverSync().child(project.worktree, { bootstrap: false })
-      const projectID = childStore.project
+      const sync = serverSync()
+      // Avoid creating a child store for every project just to render the sidebar/home list.
+      const childStore = sync.hasChild(project.worktree) ? sync.child(project.worktree, { bootstrap: false })[0] : undefined
+      const projectID = childStore?.project
       const metadata = projectID
-        ? serverSync().data.project.find((x) => x.id === projectID)
-        : serverSync().data.project.find((x) => x.worktree === project.worktree)
+        ? sync.data.project.find((x) => x.id === projectID)
+        : sync.data.project.find((x) => x.worktree === project.worktree || x.sandboxes?.includes(project.worktree))
 
       // Preserve local icon override from per-workspace localStorage cache (childStore.icon).
       // Without this, different subdirectories of the same git repo would share the same
       // icon from the database instead of using their individual overrides.
       const base = { ...metadata, ...project }
-      if (childStore.icon) {
+      if (childStore?.icon) {
         return { ...base, icon: { ...base.icon, override: childStore.icon } }
       }
       return base
@@ -526,6 +531,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
     })
 
     createEffect(() => {
+      if (!persistProjectVisuals()) return
       const projects = enriched()
       if (projects.length === 0) return
       if (!serverSync().ready) return
@@ -533,6 +539,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
       for (const project of projects) {
         if (!project.id) continue
         if (project.id === "global") continue
+        if (!serverSync().hasChild(project.worktree)) continue
         serverSync().project.icon(project.worktree, project.icon?.override)
       }
     })
@@ -540,6 +547,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
     createEffect(() => {
       const projects = enriched()
       if (projects.length === 0) return
+      const persist = persistProjectVisuals()
 
       for (const project of projects) {
         if (project.icon?.color) colorRequested.delete(project.worktree)
@@ -561,6 +569,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
           setColors(worktree, color)
         }
         if (!project.id) continue
+        if (!persist) continue
 
         const requested = colorRequested.get(worktree)
         if (requested === color) continue

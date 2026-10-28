@@ -1,5 +1,6 @@
 import { checksum } from "@opencode-ai/core/util/encode"
 import DOMPurify from "dompurify"
+import { localImagePath } from "./markdown-image"
 import { parseMarkdown } from "./markdown-worker"
 
 export type MarkdownCacheEntry = {
@@ -20,6 +21,17 @@ const config = {
 }
 
 if (typeof window !== "undefined" && DOMPurify.isSupported) {
+  DOMPurify.addHook("beforeSanitizeAttributes", (node: Element) => {
+    if (!(node instanceof HTMLImageElement)) return
+    // 本地路径不是浏览器可用的 URL，先保持惰性，交给宿主读取后再替换 src。
+    node.removeAttribute("data-local-image")
+    const path = localImagePath(node.getAttribute("src") ?? "")
+
+    if (!path) return
+    node.setAttribute("data-local-image", path)
+    node.removeAttribute("src")
+    node.removeAttribute("srcset")
+  })
   DOMPurify.addHook("afterSanitizeAttributes", (node: Element) => {
     if (!(node instanceof HTMLAnchorElement)) return
     if (node.target !== "_blank") return

@@ -1,3 +1,4 @@
+import { createMediaQuery } from "@solid-primitives/media"
 import { useFilteredList } from "@opencode-ai/ui/hooks"
 import { useSpring } from "@opencode-ai/ui/motion-spring"
 import {
@@ -127,6 +128,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const permission = usePermission()
   const language = useLanguage()
   const platform = usePlatform()
+  const isDesktop = createMediaQuery("(min-width: 768px)")
   const tabs = () => props.controls.session.tabs
   let editorRef!: HTMLDivElement
   let fileInputRef: HTMLInputElement | undefined
@@ -1508,7 +1510,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           }}
         >
           <div
-            class="relative max-h-[240px] overflow-y-auto no-scrollbar"
+            class="relative max-h-[min(240px,30dvh)] overflow-y-auto no-scrollbar"
             ref={(el) => (scrollRef = el)}
             style={{ "scroll-padding-bottom": space }}
           >
@@ -1574,6 +1576,60 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               }}
             />
 
+            <Show when={!isDesktop() && !providersLoading() && store.mode !== "shell"}>
+              <div class="min-w-0 pointer-events-auto">
+                <Show
+                  when={props.controls.model.paid}
+                  fallback={
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="normal"
+                      class="h-8 max-w-[170px] min-w-0 px-2 text-13-regular text-text-base"
+                      onClick={() => {
+                        dialog.show(() => <DialogSelectModelUnpaid model={props.controls.model.selection} />)
+                      }}
+                    >
+                      <Show when={props.controls.model.selection.current()?.provider?.id}>
+                        <ProviderIcon
+                          id={props.controls.model.selection.current()?.provider?.id ?? ""}
+                          class="size-4 shrink-0 opacity-60"
+                        />
+                      </Show>
+                      <span class="min-w-0 truncate">
+                        {props.controls.model.selection.current()?.name ?? language.t("dialog.model.select.title")}
+                      </span>
+                      <Icon name="chevron-down" size="small" class="shrink-0" />
+                    </Button>
+                  }
+                >
+                  <ModelSelectorPopover
+                    model={props.controls.model.selection}
+                    trigger={(triggerProps) => (
+                      <Button
+                        {...triggerProps}
+                        type="button"
+                        variant="ghost"
+                        size="normal"
+                        class="h-8 max-w-[170px] min-w-0 px-2 text-13-regular text-text-base"
+                      >
+                        <Show when={props.controls.model.selection.current()?.provider?.id}>
+                          <ProviderIcon
+                            id={props.controls.model.selection.current()?.provider?.id ?? ""}
+                            class="size-4 shrink-0 opacity-60"
+                          />
+                        </Show>
+                        <span class="min-w-0 truncate">
+                          {props.controls.model.selection.current()?.name ?? language.t("dialog.model.select.title")}
+                        </span>
+                        <Icon name="chevron-down" size="small" class="shrink-0" />
+                      </Button>
+                    )}
+                    onClose={restoreFocus}
+                  />
+                </Show>
+              </div>
+            </Show>
             <div class="flex items-center gap-1 pointer-events-auto">
               <Tooltip placement="top" inactive={!working() && blank()} value={tip()}>
                 <IconButton
@@ -1621,9 +1677,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           </div>
         </div>
       </DockShellForm>
-      <Show when={store.mode === "normal" || store.mode === "shell"}>
+      <Show when={(isDesktop() || store.mode === "shell") && (store.mode === "normal" || store.mode === "shell")}>
         <DockTray attach="top">
-          <div class="px-1.75 pt-5.5 pb-2 flex items-center gap-2 min-w-0">
+          <div class="px-1.75 pt-2 pb-1.5 sm:pt-5.5 sm:pb-2 flex items-center gap-2 min-w-0 w-full overflow-hidden">
             <div class="flex items-center gap-1.5 min-w-0 flex-1 relative">
               <div
                 class="h-7 flex items-center gap-1.5 min-w-0 absolute inset-0"
@@ -1649,6 +1705,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                 <Show when={!agentsLoading()}>
                   <div
                     data-component="prompt-agent-control"
+                    class="shrink-0"
                     classList={{ "animate-in fade-in duration-300": agentsShouldFadeIn() }}
                   >
                     <TooltipKeybind
@@ -1665,7 +1722,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                           props.controls.agents.select(value)
                           restoreFocus()
                         }}
-                        class="capitalize max-w-[160px] text-text-base"
+                        class="capitalize max-w-[96px] sm:max-w-[160px] text-text-base"
                         valueClass="truncate text-13-regular text-text-base"
                         triggerStyle={control()}
                         triggerProps={{ "data-action": "prompt-agent" }}
@@ -1678,6 +1735,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                   <Show when={store.mode !== "shell"}>
                     <div
                       data-component="prompt-model-control"
+                      class="min-w-0 flex-1"
                       classList={{ "animate-in fade-in duration-300": providersShouldFadeIn() }}
                     >
                       <Show
@@ -1694,7 +1752,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                               as="div"
                               variant="ghost"
                               size="normal"
-                              class="min-w-0 max-w-[320px] text-13-regular text-text-base group"
+                              class="min-w-0 flex-1 max-w-[320px] text-13-regular text-text-base group"
                               style={control()}
                               onClick={() => {
                                 dialog.show(() => <DialogSelectModelUnpaid model={props.controls.model.selection} />)
@@ -1730,7 +1788,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                                 variant="ghost"
                                 size="normal"
                                 style={control()}
-                                class="min-w-0 max-w-[320px] text-13-regular text-text-base group"
+                                class="min-w-0 flex-1 max-w-[320px] text-13-regular text-text-base group"
                                 data-action="prompt-model"
                               >
                                 <Show when={props.controls.model.selection.current()?.provider?.id}>
@@ -1755,6 +1813,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                     <Show when={showVariantControl()}>
                       <div
                         data-component="prompt-variant-control"
+                        class="shrink-0"
                         classList={{ "animate-in fade-in duration-300": providersShouldFadeIn() }}
                       >
                         <TooltipKeybind
@@ -1772,7 +1831,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                               props.controls.model.selection.variant.set(value === "default" ? undefined : value)
                               restoreFocus()
                             }}
-                            class="capitalize max-w-[160px] text-text-base"
+                            class="capitalize max-w-[64px] sm:max-w-[160px] text-text-base"
                             valueClass="truncate text-13-regular text-text-base"
                             triggerStyle={control()}
                             triggerProps={{ "data-action": "prompt-model-variant" }}

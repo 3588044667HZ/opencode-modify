@@ -347,7 +347,7 @@ function SessionPanelFrame(props: ParentProps<{ newLayout: boolean; raised?: boo
         "flex-1 min-h-0 flex flex-col": true,
         "bg-v2-background-bg-base": props.newLayout,
         "bg-background-stronger": !props.newLayout,
-        "rounded-[10px] overflow-hidden": props.newLayout,
+        "rounded-none md:rounded-[10px] overflow-hidden": props.newLayout,
         "shadow-[var(--v2-elevation-raised)]": props.newLayout && props.raised,
       }}
     >
@@ -691,6 +691,10 @@ export default function Page() {
     return list
   })
   const mobileChanges = createMemo(() => !isDesktop() && store.mobileTab === "changes")
+  createEffect(() => {
+    if (isDesktop() || hasReview() || store.mobileTab !== "changes") return
+    setStore("mobileTab", "session")
+  })
   const wantsReview = createMemo(() =>
     isDesktop()
       ? desktopFileTreeOpen() ||
@@ -2091,7 +2095,7 @@ export default function Page() {
   const sessionPanelContent = () => (
     <>
       {sessionSync() ?? ""}
-      <Show when={!isDesktop() && !!params.id && settings.general.newLayoutDesigns() && !mobileTabsBottom()}>
+      <Show when={!isDesktop() && !!params.id && hasReview() && settings.general.newLayoutDesigns() && !mobileTabsBottom()}>
         {mobileTabs(true)}
       </Show>
       <Show when={isChildSession() ? info() : undefined}>
@@ -2275,7 +2279,7 @@ export default function Page() {
           )
         }}
       </Show>
-      <Show when={!!params.id && mobileTabsBottom()}>{mobileTabs(true, true)}</Show>
+      <Show when={!!params.id && hasReview() && mobileTabsBottom()}>{mobileTabs(true, true)}</Show>
     </>
   )
 
@@ -2286,7 +2290,7 @@ export default function Page() {
         ref={panelRow}
         class="flex-1 min-h-0 flex flex-col md:flex-row"
         classList={{
-          "gap-2 p-2": settings.general.newLayoutDesigns(),
+          "gap-0 p-0 md:gap-2 md:p-2": settings.general.newLayoutDesigns(),
         }}
       >
         <Show when={!isDesktop() && !!params.id && !settings.general.newLayoutDesigns()}>{mobileTabs()}</Show>

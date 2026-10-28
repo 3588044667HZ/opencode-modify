@@ -300,6 +300,8 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
 
     wslServers: wslServersApi,
 
+    lanAccess: window.api.lanAccess,
+
     getDisplayBackend: async () => {
       return window.api.getDisplayBackend().catch(() => null)
     },

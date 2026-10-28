@@ -25,6 +25,7 @@ import type { UpdaterController } from "./updater-controller"
 import { createUpdaterSubscriptions } from "./updater-subscriptions"
 import { createDesktopDraftStore } from "./draft-store"
 import { nativeT } from "./native-translations"
+import type { LanAccessController } from "./lan"
 
 const pickerFilters = (ext?: string[]) => {
   if (!ext || ext.length === 0) return undefined
@@ -53,6 +54,7 @@ type Deps = {
   exportDebugLogs: () => Promise<string>
   recordFatalRendererError: (error: FatalRendererError) => Promise<void> | void
   setNativeTranslations: (bundle: DesktopNativeBundle) => void
+  lanAccess: LanAccessController
 }
 
 export function registerIpcHandlers(deps: Deps) {
@@ -111,6 +113,17 @@ export function registerIpcHandlers(deps: Deps) {
     const bundle = parseDesktopNativeBundle(value)
     if (!bundle) throw new Error("Invalid native translation bundle")
     deps.setNativeTranslations(bundle)
+  })
+  ipcMain.handle("lan-access-get", () => deps.lanAccess.get())
+  ipcMain.handle("lan-access-set", (_event: IpcMainInvokeEvent, input: unknown) => {
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+      throw new Error("Invalid LAN access input")
+    }
+    const value = input as { enabled?: unknown; password?: unknown }
+    if (typeof value.enabled !== "boolean") throw new Error("Invalid LAN access enabled value")
+    if (typeof value.password !== "string") throw new Error("Invalid LAN access password")
+    if (value.password.length > 256) throw new Error("Invalid LAN access password")
+    return deps.lanAccess.set({ enabled: value.enabled, password: value.password })
   })
   ipcMain.handle("store-get", (_event: IpcMainInvokeEvent, name: string, key: string) => {
     try {

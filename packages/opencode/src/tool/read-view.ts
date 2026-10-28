@@ -97,7 +97,10 @@ export const ReadViewTool = Tool.define(
                 Effect.succeed({
                   ok: false as const,
                   message: Protocol.describeError(error),
-                  fallback: error instanceof Protocol.RpcError && error.code === Protocol.ErrorCode.fileNotFound,
+                  fallback:
+                    error instanceof Protocol.RpcError &&
+                    (error.code === Protocol.ErrorCode.fileNotFound ||
+                      error.code === Protocol.ErrorCode.fileTooLarge),
                 }),
               ),
             )

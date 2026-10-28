@@ -28,6 +28,25 @@ export type FatalRendererErrorLog = {
   os?: DesktopOS
 }
 
+export type LanAccessStatus = {
+  enabled: boolean
+  password: string
+  running: boolean
+  port?: number
+  urls: string[]
+  error?: string
+}
+
+export type LanAccessInput = {
+  enabled: boolean
+  password: string
+}
+
+export type LanAccessPlatform = {
+  get(): Promise<LanAccessStatus>
+  set(input: LanAccessInput): Promise<LanAccessStatus>
+}
+
 type PlatformBase = {
   /** App version */
   version?: string
@@ -85,6 +104,9 @@ type PlatformBase = {
 
   /** Manage WSL sidecar servers (Electron on Windows only) */
   wslServers?: WslServersPlatform
+
+  /** Share the local desktop server on the LAN with a GUI-managed password */
+  lanAccess?: LanAccessPlatform
 
   /** Get the preferred display backend (desktop only) */
   getDisplayBackend?(): Promise<DisplayBackend | null> | DisplayBackend | null

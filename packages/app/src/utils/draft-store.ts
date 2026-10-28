@@ -22,10 +22,21 @@ function blobUrl(id: string, blob: Blob) {
 }
 
 async function blobID(blob: Blob) {
-  const id = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", await blob.arrayBuffer())))
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("")
-  return id
+  const bytes = new Uint8Array(await blob.arrayBuffer())
+  const subtle = globalThis.crypto?.subtle
+  if (subtle) {
+    return Array.from(new Uint8Array(await subtle.digest("SHA-256", bytes)))
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("")
+  }
+  // LAN HTTP origins are not secure contexts, so WebCrypto is unavailable there.
+  let a = 0x811c9dc5
+  let b = 0x9e3779b1
+  for (const byte of bytes) {
+    a = Math.imul(a ^ byte, 0x01000193)
+    b = Math.imul(b ^ byte, 0x27d4eb2d)
+  }
+  return `fnv-${(a >>> 0).toString(16).padStart(8, "0")}${(b >>> 0).toString(16).padStart(8, "0")}-${bytes.length.toString(16)}`
 }
 
 export async function createBlobReference(blob: Blob): Promise<BlobReference> {

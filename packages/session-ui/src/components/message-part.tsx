@@ -1796,6 +1796,30 @@ PART_MAPPING["reasoning"] = function ReasoningPartDisplay(props) {
 }
 
 ToolRegistry.register({
+  name: "output",
+  render(props) {
+    const text = createMemo(() => {
+      const value = props.metadata?.text ?? props.input?.text ?? props.output
+      return typeof value === "string" ? value : ""
+    })
+    const title = createMemo(() => {
+      const value = props.metadata?.title ?? props.input?.title
+      return typeof value === "string" ? value : ""
+    })
+    return (
+      <Show when={text()}>
+        <div data-component="output-part">
+          <Show when={title()}>
+            <div class="text-13-regular text-text-weak pb-1">{title()}</div>
+          </Show>
+          <Markdown text={text()} />
+        </div>
+      </Show>
+    )
+  },
+})
+
+ToolRegistry.register({
   name: "read",
   render(props) {
     const data = useData()

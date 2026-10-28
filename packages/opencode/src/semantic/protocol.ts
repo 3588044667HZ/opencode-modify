@@ -8,6 +8,7 @@ export const ErrorCode = {
   indexing: -32000,
   fileNotFound: -32001,
   symbolNotFound: -32002,
+  fileTooLarge: -32003,
   journalRecoveryFailed: -32018,
   // hello 门禁未授权。数值与 edit_transaction 的 duplicate_file 相同，作用域不同（帧级 vs 结果联合）。
   unauthorized: -32019,
@@ -109,6 +110,9 @@ export function describeError(error: SemanticError): string {
     }
     if (error.code === ErrorCode.symbolNotFound) {
       return `semantic engine could not resolve symbol (it may not exist or be indexed): ${error.message}`
+    }
+    if (error.code === ErrorCode.fileTooLarge) {
+      return `semantic engine skipped this file because it is too large: ${error.message}`
     }
     if (error.code === ErrorCode.journalRecoveryFailed) {
       return "semantic writes are disabled: journal recovery failed (human intervention required)"

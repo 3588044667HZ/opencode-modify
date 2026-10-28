@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// 一次性本地构建：服务端 bundle（packages/opencode/dist/node）+ 桌面 GUI（packages/desktop/out）。
+// 一次性本地构建：服务端 bundle（packages/opencode/dist/node）+ 桌面 GUI（packages/desktop/out）+ Web UI（packages/app/dist）+ 语义引擎 jar。
 // 可选 --package 走 electron-builder 打包（win），--deploy <dir> 把 win-unpacked 覆盖到运行目录。
 //
 // 刻意不调用 packages/desktop/scripts/prebuild.ts 里的 downloadCliToResources()：
@@ -12,6 +12,7 @@ import path from "node:path"
 const root = path.resolve(import.meta.dir, "..")
 const opencodeDir = path.join(root, "packages/opencode")
 const desktopDir = path.join(root, "packages/desktop")
+const appDir = path.join(root, "packages/app")
 
 const BUILD_FILE = path.join(root, "BUILD.md")
 const TABLE_HEADER = "| 时间 | Build ID | 提交 | 本次更改 | 服务端标记 | GUI 标记 |"
@@ -40,9 +41,12 @@ const HELP = `用法: bun run build:local [选项]
   --deploy <dir>   把 packages/desktop/dist/win-unpacked 覆盖到 <dir>（例如 D:/opencode-desktop-dev）
                    需先 --package 或 --installer；请先完全退出目标目录里正在运行的 OpenCode
   --channel <c>    dev | beta | prod（默认 dev，决定 appId/productName/图标）
+  --no-web         跳过 Web UI 构建（LAN 访问将回退到 sidecar 自带 UI）
+  --no-semantic    跳过语义引擎 jar 构建
+  --semantic       要求语义引擎 jar 构建成功（默认失败只警告）
   -h, --help       显示帮助
 
-默认（无参数）只做两步：服务端 bundle + 桌面 GUI bundle。`
+默认（无参数）做四步：服务端 bundle + 桌面 GUI bundle + Web UI bundle + 语义引擎 jar（--no-web / --no-semantic 可跳过）。`
 
 if (has("--help") || has("-h")) {
   console.log(HELP)
@@ -77,6 +81,20 @@ await $`bun script/build-node.ts`.cwd(opencodeDir)
 
 step("构建桌面 GUI（packages/desktop → out）")
 await $`bunx electron-vite build`.cwd(desktopDir)
+
+if (!has("--no-web")) {
+  step("构建 Web UI（packages/app → dist）")
+  await $`bun run build`.cwd(appDir)
+}
+
+if (!has("--no-semantic")) {
+  step("构建语义引擎 jar")
+  if (has("--semantic")) {
+    await $`bun run script/build-semantic.ts --require`.cwd(root)
+  } else {
+    await $`bun run script/build-semantic.ts`.cwd(root)
+  }
+}
 
 // 防陈旧校验：产物必须是本次运行生成的，且 GUI 内嵌的服务端 chunk 不早于 dist/node。
 step("校验产物")

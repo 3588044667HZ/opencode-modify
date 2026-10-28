@@ -49,6 +49,7 @@ import { migrate } from "./migrate"
 import { cleanupStoreFiles } from "./store-cleanup"
 import { startBackgroundCli } from "./background-cli"
 import { setNativeTranslations } from "./native-translations"
+import { createLanAccess, type LanAccessController } from "./lan"
 
 const APP_NAMES: Record<string, string> = {
   dev: "OpenCode Dev",
@@ -66,6 +67,7 @@ const jsCallStackFeature = "DocumentPolicyIncludeJSCallStacksInCrashReports"
 
 let logger: ReturnType<typeof initLogging>
 let server: SidecarListener | null = null
+let lanAccessController: LanAccessController | undefined
 
 const pendingDeepLinks: string[] = []
 
@@ -86,6 +88,7 @@ function emitDeepLinks(urls: string[]) {
 }
 
 async function killSidecar() {
+  await lanAccessController?.stop()
   if (!server) return
   const current = server
   server = null
@@ -165,6 +168,7 @@ const main = Effect.gen(function* () {
     },
   )
   const stopSidecars = async () => {
+    await lanAccessController?.stop()
     await killSidecar()
     wslServers.stopAll()
   }
@@ -230,6 +234,7 @@ const main = Effect.gen(function* () {
   app.on("will-quit", () => {
     setAppQuitting()
     void stopSidecars()
+    void lanAccessController?.stop()
   })
 
   app.on("child-process-gone", (_event, details) => {
@@ -254,6 +259,11 @@ const main = Effect.gen(function* () {
   const serverReady = Deferred.makeUnsafe<ServerReadyData, unknown>()
 
   yield* Effect.promise(() => app.whenReady())
+
+  // LAN 访问优先服务本地 Web UI 构建；打包后在 resources/web-ui，开发时在 packages/app/dist。
+  const webRoot = app.isPackaged ? join(process.resourcesPath, "web-ui") : join(app.getAppPath(), "../app/dist")
+  const lanAccess = createLanAccess(logger, webRoot)
+  lanAccessController = lanAccess
 
   if (!TEST_ONBOARDING) migrate()
   yield* Effect.promise(() => cleanupStoreFiles(app.getPath("userData"))).pipe(
@@ -311,6 +321,7 @@ const main = Effect.gen(function* () {
     setNativeTranslations: (bundle) => {
       if (setNativeTranslations(bundle)) createMenu(menuDeps)
     },
+    lanAccess,
   })
   registerWslIpcHandlers(wslServers)
   void updater.start()
@@ -339,6 +350,9 @@ const main = Effect.gen(function* () {
         username: sidecar.username,
         password: sidecar.password,
       })
+      yield* Effect.promise(() =>
+        lanAccess.attach({ url: sidecar.url, username: sidecar.username, password: sidecar.password }),
+      )
 
       if (process.platform === "win32") {
         void wslServers.initialize().catch((error) => logger.error("wsl server initialization failed", error))
@@ -390,6 +404,7 @@ const main = Effect.gen(function* () {
       username: "opencode",
       password,
     })
+    yield* Effect.promise(() => lanAccess.attach({ url, username: "opencode", password }))
 
     if (process.platform === "win32") {
       void wslServers.initialize().catch((error) => logger.error("wsl server initialization failed", error))

@@ -145,7 +145,10 @@ public final class Launcher {
     command.add("-Djna.noclasspath=true");
     command.add("-Dpty4j.preferred.native.folder=" + ideaDir.resolve("lib/pty4j"));
     command.add("-XX:+IgnoreUnrecognizedVMOptions");
-    command.add("-Xmx2048m");
+    command.add("-Xmx" + heapMb() + "m");
+    // 深层语法树/PSI 遍历可能触发 StackOverflow；给分析线程更大的栈，避免守护被单个文件打崩。
+    command.add("-Xss16m");
+    command.add("-XX:+ExitOnOutOfMemoryError");
     command.add("--enable-native-access=ALL-UNNAMED");
     for (String opens :
         List.of(
@@ -865,4 +868,14 @@ public final class Launcher {
       return productCode + " " + buildNumber + " @ " + home + " via " + source;
     }
   }
+  private static int heapMb() {
+    String raw = System.getenv("OPENCODE_SEMANTIC_HEAP_MB");
+    if (raw == null || raw.isBlank()) return 2048;
+    try {
+      return Math.max(512, Integer.parseInt(raw.trim()));
+    } catch (NumberFormatException ignored) {
+      return 2048;
+    }
+  }
+
 }

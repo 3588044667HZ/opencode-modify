@@ -13,6 +13,7 @@ import {
 } from "@/context/global-sync/home-session-index"
 import type { LocalProject } from "@/context/layout"
 import { useLanguage } from "@/context/language"
+import { usePlatform } from "@/context/platform"
 import { ServerConnection } from "@/context/server"
 import { sessionHasOpenTab, useTabs } from "@/context/tabs"
 import { compareSessionTime, displayName, errorMessage, projectForSession } from "@/pages/layout/helpers"
@@ -43,6 +44,7 @@ export function createHomeSessionsController(home: HomeController) {
   const command = useCommand()
   const dialog = useDialog()
   const language = useLanguage()
+  const platform = usePlatform()
   const projectDirectories = createMemo(() => {
     const project = home.project.selected()
     if (!project) return home.project.list().flatMap(directories)
@@ -102,6 +104,9 @@ export function createHomeSessionsController(home: HomeController) {
     const ctx = home.server.focusedContext()
     const conn = home.server.focused()
     if (!ctx || !conn) return
+    // Web/LAN clients should paint the home list first; session prefetch costs
+    // another request and Markdown highlighting before the user opens anything.
+    if (platform.platform !== "desktop") return
     records()
       .slice(0, 2)
       .forEach((record) => {

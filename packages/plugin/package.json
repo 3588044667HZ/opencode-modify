@@ -6,7 +6,8 @@
   "license": "MIT",
   "scripts": {
     "typecheck": "tsgo --noEmit",
-    "build": "tsc"
+    "build": "tsc",
+    "test": "bun test test/ipc test/pack"
   },
   "exports": {
     ".": "./src/index.ts",
@@ -15,7 +16,16 @@
     "./v2/effect": "./src/v2/effect/index.ts",
     "./v2/effect/integration": "./src/v2/effect/integration.ts",
     "./v2/effect/plugin": "./src/v2/effect/plugin.ts",
-    "./v2/promise": "./src/v2/promise/index.ts"
+    "./v2/promise": "./src/v2/promise/index.ts",
+    "./ipc": "./src/ipc/index.ts",
+    "./ipc/stdio": "./src/ipc/stdio.ts",
+    "./ipc/process": "./src/ipc/process.ts",
+    "./ipc/message-port": "./src/ipc/message-port.ts",
+    "./ipc/lifecycle": "./src/ipc/lifecycle.ts",
+    "./pack": "./src/pack/index.ts",
+    "./pack/host": "./src/pack/host.ts",
+    "./pack/runtime": "./src/pack/runtime.ts",
+    "./pack/file-store": "./src/pack/file-store.ts"
   },
   "files": [
     "dist"

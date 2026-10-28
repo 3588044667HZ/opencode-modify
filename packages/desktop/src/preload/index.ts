@@ -36,6 +36,10 @@ const api: ElectronAPI = {
     removeServer: (id) => ipcRenderer.invoke("wsl-servers-remove", id),
     startServer: (id) => ipcRenderer.invoke("wsl-servers-start", id),
   },
+  lanAccess: {
+    get: () => ipcRenderer.invoke("lan-access-get"),
+    set: (input) => ipcRenderer.invoke("lan-access-set", input),
+  },
   updater: {
     subscribe: async (cb) => {
       updaterCallbacks.add(cb)

@@ -274,14 +274,15 @@ function LayoutCompatibility(props: ParentProps) {
   return <>{props.children}</>
 }
 
+type DesktopWindowAPI = {
+  setTitlebar?: (theme: { mode: "light" | "dark"; scheme?: "system" | "light" | "dark" }) => Promise<void>
+  exportDebugLogs?: () => Promise<string>
+}
+
 declare global {
   interface Window {
     __OPENCODE__?: {
       deepLinks?: string[]
-    }
-    api?: {
-      setTitlebar?: (theme: { mode: "light" | "dark"; scheme?: "system" | "light" | "dark" }) => Promise<void>
-      exportDebugLogs?: () => Promise<string>
     }
   }
 }
@@ -411,7 +412,7 @@ export function AppBaseProviders(
       <Font />
       <ThemeProvider
         onThemeApplied={(_, mode, scheme) => {
-          void window.api?.setTitlebar?.({ mode, scheme })
+          void (window as Window & { api?: DesktopWindowAPI }).api?.setTitlebar?.({ mode, scheme })
         }}
       >
         <LanguageProvider locale={props.locale} onNativeTranslations={props.onNativeTranslations}>

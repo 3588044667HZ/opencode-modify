@@ -46,16 +46,21 @@ echo "[build-local] idea: $IDEA_DIR"
 echo "[build-local] javac: $JAVAC"
 (cd "$ROOT" && "$JAVAC" --release 21 -encoding UTF-8 -cp "$CP" -d "$OUT/classes" "@$OUT/sources.txt")
 
-printf 'Manifest-Version: 1.0\nMain-Class: opencode.semantic.Launcher\n' > "$OUT/MANIFEST.MF"
+printf 'Manifest-Version: 1.0
+Main-Class: opencode.semantic.Launcher
+' > "$OUT/MANIFEST.MF"
 
-"$JAR" --create --file "$OUT/semantic-server.jar" \
-  --manifest "$OUT/MANIFEST.MF" \
-  -C "$OUT/classes" . \
-  -C "$ROOT/src/main/resources" META-INF
+TARGET_JAR="${SEMANTIC_OUTPUT_JAR:-$OUT/semantic-server.jar}"
+mkdir -p "$(dirname "$TARGET_JAR")"
 
-PLUGIN_LIB="$ROOT/.sandbox/plugins/semantic-server/lib"
-mkdir -p "$PLUGIN_LIB"
-cp "$OUT/semantic-server.jar" "$PLUGIN_LIB/semantic-server.jar"
+"$JAR" --create --file "$TARGET_JAR"   --manifest "$OUT/MANIFEST.MF"   -C "$OUT/classes" .   -C "$ROOT/src/main/resources" META-INF
 
-echo "[build-local] OK: $OUT/semantic-server.jar"
-echo "[build-local] installed: $PLUGIN_LIB/semantic-server.jar"
+# 指定 SEMANTIC_OUTPUT_JAR 时（由 build-semantic.ts 调用），不覆盖运行中的 sandbox。
+if [ "$TARGET_JAR" = "$OUT/semantic-server.jar" ]; then
+  PLUGIN_LIB="$ROOT/.sandbox/plugins/semantic-server/lib"
+  mkdir -p "$PLUGIN_LIB"
+  cp "$OUT/semantic-server.jar" "$PLUGIN_LIB/semantic-server.jar"
+  echo "[build-local] installed: $PLUGIN_LIB/semantic-server.jar"
+fi
+
+echo "[build-local] OK: $TARGET_JAR"

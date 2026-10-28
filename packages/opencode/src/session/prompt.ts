@@ -16,6 +16,7 @@ import { SessionCompaction } from "./compaction"
 import { SystemPrompt } from "./system"
 import { Instruction } from "./instruction"
 import { Plugin } from "../plugin"
+import { Pack } from "@/pack"
 import { MAX_STEPS_PROMPT } from "@opencode-ai/core/session/runner/max-steps"
 import { ToolRegistry } from "@/tool/registry"
 import { MCP } from "../mcp"
@@ -124,6 +125,7 @@ const layer = Layer.effect(
     const processor = yield* SessionProcessor.Service
     const compaction = yield* SessionCompaction.Service
     const plugin = yield* Plugin.Service
+    const packs = yield* Pack.Service
     const commands = yield* Command.Service
     const config = yield* Config.Service
     const permission = yield* Permission.Service
@@ -1276,12 +1278,13 @@ const layer = Layer.effect(
 
             yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
-            const [skills, env, instructions, mcpInstructions, team, modelMsgs] = yield* Effect.all([
+            const [skills, env, instructions, mcpInstructions, team, packPrompts, modelMsgs] = yield* Effect.all([
               sys.skills(agent),
               sys.environment(model),
               instruction.system().pipe(Effect.orDie),
               sys.mcp(agent, session.permission),
               sys.team(agent),
+              packs.prompts(),
               MessageV2.toModelMessagesEffect(msgs, model),
             ])
             const system = [
@@ -1290,6 +1293,7 @@ const layer = Layer.effect(
               ...(mcpInstructions ? [mcpInstructions] : []),
               ...(skills ? [skills] : []),
               ...(team ? [team] : []),
+              ...packPrompts,
             ]
             const format = lastUser.format ?? { type: "text" as const }
             if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
@@ -1641,6 +1645,7 @@ export const node = LayerNode.make({
     SessionProcessor.node,
     SessionCompaction.node,
     Plugin.node,
+    Pack.node,
     Command.node,
     Config.node,
     Permission.node,

@@ -16,6 +16,7 @@ import { isServer, render } from "solid-js/web"
 import { Icon as IconV2 } from "@opencode-ai/ui/v2/icon"
 import { IconButtonV2 } from "@opencode-ai/ui/v2/icon-button-v2"
 import { TooltipV2 } from "@opencode-ai/ui/v2/tooltip-v2"
+import { useMarkdown, type ReadMarkdownImage } from "../context/markdown"
 import { canReusePendingBlock, completedProjection } from "./markdown-projection"
 import type { Block, Projection } from "./markdown-stream"
 import {
@@ -31,6 +32,7 @@ import {
 import { markdownBlockKey, type MarkdownToken } from "./markdown-worker-protocol"
 import { shouldResetCodeTokens, type RenderedCodeState } from "./markdown-code-state"
 import { getCachedMarkdown, sanitizeMarkdown, touchCachedMarkdown, type MarkdownCacheEntry } from "./markdown-cache"
+import { createMarkdownImages } from "./markdown-image"
 import { inlineCodeKind } from "./markdown-inline-code-kind"
 
 type RenderedBlock =
@@ -372,6 +374,7 @@ export function Markdown(
 ) {
   const [local, others] = splitProps(props, ["text", "cacheKey", "streaming", "class", "classList"])
   const i18n = useI18n()
+  const markdown = useMarkdown()
   const [root, setRoot] = createSignal<HTMLDivElement>()
   const owner = createUniqueId()
   const activeCodeKeys = new Set<string>()
@@ -491,6 +494,8 @@ export function Markdown(
   )
 
   let copyCleanup: (() => void) | undefined
+  let readImage: ReadMarkdownImage | undefined
+  let images: ReturnType<typeof createMarkdownImages> | undefined
 
   createEffect(() => {
     const container = root()
@@ -499,9 +504,15 @@ export function Markdown(
     const content = local.text ? pendingBlocks(result, projected, local.cacheKey, owner) : []
     if (!container) return
     if (isServer) return
+    if (readImage !== markdown?.readImage) {
+      images?.dispose()
+      readImage = markdown?.readImage
+      images = readImage ? createMarkdownImages(readImage) : undefined
+    }
     if (content.length === 0) {
       disposeCopyButtons(container)
       container.innerHTML = ""
+      images?.update(container)
       return
     }
 
@@ -522,6 +533,7 @@ export function Markdown(
       disposeCopyButtons(child)
       child.remove()
     }
+    images?.update(container)
     container
       .querySelectorAll<HTMLElement>('[data-slot="markdown-copy-button"]')
       .forEach((button) => setCopyState(button, labels, button.dataset.copied === "true"))
@@ -533,6 +545,7 @@ export function Markdown(
   })
 
   onCleanup(() => {
+    images?.dispose()
     if (copyCleanup) copyCleanup()
     disposeMarkdownProjection(owner)
     activeCodeKeys.forEach(disposeCode)

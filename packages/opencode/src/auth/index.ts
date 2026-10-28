@@ -32,7 +32,7 @@ export class Api extends Schema.Class<Api>("ApiAuth")({
   key: Schema.String,
   metadata: Schema.optional(Schema.Record(Schema.String, Schema.String)),
   // 同一 provider 可以保存多把 key，key 字段始终镜像当前生效的那把
-  keys: Schema.optional(Schema.Array(ApiKey)),
+  keys: Schema.optional(Schema.mutable(Schema.Array(ApiKey))),
   activeKeyID: Schema.optional(Schema.String),
 }) {}
 

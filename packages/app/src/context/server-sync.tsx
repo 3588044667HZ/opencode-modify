@@ -680,6 +680,7 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
       return globalStore.error
     },
     child: children.child,
+    hasChild: children.has,
     peek: children.peek,
     disableMcp: children.disableMcp,
     queryOptions: queryOptionsApi,

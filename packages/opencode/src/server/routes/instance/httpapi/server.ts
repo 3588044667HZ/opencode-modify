@@ -24,6 +24,7 @@ import { Plugin } from "@/plugin"
 import { PluginPtyEnvironment } from "@/plugin/pty-environment"
 import { InstanceStore } from "@/project/instance-store"
 import { Project } from "@/project/project"
+import { Pack } from "@/pack"
 import { Vcs } from "@/project/vcs"
 import { ProviderAuth } from "@/provider/auth"
 import { Provider } from "@/provider/provider"
@@ -259,6 +260,7 @@ const app = LayerNode.group([
   Command.node,
   Truncate.node,
   ToolRegistry.node,
+  Pack.node,
   Semantic.node,
   Format.node,
   Project.node,
