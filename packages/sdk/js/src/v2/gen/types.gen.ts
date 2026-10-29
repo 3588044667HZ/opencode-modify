@@ -2117,9 +2117,14 @@ export type Config = {
   semantic?: {
     enabled?: boolean
     command?: Array<string>
+    jar?: string
     socket_dir?: string
     idle_timeout_ms?: number
+    ide?: string
+    ide_home?: string
+    jdk_home?: string
     exclude?: Array<string>
+    tools?: Array<string>
   }
   instructions?: Array<string>
   layout?: LayoutConfig
@@ -7742,6 +7747,11 @@ export type GlobalHealthResponses = {
     healthy: true
     version: string
     build: string
+    device: {
+      name: string
+      platform: string
+      hostname: string
+    }
   }
 }
 
@@ -11896,6 +11906,11 @@ export type V2HealthGetResponses = {
    */
   200: {
     healthy: true
+    device: {
+      name: string
+      platform: string
+      hostname: string
+    }
   }
 }
 

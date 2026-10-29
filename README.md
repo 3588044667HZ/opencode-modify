@@ -10,15 +10,17 @@
 
 ## 特性总览
 
-| 能力 | 工具 | 说明 |
-| --- | --- | --- |
-| 团队派发 | `dispatch` | 花名册/ad-hoc 并行子代理，join/background，并发上限、预算、续聊 |
-| 团队管理 | `team` | 成员状态快照与按需停止（单个/全队） |
-| 成员通信 | `agent_send` / `agent_inbox` | 会话树内消息投递与审计收件箱 |
-| 共享状态 | `blackboard` | 树内 KV，版本化 + CAS + append |
-| 生命周期通知 | 自动 | background 完成唤醒、等权限/停滞看门狗 |
-| 桌面 UI | 内建 | Agent Teams 独立窗口：Team / Blackboard / Inbox 面板 |
-| 语义引擎 | `read_view`（默认）/ `blast_radius` / `project_map` / `edit_batch` / `edit_transaction` / `verify_test` | 基于本机 JetBrains IDE 的无头分析：定义/引用/诊断/项目地图/事务编辑/读时对账；默认只暴露 read_view，其余经 `semantic.tools` 开启 |
+| 能力         | 工具                                                                                                    | 说明                                                                                                                             |
+| ------------ | ------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| 团队派发     | `dispatch`                                                                                              | 花名册/ad-hoc 并行子代理，join/background，并发上限、预算、续聊                                                                  |
+| 团队管理     | `team`                                                                                                  | 成员状态快照与按需停止（单个/全队）                                                                                              |
+| 成员通信     | `agent_send` / `agent_inbox`                                                                            | 会话树内消息投递与审计收件箱                                                                                                     |
+| 共享状态     | `blackboard`                                                                                            | 树内 KV，版本化 + CAS + append                                                                                                   |
+| 生命周期通知 | 自动                                                                                                    | background 完成唤醒、等权限/停滞看门狗                                                                                           |
+| 桌面 UI      | 内建                                                                                                    | Agent Teams 独立窗口：Team / Blackboard / Inbox 面板                                                                             |
+| 独立 server  | `build:server`                                                                                          | 无 Electron 的 standalone 二进制，内嵌 Web UI；可在 Linux/Windows 上作为常驻服务运行                                             |
+| 设备标签     | `/global/health` · `/api/health`                                                                        | 在 Web UI 的服务器列表显示 `Linux · linux-1g` 等来源标签；用 `OPENCODE_DEVICE_NAME` 覆盖默认 hostname                            |
+| 语义引擎     | `read_view`（默认）/ `blast_radius` / `project_map` / `edit_batch` / `edit_transaction` / `verify_test` | 基于本机 JetBrains IDE 的无头分析：定义/引用/诊断/项目地图/事务编辑/读时对账；默认只暴露 read_view，其余经 `semantic.tools` 开启 |
 
 除此之外还有一批针对多代理场景的稳定性修复（见下文「稳定性修复」）。
 
@@ -72,11 +74,11 @@
 - **完成唤醒**：background 模式下成员完成/失败时，父会话会收到一条 ≤2KB 的合成 `<team_update>`（状态、摘要、结果尾部、tokens/elapsed），完整结果留在成员会话，可用其 `session_id`（`task_id`）回读。同一 job 只通知一次。
 - **看门狗**：background 模式下，成员**等待权限**超过阈值或**长时间无活动**时，父会话会收到 ≤512B 的 `<team_watchdog>` 提醒（附带操作建议：批准/拒绝、`team op=stop`、`agent_send` 干预）。同一权限询问、同一停滞区间只提醒一次。阈值可通过环境变量调整：
 
-  | 环境变量 | 默认 |
-  | --- | --- |
-  | `OPENCODE_EXPERIMENTAL_TEAM_WATCHDOG_INTERVAL_MS` | `60000` |
+  | 环境变量                                            | 默认     |
+  | --------------------------------------------------- | -------- |
+  | `OPENCODE_EXPERIMENTAL_TEAM_WATCHDOG_INTERVAL_MS`   | `60000`  |
   | `OPENCODE_EXPERIMENTAL_TEAM_WATCHDOG_PERMISSION_MS` | `300000` |
-  | `OPENCODE_EXPERIMENTAL_TEAM_WATCHDOG_INACTIVE_MS` | `600000` |
+  | `OPENCODE_EXPERIMENTAL_TEAM_WATCHDOG_INACTIVE_MS`   | `600000` |
 
 ### 4. `agent_send` / `agent_inbox` — 成员通信
 
@@ -120,22 +122,22 @@
 
 默认只向模型暴露 `read_view`（含 IDE 诊断）；其余工具需在 `semantic.tools` 中显式开启。
 
-| 工具 | 能力 |
-| --- | --- |
-| `read_view` | 内容/符号/覆盖/锚点/诊断；`known_version` 命中时返回 `unchanged`，过期时返回有界 delta |
-| `blast_radius` | 定义、调用者、callees、受影响文件/测试、入口点、风险评级 |
-| `project_map` | 目录模块、入口点、模块依赖/环、hot（占位） |
-| `edit_batch` / `edit_transaction` | 锚点编辑、逐文件版本/changed/position_map、跨文件事务与崩溃恢复 |
-| `verify_test` | 运行项目测试并归一化结果 |
+| 工具                              | 能力                                                                                   |
+| --------------------------------- | -------------------------------------------------------------------------------------- |
+| `read_view`                       | 内容/符号/覆盖/锚点/诊断；`known_version` 命中时返回 `unchanged`，过期时返回有界 delta |
+| `blast_radius`                    | 定义、调用者、callees、受影响文件/测试、入口点、风险评级                               |
+| `project_map`                     | 目录模块、入口点、模块依赖/环、hot（占位）                                             |
+| `edit_batch` / `edit_transaction` | 锚点编辑、逐文件版本/changed/position_map、跨文件事务与崩溃恢复                        |
+| `verify_test`                     | 运行项目测试并归一化结果                                                               |
 
 ### 支持矩阵（当前）
 
-| 语言 | read_view | project_map / blast_radius | 说明 |
-| --- | --- | --- | --- |
-| Java | 完整（锚点/诊断/跨文件定义） | 完整 | IDEA / IntelliJ 平台 |
-| Python | 完整（符号/锚点/诊断） | 可用 | PyCharm；未配置解释器时引用退化为名称级匹配 |
-| JS/TS | 内容/位置/符号；锚点与诊断降级 | 语法级可用 | 不调用 TS 语言服务 resolve，避免卡死；精度低于 Java/Python |
-| HTML/CSS | 内容/位置 | 不适用 | 仅文件视图 |
+| 语言     | read_view                      | project_map / blast_radius | 说明                                                       |
+| -------- | ------------------------------ | -------------------------- | ---------------------------------------------------------- |
+| Java     | 完整（锚点/诊断/跨文件定义）   | 完整                       | IDEA / IntelliJ 平台                                       |
+| Python   | 完整（符号/锚点/诊断）         | 可用                       | PyCharm；未配置解释器时引用退化为名称级匹配                |
+| JS/TS    | 内容/位置/符号；锚点与诊断降级 | 语法级可用                 | 不调用 TS 语言服务 resolve，避免卡死；精度低于 Java/Python |
+| HTML/CSS | 内容/位置                      | 不适用                     | 仅文件视图                                                 |
 
 ### IDE 自动发现与选择
 
@@ -161,17 +163,17 @@ jar 解析顺序：`semantic.jar` > `OPENCODE_SEMANTIC_JAR`/`SEMANTIC_JAR` > 打
 ```jsonc
 {
   "semantic": {
-    "enabled": true,                    // 默认 false
+    "enabled": true, // 默认 false
     // 默认只暴露 read_view（含诊断）；需要时加入 blast_radius/project_map/edit_batch/edit_transaction/verify_test
     "tools": ["read_view"],
     // 省略 command：自动发现 IDE，用其 JBR 启动 jar（推荐）
     // "command": ["<IDE>/jbr/bin/java.exe", "-Djava.awt.headless=true", "-jar", "<jar>"],
     "jar": "<可选：semantic-server.jar 路径>",
-    "ide": "auto",                      // auto | idea | pycharm | webstorm | <安装路径>
+    "ide": "auto", // auto | idea | pycharm | webstorm | <安装路径>
     "ide_home": "<可选：IDE 安装目录>",
     "jdk_home": "<可选：项目 SDK/JDK>",
-    "exclude": ["node_modules", "packages/*/dist"]
-  }
+    "exclude": ["node_modules", "packages/*/dist"],
+  },
 }
 ```
 
@@ -201,22 +203,23 @@ jar 解析顺序：`semantic.jar` > `OPENCODE_SEMANTIC_JAR`/`SEMANTIC_JAR` > 打
       "aggregate": "concat",
       "members": [
         { "agent": "general", "role": "implementer", "variant": "high" },
-        { "agent": "explore", "prompt": "只做侦查并回报结论" }
-      ]
-    }
+        { "agent": "explore", "prompt": "只做侦查并回报结论" },
+      ],
+    },
   },
   "agent_message": { "max_hop": 8, "max_body_bytes": 8192, "max_per_minute": 20, "wake_idle": true },
-  "blackboard": { "max_value_bytes": 65536, "max_keys": 256 }
+  "blackboard": { "max_value_bytes": 65536, "max_keys": 256 },
 }
 ```
 
 开关（CLI 默认关闭，桌面端默认开启）：
 
-| 环境变量 | 作用 |
-| --- | --- |
-| `OPENCODE_EXPERIMENTAL_AGENT_TEAMS` | 注册 `dispatch`/`team`/`agent_send`/`agent_inbox`/`blackboard` 与团队提示词 |
-| `OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS` | 打开 `task` 工具的后台模式 |
-| `OPENCODE_EXPERIMENTAL` | 一次开启全部实验特性（含以上） |
+| 环境变量                                     | 作用                                                                        |
+| -------------------------------------------- | --------------------------------------------------------------------------- |
+| `OPENCODE_EXPERIMENTAL_AGENT_TEAMS`          | 注册 `dispatch`/`team`/`agent_send`/`agent_inbox`/`blackboard` 与团队提示词 |
+| `OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS` | 打开 `task` 工具的后台模式                                                  |
+| `OPENCODE_EXPERIMENTAL`                      | 一次开启全部实验特性（含以上）                                              |
+| `OPENCODE_DEVICE_NAME`                       | Web UI 设备标签名称；默认使用操作系统 hostname                              |
 
 ---
 
@@ -226,14 +229,54 @@ jar 解析顺序：`semantic.jar` > `OPENCODE_SEMANTIC_JAR`/`SEMANTIC_JAR` > 打
 
 ```bash
 bun install
-bun dev            # CLI（TUI）
-bun dev:desktop    # 桌面端（agent-teams UI 默认开启）
-bun dev:web        # Web 版
-bun run build:local  # 一次性构建服务端 bundle + 桌面 GUI（带防陈旧校验）
-# 可选：--package 仅打包 win-unpacked（本地部署用）；--installer 额外产出 NSIS 安装器；--deploy <dir> 覆盖部署到运行目录
+bun dev              # CLI（TUI）
+bun dev:desktop      # 桌面端（agent-teams UI 默认开启）
+bun dev:web          # Web 版
+
+bun run build:server # 只构建 standalone server + 内嵌 Web UI
+bun run build:local  # 构建 Desktop + 内置 sidecar server + Web UI
+
+# Desktop 可选：--package 仅打包 win-unpacked（本地部署用）；--installer 额外产出 NSIS 安装器；--deploy <dir> 覆盖部署到运行目录
 ```
 
-桌面端/服务端验证前请先执行 `bun run build:local`（或 `bun run build:local -- --package --deploy D:/opencode-desktop-dev`），避免陈旧产物让改动"不生效"。
+Desktop 验证前请执行 `bun run build:local`；只用浏览器访问时执行 `bun run build:server`。两条命令的产物目录相互独立，不会互相覆盖。
+
+### 独立 Server（浏览器 GUI）
+
+`build:server` 产物位于：
+
+```text
+packages/opencode/dist-server/opencode-<os>-<arch>/bin/
+```
+
+默认内嵌 Web UI，启动后浏览器访问 `http://127.0.0.1:4096`；Windows 构建会把 `script/windows/` 下的启动、停止、状态和可选开机自启脚本复制到 exe 旁边。
+
+```bash
+# Windows
+bun run build:server
+# Linux（在 Linux 工作站上执行同一条命令）
+bun run build:server
+```
+
+Linux 示例：
+
+```bash
+OPENCODE_DEVICE_NAME=linux-1g ./opencode serve --port 4096 --hostname 127.0.0.1
+```
+
+局域网访问时绑定 `0.0.0.0` 并设置 `OPENCODE_SERVER_PASSWORD`；不要把无认证端口直接暴露到公网。开机自启**默认关闭**，需要时手动运行 `enable-autostart.bat`，取消运行 `disable-autostart.bat`。
+
+Web GUI 的项目路径选择使用 **server 端目录浏览**（`file.list`/`path.get`），不是浏览器原生文件对话框，因此 Linux workstation/headless 环境可直接选择 `/home/...`、挂载盘等 server 路径；浏览器在另一台机器时选中的仍是 server 机器路径。
+
+### 设备标签
+
+server 的 `/global/health` 与 `/api/health` 返回：
+
+```json
+{ "device": { "name": "linux-1g", "platform": "linux", "hostname": "build-01" } }
+```
+
+Web UI 的服务器列表和 Settings → Servers 会显示设备标签。默认名称是 hostname，可用 `OPENCODE_DEVICE_NAME` 覆盖，例如 `OPENCODE_DEVICE_NAME=linux-1g`。
 
 语义引擎为可选能力：安装并授权 JetBrains IDE 后，在 `opencode.json` 设置
 `"semantic": { "enabled": true }`（默认只暴露 `read_view`，其余工具用 `semantic.tools` 开启）；未配置 `command` 时自动发现 IDE 并用其 JBR 启动，
@@ -255,7 +298,7 @@ bun test --timeout 30000 test/tool/agent-send.test.ts test/session/collaboration
 
 **每次代码修改后必须留下构建标记；GUI 与服务端必须来自同一次构建。**
 
-1. 修改完成后运行 `bun run build:local`：脚本会自动在仓库根 **`BUILD.md`** 追加/更新一行（时间、Build ID、提交、本次更改、服务端标记、GUI 标记）；若手工构建，也必须手动在 `BUILD.md` 追加一行说明本次更改。
+1. 修改完成后运行对应构建：Desktop/Web 用 `bun run build:local`，独立 server 用 `bun run build:server`；两者都会在仓库根 **`BUILD.md`** 追加一行（时间、Build ID、提交、本次更改、构建标记）。若手工构建，也必须手动追加说明。
 2. 运行时核对两端标记：
    - 服务端：启动日志出现 `server listening build=<id>`，`GET /global/health` 返回 `build` 字段；
    - GUI：Agent Teams 窗口页头显示 `build <id>`；
@@ -268,15 +311,16 @@ bun test --timeout 30000 test/tool/agent-send.test.ts test/session/collaboration
 
 ## 仓库结构
 
-| 路径 | 内容 |
-| --- | --- |
-| `packages/opencode` | 核心运行时、会话、工具（`dispatch`/`team`/`agent_send`/`agent_inbox`/`blackboard`…） |
-| `packages/core` | 服务层：`BackgroundJob`、mailbox、blackboard 存储、配置 schema |
-| `packages/app`、`packages/desktop` | Web/桌面 UI（Agent Teams 窗口与面板） |
-| `packages/schema`、`packages/session-ui` | 事件协议与共享会话 UI |
-| `semantic-server` | 无头 JetBrains IDE 语义守护（协议实现、fixtures、探针、conformance） |
-| `LLM-IDE-SPEC` | 语义引擎设计：传输、多语言/IDE 选择、对账、LSP 路线 |
-| `specs/` | 中文设计文档（见下） |
+| 路径                                     | 内容                                                                                 |
+| ---------------------------------------- | ------------------------------------------------------------------------------------ |
+| `packages/opencode`                      | 核心运行时、会话、工具（`dispatch`/`team`/`agent_send`/`agent_inbox`/`blackboard`…） |
+| `packages/core`                          | 服务层：`BackgroundJob`、mailbox、blackboard 存储、配置 schema                       |
+| `packages/app`、`packages/desktop`       | Web/桌面 UI（Agent Teams 窗口与面板）                                                |
+| `script/windows`                         | 独立 server 的 Windows 启动/停止/状态与可选开机自启脚本（默认不自启）                |
+| `packages/schema`、`packages/session-ui` | 事件协议与共享会话 UI                                                                |
+| `semantic-server`                        | 无头 JetBrains IDE 语义守护（协议实现、fixtures、探针、conformance）                 |
+| `LLM-IDE-SPEC`                           | 语义引擎设计：传输、多语言/IDE 选择、对账、LSP 路线                                  |
+| `specs/`                                 | 中文设计文档（见下）                                                                 |
 
 ## 设计文档
 
@@ -298,6 +342,6 @@ bun test --timeout 30000 test/tool/agent-send.test.ts test/session/collaboration
 
 ## 独立维护声明
 
-- 本仓库独立维护：不跟踪上游、不下载官方 CLI、不检查官方更新、不执行官方升级；桌面端与 CLI 的代码一律来自本仓库构建（`bun run build:local`）。
+- 本仓库独立维护：不跟踪上游、不下载官方 CLI、不检查官方更新、不执行官方升级；桌面端、独立 server 与 CLI 的代码一律来自本仓库构建（`build:local` / `build:server`）。
 - 升级方式只有一种：`git pull` 本仓库后重新构建。`opencode upgrade` 在该分支会被明确拒绝。
 - 仅保留必要的开源许可与版权声明（见 [LICENSE](LICENSE)，MIT）；其余与上游发行渠道的关系均已移除。

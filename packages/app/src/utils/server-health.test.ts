@@ -29,6 +29,17 @@ describe("checkServerHealth", () => {
     expect(request?.pathname).toBe("/api/health")
   })
 
+  test("reports the server device", async () => {
+    const device = { name: "linux-1g", platform: "linux", hostname: "build-01" }
+    const fetch = (async () =>
+      new Response(JSON.stringify({ healthy: true, version: "1.2.3", device }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })) as unknown as typeof globalThis.fetch
+
+    expect(await checkServerHealth(server, fetch)).toEqual({ healthy: true, version: "1.2.3", device })
+  })
+
   test("falls back to the V1 health endpoint", async () => {
     const paths: string[] = []
     const fetch = (async (input: RequestInfo | URL) => {

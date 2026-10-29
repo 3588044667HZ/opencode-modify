@@ -5,7 +5,8 @@ import { ClientError, OpenCode } from "@opencode-ai/client"
 import { Accessor, createEffect, onCleanup } from "solid-js"
 import { createStore, reconcile } from "solid-js/store"
 
-export type ServerHealth = { healthy: boolean; version?: string }
+export type ServerDevice = { name: string; platform: string; hostname?: string }
+export type ServerHealth = { healthy: boolean; version?: string; device?: ServerDevice }
 
 interface CheckServerHealthOptions {
   timeoutMs?: number
@@ -95,18 +96,26 @@ export async function checkServerHealth(
         : undefined,
     })
       .health.get({ signal })
-      .then((x) =>
-        typeof x.healthy === "boolean"
-          ? { data: { healthy: x.healthy, version: x.version } }
-          : { error: new Error("Invalid health response") },
-      )
+      .then((x) => {
+        const device = (x as { device?: ServerDevice }).device
+        return typeof x.healthy === "boolean"
+          ? { data: { healthy: x.healthy, version: x.version, ...(device ? { device } : {}) } }
+          : { error: new Error("Invalid health response") }
+      })
       .catch((error) => ({ error }))
     if ("data" in current && current.data) return current.data
     if (signal?.aborted) return { healthy: false }
 
     return createSdkForServer({ server, fetch, signal })
       .global.health()
-      .then((x) => (x.error ? next(count, x.error) : { healthy: x.data?.healthy === true, version: x.data?.version }))
+      .then((x) => {
+        if (x.error) return next(count, x.error)
+        return {
+          healthy: x.data?.healthy === true,
+          ...(x.data?.version ? { version: x.data.version } : {}),
+          ...(x.data?.device ? { device: x.data.device } : {}),
+        }
+      })
       .catch((error) => next(count, error))
   }
   return attempt(0).finally(() => timeout?.clear?.())

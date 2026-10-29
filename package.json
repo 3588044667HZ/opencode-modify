@@ -12,6 +12,7 @@
     "dev:console": "ulimit -n 10240 2>/dev/null; bun run --cwd packages/console/app dev",
     "dev:storybook": "bun --cwd packages/storybook storybook",
     "build:local": "bun run script/build-local.ts",
+    "build:server": "bun run script/build-server.ts",
     "build:semantic": "bun run script/build-semantic.ts",
     "lint": "oxlint",
     "typecheck": "bun turbo typecheck",

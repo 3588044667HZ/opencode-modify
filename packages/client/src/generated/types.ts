@@ -101,7 +101,10 @@ export type ProjectCopyError = {
 export const isProjectCopyError = (value: unknown): value is ProjectCopyError =>
   typeof value === "object" && value !== null && "name" in value && value["name"] === "ProjectCopyError"
 
-export type HealthGetOutput = { readonly healthy: true }
+export type HealthGetOutput = {
+  readonly healthy: true
+  readonly device: { readonly name: string; readonly platform: string; readonly hostname: string }
+}
 
 export type LocationGetInput = {
   readonly location?: {

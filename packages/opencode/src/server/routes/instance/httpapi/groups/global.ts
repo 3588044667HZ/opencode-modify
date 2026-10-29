@@ -7,12 +7,14 @@ import "@/server/event"
 import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import semver from "semver"
+import { Device } from "@opencode-ai/protocol/groups/health"
 import { described } from "./metadata"
 
 const GlobalHealth = Schema.Struct({
   healthy: Schema.Literal(true),
   version: Schema.String,
   build: Schema.String,
+  device: Device,
 })
 
 const SyncEventSchemas = EventManifest.Latest.values()

@@ -80,6 +80,18 @@
 - **验收**：检测到不可用时展示原因 + 一键跳转安装/修复指引；不阻塞主流程；覆盖 Java/Python/JS-TS 三语言。
 - **依赖**：无。
 
+## G10 — Desktop Shell 来源切换（P1，备忘）
+
+- **目标**：Windows 桌面端提供全局 Shell 来源选择，可在 Git Bash 与 PowerShell 之间切换；设置一次后对 agent 的 shell 工具、终端/PTY 和后续新会话统一生效。
+- **现状**：未实现；当前 shell 解析分散在 shell 工具与 PTY，缺少用户可见的统一来源设置。
+- **方向**：
+  a. Desktop 设置增加“Shell 来源”：Auto / Git Bash / PowerShell；持久化到全局 desktop 设置，不按项目覆盖；
+  b. 统一解析可执行文件与参数：Git Bash 优先 `bash.exe`，PowerShell 优先 `pwsh.exe`、回退 `powershell.exe`；Auto 按可用性检测；
+  c. 设置页展示实际解析路径与版本；检测失败时明确报错并回退，不静默换 shell；
+  d. 新进程使用新来源；已运行 PTY 保持原 shell，重启 terminal 后生效。
+- **验收**：设置切换后新开的 shell 工具/PTY 使用所选来源；路径缺失有可读错误与回退；Unix/macOS 不受影响；有设置持久化、解析与回退测试。
+- **依赖**：无。
+
 ---
 
 ## 建议执行顺序

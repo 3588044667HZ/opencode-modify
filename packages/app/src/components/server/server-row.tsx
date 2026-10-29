@@ -12,7 +12,7 @@ import {
 } from "solid-js"
 import { useLanguage } from "@/context/language"
 import { type ServerConnection, serverName } from "@/context/server"
-import type { ServerHealth } from "@/utils/server-health"
+import type { ServerDevice, ServerHealth } from "@/utils/server-health"
 
 interface ServerRowProps extends ParentProps {
   conn: ServerConnection.Any
@@ -54,6 +54,13 @@ export function ServerRow(props: ServerRowProps) {
   const tooltipValue = () => (
     <span class="flex items-center gap-2">
       <span>{serverName(props.conn, true)}</span>
+      <Show when={props.status?.device}>
+        {(device) => (
+          <span class="text-text-invert-weak">
+            {platformName(device().platform)} · {device().name}
+          </span>
+        )}
+      </Show>
       <Show when={props.status?.version}>
         <span class="text-text-invert-weak">v{props.status?.version}</span>
       </Show>
@@ -76,6 +83,9 @@ export function ServerRow(props: ServerRowProps) {
             <span ref={nameRef} class={`${props.nameClass ?? "truncate"} min-w-0`}>
               {name()}
             </span>
+            <Show when={props.status?.device?.name}>
+              <ServerDeviceTag device={props.status?.device} />
+            </Show>
             <Show
               when={badge()}
               fallback={
@@ -111,6 +121,30 @@ export function ServerRow(props: ServerRowProps) {
       </div>
     </Tooltip>
   )
+}
+
+export function ServerDeviceTag(props: { device?: ServerDevice }) {
+  return (
+    <Show when={props.device}>
+      {(device) => (
+        <span
+          class="inline-flex max-w-[180px] shrink-0 items-center gap-1 truncate rounded-md bg-surface-base px-1.5 py-0.5 text-11-regular text-text-weak"
+          title={`${platformName(device().platform)} · ${device().name}`}
+        >
+          <span class="truncate">
+            {platformName(device().platform)} · {device().name}
+          </span>
+        </span>
+      )}
+    </Show>
+  )
+}
+
+function platformName(platform: string) {
+  if (platform === "win32") return "Windows"
+  if (platform === "darwin") return "macOS"
+  if (platform === "linux") return "Linux"
+  return platform
 }
 
 export function ServerHealthIndicator(props: { health?: ServerHealth }) {
