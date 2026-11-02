@@ -60,6 +60,8 @@ export type Resource = Schema.Schema.Type<typeof Resource>
 
 export const ToolsChanged = McpEvent.ToolsChanged
 
+export const StatusChanged = McpEvent.StatusChanged
+
 export const BrowserOpenFailed = McpEvent.BrowserOpenFailed
 
 export const Failed = NamedError.create("MCPFailed", {
@@ -163,6 +165,7 @@ export interface McpTool {
 
 export interface Interface {
   readonly status: () => Effect.Effect<Record<string, Status>>
+  readonly configured: () => Effect.Effect<Record<string, Status>>
   readonly clients: () => Effect.Effect<Record<string, MCPClient>>
   readonly instructions: () => Effect.Effect<ServerInstructions[]>
   readonly tools: () => Effect.Effect<Record<string, McpTool>>
@@ -449,6 +452,7 @@ const layer = Layer.effect(
         bridge.fork(
           Effect.logWarning("MCP connection closed", { server: name }).pipe(
             Effect.andThen(events.publish(ToolsChanged, { server: name })),
+            Effect.andThen(events.publish(StatusChanged, { server: name })),
             Effect.ignore,
           ),
         )
@@ -585,6 +589,7 @@ const layer = Layer.effect(
       else delete s.instructions[name]
       watch(s, name, client, bridge, timeout)
       if (previous) yield* Effect.tryPromise(() => previous.close()).pipe(Effect.ignore)
+      yield* events.publish(StatusChanged, { server: name }).pipe(Effect.ignore)
       return s.status[name]
     })
 
@@ -604,6 +609,17 @@ const layer = Layer.effect(
         result[key] = s.status[key] ?? { status: "disabled" }
       }
 
+      return result
+    })
+
+    const configured = Effect.fn("MCP.configured")(function* () {
+      const s = yield* InstanceState.get(state)
+      const config = (yield* cfgSvc.get()).mcp ?? {}
+      const result: Record<string, Status> = {}
+      for (const [key, mcp] of Object.entries(config)) {
+        if (!isMcpConfigured(mcp)) continue
+        result[key] = s.status[key] ?? { status: "disabled" }
+      }
       return result
     })
 
@@ -632,6 +648,7 @@ const layer = Layer.effect(
       if (!result.mcpClient) {
         yield* closeClient(s, name)
         delete s.clients[name]
+        yield* events.publish(StatusChanged, { server: name }).pipe(Effect.ignore)
         return result.status
       }
 
@@ -656,6 +673,7 @@ const layer = Layer.effect(
       yield* closeClient(s, name)
       delete s.clients[name]
       s.status[name] = { status: "disabled" }
+      yield* events.publish(StatusChanged, { server: name }).pipe(Effect.ignore)
     })
 
     function requestTimeout(s: State, name: string, configured: McpEntry | undefined, fallback?: number) {
@@ -971,6 +989,7 @@ const layer = Layer.effect(
 
     return Service.of({
       status,
+      configured,
       clients,
       instructions,
       tools,

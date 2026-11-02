@@ -51,3 +51,7 @@
 | 2026-10-29 09:42 | windows-server-launchers-unbuilt | 778deeb | feat(script): 新增 Windows 独立 server 启动/停止/状态 bat 与可选开机自启脚本；默认不创建自启项；enable/disable 使用当前用户 Startup 快捷方式（无管理员权限），已在临时 APPDATA 验证创建/删除；支持 --silent/--no-browser、PID/日志、health 等待 | 未构建 | 未构建 |
 | 2026-10-29 10:32 | 261029-1032-778deeb-dirty | 778deeb | feat(server): health 返回 device{name,platform,hostname}（OPENCODE_DEVICE_NAME 可覆盖 hostname）；WebUI server 列表/设置显示设备标签；生成 client/SDK 类型；app typecheck 与构建通过 | 261029-1032-778deeb-dirty | 261029-1032-778deeb-dirty |
 | 2026-10-29 15:37 | 261029-1537-778deeb-dirty | 778deeb | feat(script): build:server 构建 standalone server（嵌入 Web UI，输出 dist-server）+ Windows 启动器；build:local 重新构建 desktop + WebUI；device 标签与启动编排产物已刷新 | 261029-1537-778deeb-dirty | 261029-1537-778deeb-dirty |
+| 2026-10-30 12:11 | project-memory-unbuilt | 1227ef3 | feat(memory): 无 AGENTS/CLAUDE/CONTEXT 的项目首次提示时自动生成 .opencode/memory.md（manifest/命令/目录/工具，确定性、无模型）；不覆盖已有文件；OPENCODE_DISABLE_PROJECT_MEMORY 可关闭；新增 instruction 测试 | 未构建 | 未构建 |
+| 2026-11-02 13:54 | 261102-1354-1227ef3-dirty | 1227ef3 | 未提交改动 | 261102-1354-1227ef3-dirty | 261102-1354-1227ef3-dirty |
+| 2026-10-30 12:30 | mcp-tool-event-unbuilt | 1227ef3 | feat(mcp): 模型可用 mcp(list/enable/disable) 操作 opencode.json 中已配置的 MCP；不新增/不启动任意 server；连接/断开/关闭发布 mcp.status.changed，修复 UI 不刷新；docs 说明由模型用 shell 拉起宿主应用 | 未构建 | 未构建 |
+| 2026-10-30 12:45 | mcp-status-event-unbuilt | 1227ef3 | fix(mcp): 连接/断开/失败/连接关闭发布 mcp.status.changed；UI 已有 invalidate 逻辑，模型 mcp enable/disable 后状态自动刷新；MCP lifecycle 21 pass | 未构建 | 未构建 |

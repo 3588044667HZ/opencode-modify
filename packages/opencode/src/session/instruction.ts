@@ -13,6 +13,7 @@ import { withTransientReadRetry } from "@/util/effect-http-client"
 import { Global } from "@opencode-ai/core/global"
 import type { MessageV2 } from "./message-v2"
 import type { MessageID } from "./schema"
+import { ensureProjectMemory } from "./project-memory"
 
 function extract(messages: SessionV1.WithParts[]) {
   const paths = new Set<string>()
@@ -149,11 +150,17 @@ const layer: Layer.Layer<
         }
       }
 
+      const memory = path.join(ctx.directory, ".opencode", "memory.md")
+      if (yield* fs.existsSafe(memory)) paths.add(path.resolve(memory))
+
       return paths
     })
 
     const system = Effect.fn("Instruction.system")(function* () {
       const config = yield* cfg.get()
+      yield* ensureProjectMemory(yield* InstanceState.directory, fs).pipe(
+        Effect.catchCause((cause) => Effect.logWarning("project memory generation failed", { cause })),
+      )
       const paths = yield* systemPaths()
       const urls = (config.instructions ?? []).filter(
         (item) => item.startsWith("https://") || item.startsWith("http://"),

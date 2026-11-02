@@ -1,0 +1,12 @@
+Manage the MCP servers configured in opencode.json.
+
+This tool can only inspect, enable, or disable servers that already exist in opencode.json. It cannot add, install, or configure a new MCP server, and it cannot start arbitrary commands or URLs.
+
+Operations:
+- `list`: show configured MCP servers and their current status.
+- `enable`: connect one configured server by name. Its tools become available on the next model turn.
+- `disable`: disconnect one configured server by name.
+
+Use this when a task needs an MCP server that is currently disabled. Do not use it to probe unrelated servers or to bypass MCP configuration.
+
+This tool never launches an external application. If a configured server is unavailable because its host application (for example Word, Excel, PowerPoint, or LibreOffice) is not running, use the existing shell tool to start that application first, then retry `enable`.

@@ -33,6 +33,7 @@ import { WebFetchTool } from "./webfetch"
 import { WriteTool } from "./write"
 import { InvalidTool } from "./invalid"
 import { SkillTool } from "./skill"
+import { McpTool } from "./mcp"
 import * as Tool from "./tool"
 import { Config } from "@/config/config"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@opencode-ai/plugin"
@@ -146,6 +147,7 @@ const layer = Layer.effect(
     const greptool = yield* GrepTool
     const patchtool = yield* ApplyPatchTool
     const skilltool = yield* SkillTool
+    const mcptool = yield* McpTool
     const agent = yield* Agent.Service
     const codeMode = flags.experimentalCodeMode ? yield* Effect.promise(() => import("./code-mode")) : undefined
     const codeModeTool = codeMode ? yield* codeMode.CodeModeTool : undefined
@@ -239,8 +241,7 @@ const layer = Layer.effect(
         const questionEnabled = ["app", "cli", "desktop"].includes(flags.client) || flags.enableQuestionTool
         const semanticEnabled = cfg.semantic?.enabled === true
         const semanticTools = new Set(cfg.semantic?.tools ?? ["read_view"])
-        const semanticTool = (id: string, value: Tool.Def) =>
-          semanticEnabled && semanticTools.has(id) ? [value] : []
+        const semanticTool = (id: string, value: Tool.Def) => (semanticEnabled && semanticTools.has(id) ? [value] : [])
 
         const tool = yield* Effect.all({
           invalid: Tool.init(invalid),
@@ -261,6 +262,7 @@ const layer = Layer.effect(
           todo: Tool.init(todo),
           search: Tool.init(websearch),
           skill: Tool.init(skilltool),
+          mcp: Tool.init(mcptool),
           patch: Tool.init(patchtool),
           question: Tool.init(question),
           output: Tool.init(output),
@@ -295,6 +297,7 @@ const layer = Layer.effect(
           tool.todo,
           tool.search,
           tool.skill,
+          tool.mcp,
           tool.patch,
           ...(tool.dispatch ? [tool.dispatch] : []),
           ...(tool.team ? [tool.team] : []),

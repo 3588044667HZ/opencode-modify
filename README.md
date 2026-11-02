@@ -20,6 +20,8 @@
 | 桌面 UI      | 内建                                                                                                    | Agent Teams 独立窗口：Team / Blackboard / Inbox 面板                                                                             |
 | 独立 server  | `build:server`                                                                                          | 无 Electron 的 standalone 二进制，内嵌 Web UI；可在 Linux/Windows 上作为常驻服务运行                                             |
 | 设备标签     | `/global/health` · `/api/health`                                                                        | 在 Web UI 的服务器列表显示 `Linux · linux-1g` 等来源标签；用 `OPENCODE_DEVICE_NAME` 覆盖默认 hostname                            |
+| 自动项目记忆 | `.opencode/memory.md`                                                                                   | 新项目首次构建 prompt 时自动扫描 manifest/目录并生成项目记忆；不覆盖已有文件，不调用模型                                         |
+| 按需启用 MCP | `mcp`                                                                                                   | 模型可列出/启用/停用 `opencode.json` 中已配置的 MCP；不能新增 server、命令或 URL                                                 |
 | 语义引擎     | `read_view`（默认）/ `blast_radius` / `project_map` / `edit_batch` / `edit_transaction` / `verify_test` | 基于本机 JetBrains IDE 的无头分析：定义/引用/诊断/项目地图/事务编辑/读时对账；默认只暴露 read_view，其余经 `semantic.tools` 开启 |
 
 除此之外还有一批针对多代理场景的稳定性修复（见下文「稳定性修复」）。
@@ -220,6 +222,7 @@ jar 解析顺序：`semantic.jar` > `OPENCODE_SEMANTIC_JAR`/`SEMANTIC_JAR` > 打
 | `OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS` | 打开 `task` 工具的后台模式                                                  |
 | `OPENCODE_EXPERIMENTAL`                      | 一次开启全部实验特性（含以上）                                              |
 | `OPENCODE_DEVICE_NAME`                       | Web UI 设备标签名称；默认使用操作系统 hostname                              |
+| `OPENCODE_DISABLE_PROJECT_MEMORY`            | 设为 `1` 关闭首次提示时的自动 `.opencode/memory.md` 生成                    |
 
 ---
 
@@ -267,6 +270,42 @@ OPENCODE_DEVICE_NAME=linux-1g ./opencode serve --port 4096 --hostname 127.0.0.1
 局域网访问时绑定 `0.0.0.0` 并设置 `OPENCODE_SERVER_PASSWORD`；不要把无认证端口直接暴露到公网。开机自启**默认关闭**，需要时手动运行 `enable-autostart.bat`，取消运行 `disable-autostart.bat`。
 
 Web GUI 的项目路径选择使用 **server 端目录浏览**（`file.list`/`path.get`），不是浏览器原生文件对话框，因此 Linux workstation/headless 环境可直接选择 `/home/...`、挂载盘等 server 路径；浏览器在另一台机器时选中的仍是 server 机器路径。
+
+### 自动项目记忆
+
+当项目没有 `AGENTS.md`、`CLAUDE.md` 或 `CONTEXT.md` 时，首次构建 prompt 会自动生成：
+
+```text
+.opencode/memory.md
+```
+
+生成内容是**确定性的仓库元数据**，不调用模型、不读取源码：项目名、识别到的语言、常见构建/测试/lint 命令、顶层目录和工具配置文件。生成后会作为指令上下文加载。
+
+- 只生成一次，已存在时绝不覆盖，可自由编辑。
+- 只在没有现有 instruction 文件时生成，避免和 AGENTS.md 重复。
+- 写文件失败只记录 warning，不阻塞对话。
+- `OPENCODE_DISABLE_PROJECT_MEMORY=1` 可关闭。
+- 需要更深入的项目规范时仍使用 `/init` 生成/更新 `AGENTS.md`；两者可以并存，但自动 memory 不替代人工 review。
+
+### 按需启用 MCP
+
+模型可以通过 `mcp` 工具按需启用已配置的 MCP server：
+
+```text
+mcp(op="list")
+mcp(op="enable", name="ppt")
+mcp(op="disable", name="ppt")
+```
+
+边界：
+
+- 只允许操作 `opencode.json` 中已经存在的 MCP server。
+- 不能通过该工具新增 MCP、安装包、执行任意命令或访问任意 URL。
+- `mcp` 工具不负责启动外部应用；模型先用现有 shell 工具启动 Word/Excel/PowerPoint/LibreOffice 等宿主应用，再调用 `mcp(op="enable", name="...")` 连接。
+- `enable` 后新 MCP 的工具在下一轮模型请求中可用；当前轮不会热插拔。
+- 沿用现有权限配置，不新增权限 key。
+- 已禁用的 MCP 可以在运行时临时启用，不会改写配置文件。
+- 如果宿主应用使用动态 port/token，需要 bridge 更新配置或重启实例后重新连接。
 
 ### 设备标签
 

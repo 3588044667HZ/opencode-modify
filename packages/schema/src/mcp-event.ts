@@ -10,6 +10,13 @@ export const ToolsChanged = Event.define({
   },
 })
 
+export const StatusChanged = Event.define({
+  type: "mcp.status.changed",
+  schema: {
+    server: Schema.String,
+  },
+})
+
 export const BrowserOpenFailed = Event.define({
   type: "mcp.browser.open.failed",
   schema: {
@@ -18,4 +25,4 @@ export const BrowserOpenFailed = Event.define({
   },
 })
 
-export const Definitions = Event.inventory(ToolsChanged, BrowserOpenFailed)
+export const Definitions = Event.inventory(ToolsChanged, StatusChanged, BrowserOpenFailed)

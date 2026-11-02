@@ -229,6 +229,45 @@ describe("Instruction.system", () => {
     }),
   )
 
+  it.live("generates project memory when no instruction file exists", () =>
+    withFiles(
+      {
+        "package.json": JSON.stringify({ name: "memory-fixture", scripts: { build: "echo build", test: "echo test" } }),
+        "src/index.ts": "export const value = 1\n",
+      },
+      (dir) =>
+        Effect.gen(function* () {
+          const svc = yield* Instruction.Service
+          const rules = yield* svc.system()
+          const memory = path.join(dir, ".opencode", "memory.md")
+          expect(rules.some((rule) => rule.startsWith(`Instructions from: ${memory}`))).toBe(true)
+
+          const fs = yield* FileSystem.FileSystem
+          const content = yield* fs.readFileString(memory)
+          expect(content).toContain("# Project Memory")
+          expect(content).toContain("npm run build")
+          expect(content).toContain("`src/`")
+        }),
+    ),
+  )
+
+  it.live("keeps user-edited project memory", () =>
+    withFiles(
+      {
+        "package.json": JSON.stringify({ name: "memory-fixture", scripts: { build: "echo build" } }),
+        ".opencode/memory.md": "# My Project Memory\n\nKeep this text.\n",
+      },
+      (dir) =>
+        Effect.gen(function* () {
+          const svc = yield* Instruction.Service
+          yield* svc.system()
+          const fs = yield* FileSystem.FileSystem
+          const content = yield* fs.readFileString(path.join(dir, ".opencode", "memory.md"))
+          expect(content).toBe("# My Project Memory\n\nKeep this text.\n")
+        }),
+    ),
+  )
+
   it.live("skips project and global CLAUDE.md when Claude Code prompt is disabled", () =>
     Effect.gen(function* () {
       const globalTmp = yield* tmpWithFiles({ ".claude/CLAUDE.md": "# Global Claude" })
