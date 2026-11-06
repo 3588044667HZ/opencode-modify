@@ -27,6 +27,20 @@ test("renders display math delimiters", async () => {
   expect(await parser.parse("前文 \\[x^2\\] 后文")).toContain('<span class="katex-display">')
 })
 
+test("renders display math containing blank lines", async () => {
+  expect(await parser.parse(String.raw`\[x^2
+
+y\]`)).toContain('<span class="katex-display">')
+  expect(await parser.parse(String.raw`\[
+
+x^2
+
+\]`)).toContain('<span class="katex-display">')
+  expect(await parser.parse(String.raw`$$x^2
+
+y$$`)).toContain('<span class="katex-display">')
+})
+
 test("does not render invalid delimiters", async () => {
   expect(await parser.parse("价格 $5 和 $10")).not.toContain("katex")
   expect(await parser.parse("\\$x\\$")).not.toContain("katex")

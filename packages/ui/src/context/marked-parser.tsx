@@ -20,6 +20,8 @@ export function createMarkdownParser(highlight: (code: string, language: string)
 const inlineMathRegex = /^\\\(((?:\\.|[^\\\n])*?)\\\)/
 const blockMathRegex = /^\$\$\n([\s\S]+?)\n\$\$(?:\n|$)/
 const displayBracketRegex = /^\\\[([\s\S]+?)\\\]/
+const blockBracketRegex = /^[ \t]{0,3}\\\[([\s\S]+?)\\\]/
+const blockDollarMathRegex = /^[ \t]{0,3}\$\$([\s\S]+?)\$\$/
 const displayDollarRegex = /^\$\$([\s\S]+?)\$\$/
 const inlineDollarRegex = /^\$(?!\$)(?![ \t\n])((?:\\.|[^\\\n$])+?)(?<![ \t\n\\])\$(?!\$)/
 
@@ -108,6 +110,21 @@ const katexExtension: MarkedExtension = {
       renderer: renderKatexToken,
     },
     {
+      name: "blockBracketKatex",
+      level: "block",
+      tokenizer(src) {
+        const match = src.match(blockBracketRegex)
+        if (!match) return
+        return {
+          type: "blockBracketKatex",
+          raw: match[0],
+          text: match[1].trim(),
+          displayMode: true,
+        }
+      },
+      renderer: renderKatexToken,
+    },
+    {
       name: "blockKatex",
       level: "block",
       tokenizer(src) {
@@ -115,6 +132,21 @@ const katexExtension: MarkedExtension = {
         if (!match) return
         return {
           type: "blockKatex",
+          raw: match[0],
+          text: match[1].trim(),
+          displayMode: true,
+        }
+      },
+      renderer: renderKatexToken,
+    },
+    {
+      name: "blockDollarKatex",
+      level: "block",
+      tokenizer(src) {
+        const match = src.match(blockDollarMathRegex)
+        if (!match) return
+        return {
+          type: "blockDollarKatex",
           raw: match[0],
           text: match[1].trim(),
           displayMode: true,
