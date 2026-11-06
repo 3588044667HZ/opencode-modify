@@ -19,6 +19,11 @@ import { Script } from "@opencode-ai/script"
 import pkg from "../package.json"
 
 const singleFlag = process.argv.includes("--single")
+const targetFlag = (() => {
+  const index = process.argv.indexOf("--target")
+  if (index !== -1) return process.argv[index + 1]
+  return process.argv.find((arg) => arg.startsWith("--target="))?.slice("--target=".length)
+})()
 const baselineFlag = process.argv.includes("--baseline")
 const skipInstall = process.argv.includes("--skip-install")
 const sourcemapsFlag = process.argv.includes("--sourcemaps")
@@ -115,26 +120,36 @@ const allTargets: {
   },
 ]
 
-const targets = singleFlag
-  ? allTargets.filter((item) => {
-      if (item.os !== process.platform || item.arch !== process.arch) {
-        return false
-      }
+const targets = targetFlag
+  ? (() => {
+      const [os, arch, abi] = targetFlag.split("-")
+      if (!os || !arch)
+        throw new Error(`Invalid --target ${targetFlag}; expected linux-x64, win32-x64, darwin-arm64, etc.`)
+      return allTargets.filter(
+        (item) =>
+          item.os === os && item.arch === arch && item.abi === (abi as "musl" | undefined) && item.avx2 !== false,
+      )
+    })()
+  : singleFlag
+    ? allTargets.filter((item) => {
+        if (item.os !== process.platform || item.arch !== process.arch) {
+          return false
+        }
 
-      // When building for the current platform, prefer a single native binary by default.
-      // Baseline binaries require additional Bun artifacts and can be flaky to download.
-      if (item.avx2 === false) {
-        return baselineFlag
-      }
+        // When building for the current platform, prefer a single native binary by default.
+        // Baseline binaries require additional Bun artifacts and can be flaky to download.
+        if (item.avx2 === false) {
+          return baselineFlag
+        }
 
-      // also skip abi-specific builds for the same reason
-      if (item.abi !== undefined) {
-        return false
-      }
+        // also skip abi-specific builds for the same reason
+        if (item.abi !== undefined) {
+          return false
+        }
 
-      return true
-    })
-  : allTargets
+        return true
+      })
+    : allTargets
 
 await $`rm -rf ${outDir}`
 

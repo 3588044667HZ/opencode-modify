@@ -34,8 +34,17 @@ const now = new Date()
 const pad = (value: number) => String(value).padStart(2, "0")
 const time = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`
 const stamp = `${String(now.getFullYear()).slice(2)}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`
-const sha = (await $`git rev-parse --short HEAD`.cwd(root).text()).trim()
-const dirty = (await $`git status --porcelain`.cwd(root).text()).trim().length > 0
+const sha = (
+  await $`git rev-parse --short HEAD`
+    .cwd(root)
+    .text()
+    .catch(() => "local")
+).trim()
+const dirty = await $`git status --porcelain`
+  .cwd(root)
+  .text()
+  .then((value) => value.trim().length > 0)
+  .catch(() => false)
 const buildId = `${stamp}-${sha}${dirty ? "-dirty" : ""}`
 process.env.OPENCODE_BUILD_ID = buildId
 process.env.OPENCODE_BUILD_OUT = "dist-server"

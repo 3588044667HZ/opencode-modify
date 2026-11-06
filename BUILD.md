@@ -55,3 +55,4 @@
 | 2026-11-02 13:54 | 261102-1354-1227ef3-dirty | 1227ef3 | 未提交改动 | 261102-1354-1227ef3-dirty | 261102-1354-1227ef3-dirty |
 | 2026-10-30 12:30 | mcp-tool-event-unbuilt | 1227ef3 | feat(mcp): 模型可用 mcp(list/enable/disable) 操作 opencode.json 中已配置的 MCP；不新增/不启动任意 server；连接/断开/关闭发布 mcp.status.changed，修复 UI 不刷新；docs 说明由模型用 shell 拉起宿主应用 | 未构建 | 未构建 |
 | 2026-10-30 12:45 | mcp-status-event-unbuilt | 1227ef3 | fix(mcp): 连接/断开/失败/连接关闭发布 mcp.status.changed；UI 已有 invalidate 逻辑，模型 mcp enable/disable 后状态自动刷新；MCP lifecycle 21 pass | 未构建 | 未构建 |
+| 2026-11-06 09:31 | 261106-0931-320bd36-dirty | 320bd36 | fix: restore workspace typecheck; feat: add project memory and model-controlled MCPs | 261106-0931-320bd36-dirty | 261106-0931-320bd36-dirty |
