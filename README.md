@@ -14,6 +14,8 @@
 | ------------ | ------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | 团队派发     | `dispatch`                                                                                              | 花名册/ad-hoc 并行子代理，join/background，并发上限、预算、续聊                                                                  |
 | 团队管理     | `team`                                                                                                  | 成员状态快照与按需停止（单个/全队）                                                                                              |
+| 子 agent 复用 | `task_id`                                                                                                | 新建子会话保存 task brief；compaction 保留目标与工作状态；可继续追问                                                            |
+| 上下文窗口   | `context`                                                                                               | 查询当前/后代子会话的 context 使用率、剩余 tokens 与是否溢出                                                                    |
 | 成员通信     | `agent_send` / `agent_inbox`                                                                            | 会话树内消息投递与审计收件箱                                                                                                     |
 | 共享状态     | `blackboard`                                                                                            | 树内 KV，版本化 + CAS + append                                                                                                   |
 | 生命周期通知 | 自动                                                                                                    | background 完成唤醒、等权限/停滞看门狗                                                                                           |
@@ -31,10 +33,10 @@
 ## 架构
 
 ```text
-                     ┌────────────────────────────────────────────┐
+                     ┌──────────────────────────────────────────────────────┐
                      │ Lead session（build / plan / 任意 primary） │
-                     │  dispatch · team · agent_send · blackboard │
-                     └───────────────┬────────────────────────────┘
+                     │  dispatch · team · context · agent_send · blackboard │
+                     └───────────────┬──────────────────────────────────────┘
                                      │ dispatch(team|tasks, mode, concurrency, …)
               ┌──────────────────────┼──────────────────────┐
               ▼                      ▼                      ▼
@@ -113,6 +115,29 @@
 - `agent_send` 不再阻塞发送者（根因：`Runner.ensureRunning` 在目标忙碌时等待其当前轮次）。
 - `dispatch` 并发上限真正生效；对运行中成员 `task_id` 续聊不再丢 prompt。
 - shell 工具超时/中止时，终止失败（进程刚好退出、taskkill 报错等）不再把整个工具调用变成错误并丢弃已捕获输出；终止等待有上限。
+
+### 9. 子 agent 复用与上下文管理
+
+- **可复用**：`task_id` 继续同一子会话，不会新建成员。
+- **任务锚点**：新建子会话时写入 `metadata.subagent`，保存描述、初始 prompt 的 8,000 字符 brief 和创建时间；resume 不覆盖原 brief。
+- **compaction**：子会话自动 compaction 时，prompt 始终包含受保护的 task brief，并要求保留 objective、constraints、files changed、tests、open questions、next steps。没有 metadata 的旧会话回退到首条用户文本。
+- **主 agent 管理**：父 agent 仍只接收最终结果和 `task_id`，不需要接管子会话完整上下文。
+- **限制**：没有手动 compact 工具；compaction 仍由上下文溢出自动触发；插件完全替换 compaction prompt 时不会注入 brief。
+
+### 10. `context` — 上下文窗口使用率
+
+`context` 是只读工具，用于在继续追问或派发前判断子 agent 的上下文压力：
+
+```text
+context()
+context(session_id="ses_...")
+```
+
+- 默认当前会话；不同会话必须是当前会话的后代，否则拒绝。
+- 基于最新一条有 token 的 assistant 消息计算：input + output + reasoning + cache.read + cache.write。
+- 返回 model context limit、used、percent、remaining、over，以及 token breakdown。
+- 缺少 token 或模型 context limit 时返回 `unavailable`，不抛错。
+- 不新增 session schema 或 compact 工具。
 
 ---
 
@@ -329,6 +354,7 @@ bun typecheck
 bun test --timeout 30000 test/tool/dispatch.test.ts
 bun test --timeout 30000 test/tool/team.test.ts
 bun test --timeout 30000 test/tool/agent-send.test.ts test/session/collaboration.test.ts
+bun test --timeout 30000 test/tool/context.test.ts test/tool/task.test.ts test/tool/dispatch.test.ts test/tool/subagent.test.ts test/session/compaction.test.ts
 ```
 
 ---
@@ -352,7 +378,7 @@ bun test --timeout 30000 test/tool/agent-send.test.ts test/session/collaboration
 
 | 路径                                     | 内容                                                                                 |
 | ---------------------------------------- | ------------------------------------------------------------------------------------ |
-| `packages/opencode`                      | 核心运行时、会话、工具（`dispatch`/`team`/`agent_send`/`agent_inbox`/`blackboard`…） |
+| `packages/opencode`                      | 核心运行时、会话、工具（`dispatch`/`team`/`context`/`agent_send`/`agent_inbox`/`blackboard`…） |
 | `packages/core`                          | 服务层：`BackgroundJob`、mailbox、blackboard 存储、配置 schema                       |
 | `packages/app`、`packages/desktop`       | Web/桌面 UI（Agent Teams 窗口与面板）                                                |
 | `script/windows`                         | 独立 server 的 Windows 启动/停止/状态与可选开机自启脚本（默认不自启）                |
@@ -369,6 +395,7 @@ bun test --timeout 30000 test/tool/agent-send.test.ts test/session/collaboration
 - `specs/agent-teams-permissions.md` — 团队场景的权限模型
 - `specs/agent-teams-prompt-awareness.md` — 提示词注入策略
 - `specs/agent-teams-backlog.md` — 后续计划（任务板、广播、成员超时等）
+- `specs/subagent-context.md` — 子 agent 复用、compaction task brief 与 `context` 使用率工具
 - `specs/independent-maintenance.md` — 独立维护：切断上游运行时/构建时联系
 - `specs/build-markers.md` — 构建标记：`BUILD.md` 记录、GUI/服务端双标记与不匹配告警
 - `LLM-IDE-SPEC/main.md` — 语义引擎总体架构与工具契约
