@@ -1,0 +1,18 @@
+Inspect context-window usage for a session.
+
+Use this to check how much of the provider model's context window a session has consumed, for example before sending a subagent more work.
+
+Parameters:
+- session_id: optional session id. Defaults to the current session. A different session is allowed only when it is a descendant of the calling session.
+
+The tool is read-only. It reports the latest assistant token usage, the model context limit, percent used, and remaining tokens.
+
+Result shape:
+
+<context session="ses_..." agent="build" model="anthropic/claude-sonnet-4-5">
+  <window limit="200000" used="50000" percent="25" remaining="150000" over="false" />
+  <tokens input="40000" output="5000" reasoning="0" cache_read="5000" cache_write="0" />
+  <source message="msg_..." />
+</context>
+
+If token usage or the context limit is unavailable, the result carries an `unavailable` attribute with the reason instead of throwing.

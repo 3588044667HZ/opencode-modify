@@ -19,6 +19,7 @@ import { EditTransactionTool } from "./edit-transaction"
 import { ProjectMapTool } from "./project-map"
 import { VerifyTestTool } from "./verify-test"
 import { TaskTool } from "./task"
+import { ContextTool } from "./context"
 import { DispatchTool } from "./dispatch"
 import { TeamTool } from "./team"
 import { AgentSendTool } from "./agent-send"
@@ -121,6 +122,7 @@ const layer = Layer.effect(
 
     const invalid = yield* InvalidTool
     const task = yield* TaskTool
+    const contextTool = yield* ContextTool
     const dispatch = flags.experimentalAgentTeams ? yield* DispatchTool : undefined
     const team = flags.experimentalAgentTeams ? yield* TeamTool : undefined
     const agentSend = flags.experimentalAgentTeams ? yield* AgentSendTool : undefined
@@ -258,6 +260,7 @@ const layer = Layer.effect(
           edit: Tool.init(edit),
           write: Tool.init(writetool),
           task: Tool.init(task),
+          context: Tool.init(contextTool),
           fetch: Tool.init(webfetch),
           todo: Tool.init(todo),
           search: Tool.init(websearch),
@@ -293,6 +296,7 @@ const layer = Layer.effect(
           tool.edit,
           tool.write,
           tool.task,
+          tool.context,
           tool.fetch,
           tool.todo,
           tool.search,
