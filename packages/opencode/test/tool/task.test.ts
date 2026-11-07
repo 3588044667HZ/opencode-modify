@@ -543,6 +543,62 @@ describe("tool.task", () => {
     }),
   )
 
+  it.instance("execute stores the subagent brief and preserves it on resume", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const { chat, assistant } = yield* seed()
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+      const context = {
+        sessionID: chat.id,
+        messageID: assistant.id,
+        agent: "build",
+        abort: new AbortController().signal,
+        extra: { promptOps: stubOps() },
+        messages: [],
+        metadata: () => Effect.void,
+        ask: () => Effect.void,
+      }
+
+      const created = yield* def.execute(
+        {
+          description: "inspect bug",
+          prompt: "original task brief",
+          subagent_type: "general",
+        },
+        context,
+      )
+      const child = yield* sessions.get(created.metadata.sessionId)
+      expect(child.metadata?.subagent).toMatchObject({
+        description: "inspect bug",
+        brief: "original task brief",
+      })
+      expect(typeof child.metadata?.subagent?.createdAt).toBe("number")
+
+      yield* sessions.setMetadata({
+        sessionID: child.id,
+        metadata: { ...child.metadata, unrelated: "keep" },
+      })
+      const before = yield* sessions.get(child.id)
+
+      const resumed = yield* def.execute(
+        {
+          description: "follow up",
+          prompt: "follow-up prompt",
+          subagent_type: "general",
+          task_id: child.id,
+        },
+        context,
+      )
+
+      const after = yield* sessions.get(child.id)
+      expect(resumed.metadata.sessionId).toBe(child.id)
+      expect(after.metadata).toEqual(before.metadata)
+      expect(after.metadata?.subagent?.brief).toBe("original task brief")
+      expect(after.metadata?.unrelated).toBe("keep")
+    }),
+  )
+
   it.instance(
     "execute forwards an explicit variant to the subagent prompt",
     () =>

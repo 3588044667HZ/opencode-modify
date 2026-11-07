@@ -224,6 +224,7 @@ export const DispatchTool = Tool.define(
           parent,
           subagent: info,
           description: member.description,
+          brief: member.prompt,
           primaryTools: cfg.experimental?.primary_tools,
           existing,
           autonomy,

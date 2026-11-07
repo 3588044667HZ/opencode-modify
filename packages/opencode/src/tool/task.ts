@@ -183,6 +183,7 @@ export const TaskTool = Tool.define(
         parent,
         subagent: next,
         description: params.description,
+        brief: params.prompt,
         primaryTools: cfg.experimental?.primary_tools,
         existing: session,
         autonomy,

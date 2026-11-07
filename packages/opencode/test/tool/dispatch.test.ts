@@ -425,6 +425,36 @@ describe("tool.dispatch", () => {
     }),
   )
 
+  it.instance("member creation stores the subagent brief and resume preserves it", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const { chat, assistant } = yield* seed()
+      const tool = yield* DispatchTool
+      const def = yield* tool.init()
+
+      yield* def.execute(
+        { tasks: [{ agent: "general", description: "first task", prompt: "do first" }] },
+        context({ chat, assistant, promptOps: stubOps() }),
+      )
+
+      const child = (yield* sessions.children(chat.id))[0]!
+      expect(child.metadata?.subagent).toMatchObject({
+        description: "first task",
+        brief: "do first",
+      })
+      expect(typeof child.metadata?.subagent?.createdAt).toBe("number")
+
+      yield* def.execute(
+        { tasks: [{ agent: "general", description: "resume", prompt: "follow up", task_id: child.id }] },
+        context({ chat, assistant, promptOps: stubOps() }),
+      )
+
+      const after = yield* sessions.get(child.id)
+      expect(after.metadata).toEqual(child.metadata)
+      expect(yield* sessions.children(chat.id)).toHaveLength(1)
+    }),
+  )
+
   it.instance("rejects an unknown task_id", () =>
     Effect.gen(function* () {
       const { chat, assistant } = yield* seed()

@@ -11,6 +11,29 @@ import { Effect } from "effect"
 import os from "os"
 import path from "path"
 
+export const SUBAGENT_BRIEF_MAX_CHARS = 8_000
+
+export type SubagentMetadata = {
+  description: string
+  brief: string
+  createdAt: number
+}
+
+/**
+ * Builds the session-metadata anchor for a reusable subagent. The brief is
+ * capped at 8,000 characters; the full prompt stays in message history so
+ * compaction only needs this as an anchor, not as a replacement transcript.
+ */
+export function buildSubagentMetadata(input: { description: string; brief: string; createdAt?: number }) {
+  return {
+    subagent: {
+      description: input.description,
+      brief: input.brief.slice(0, SUBAGENT_BRIEF_MAX_CHARS),
+      createdAt: input.createdAt ?? Date.now(),
+    } satisfies SubagentMetadata,
+  }
+}
+
 /**
  * Creates (or reuses) the child session for a subagent launched from a tool.
  * Shared by `task` and `dispatch` so both honor the same session-tree, title,
@@ -23,6 +46,7 @@ export function createSubagentSession(input: {
   parent: Session.Info
   subagent: Agent.Info
   description: string
+  brief?: string
   primaryTools?: readonly string[]
   existing?: Session.Info
   autonomy?: readonly string[]
@@ -71,6 +95,10 @@ export function createSubagentSession(input: {
       parentID: input.parent.id,
       title: input.description + ` (@${input.subagent.name} subagent)`,
       agent: input.subagent.name,
+      metadata: buildSubagentMetadata({
+        description: input.description,
+        brief: input.brief ?? "",
+      }),
       permission: [
         ...childPermission,
         ...childToolDenies.filter(

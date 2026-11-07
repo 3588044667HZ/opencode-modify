@@ -51,6 +51,64 @@ type CompletedCompaction = {
 const truncate = (value: string) =>
   value.length <= TOOL_OUTPUT_MAX_CHARS ? value : `${value.slice(0, TOOL_OUTPUT_MAX_CHARS)}\n[truncated]`
 
+const SUBAGENT_BRIEF_MAX_CHARS = 8_000
+
+type SubagentSessionInfo = {
+  readonly parentID?: SessionID
+  readonly metadata?: Record<string, unknown>
+}
+
+const isSubagentSession = (session: SubagentSessionInfo) =>
+  session.parentID !== undefined || session.metadata?.subagent !== undefined
+
+const truncateBrief = (value: string) =>
+  value.length <= SUBAGENT_BRIEF_MAX_CHARS ? value : value.slice(0, SUBAGENT_BRIEF_MAX_CHARS)
+
+function firstUserText(messages: SessionV1.WithParts[]) {
+  for (const message of messages) {
+    if (message.info.role !== "user") continue
+    if (message.parts.some((part) => part.type === "compaction")) continue
+    const text = message.parts
+      .filter((part): part is SessionV1.TextPart => part.type === "text" && !part.ignored)
+      .map((part) => part.text.trim())
+      .filter(Boolean)
+      .join("\n")
+    if (text) return text
+  }
+  return undefined
+}
+
+function metadataBrief(value: unknown) {
+  if (!value || typeof value !== "object") return undefined
+  const record = value as Record<string, unknown>
+  if (typeof record.brief !== "string" || !record.brief.trim()) return undefined
+  const description = typeof record.description === "string" ? record.description.trim() : undefined
+  return {
+    description: description || undefined,
+    brief: truncateBrief(record.brief.trim()),
+  }
+}
+
+function subagentBrief(input: { session: SubagentSessionInfo; messages: SessionV1.WithParts[] }) {
+  const metadata = metadataBrief(input.session.metadata?.subagent)
+  if (metadata) return metadata
+  // Legacy subagent sessions created before metadata existed fall back to the
+  // first non-compaction user text as the original task brief.
+  const fallback = firstUserText(input.messages)
+  if (!fallback) return undefined
+  return { description: undefined, brief: truncateBrief(fallback) }
+}
+
+function briefBlock(input: { description?: string; brief: string }) {
+  return [
+    "Subagent task brief (preserve across compaction):",
+    ...(input.description ? [`Description: ${input.description}`] : []),
+    "Task:",
+    input.brief,
+    "This session is reusable and may receive follow-up questions. Preserve the original objective, constraints, acceptance criteria, files changed, tests, open questions, and next steps.",
+  ].join("\n")
+}
+
 const serialize = (message: SessionV1.WithParts) => {
   if (message.info.role === "user") {
     const text = message.parts
@@ -355,6 +413,8 @@ const layer = Layer.effect(
         }
       }
 
+      const info = yield* session.get(input.sessionID).pipe(Effect.orDie)
+      const brief = isSubagentSession(info) ? subagentBrief({ session: info, messages: input.messages }) : undefined
       const agent = yield* agents.get("compaction")
       const model = agent.model
         ? yield* provider.getModel(agent.model.providerID, agent.model.modelID).pipe(Effect.orDie)
@@ -383,7 +443,7 @@ const layer = Layer.effect(
         [
           buildPrompt({
             previousSummary,
-            context: [conversation],
+            context: [...(brief ? [briefBlock(brief)] : []), conversation],
           }),
           ...compacting.context,
         ]

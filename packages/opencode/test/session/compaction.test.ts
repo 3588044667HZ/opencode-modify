@@ -1660,6 +1660,112 @@ describe("session.compaction.process", () => {
       expect(part?.tail_start_id).toBe(keep.id)
     }).pipe(withCompaction({ config: cfg({ tail_turns: 2, preserve_recent_tokens: 500 }) })),
   )
+
+  itCompaction.instance(
+    "includes the subagent task brief and reuse instruction in the compaction prompt",
+    () => {
+      const stub = llm()
+      let captured = ""
+      stub.push(
+        reply("summary", (input) => {
+          captured = JSON.stringify(input.messages)
+        }),
+      )
+      return Effect.gen(function* () {
+        const ssn = yield* SessionNs.Service
+        const root = yield* ssn.create({})
+        const session = yield* ssn.create({
+          parentID: root.id,
+          metadata: {
+            subagent: {
+              description: "parser repair",
+              brief: "Repair the parser and keep the acceptance tests passing.",
+              createdAt: Date.now(),
+            },
+          },
+        })
+        yield* createUserMessage(session.id, "follow-up request")
+        yield* createCompactionMarker(session.id)
+
+        const msgs = yield* ssn.messages({ sessionID: session.id })
+        const parent = msgs.at(-1)?.info.id
+        expect(parent).toBeTruthy()
+        yield* SessionCompaction.use.process({ parentID: parent!, messages: msgs, sessionID: session.id, auto: false })
+
+        expect(captured).toContain("Subagent task brief (preserve across compaction):")
+        expect(captured).toContain("Description: parser repair")
+        expect(captured).toContain("Repair the parser and keep the acceptance tests passing.")
+        expect(captured).toContain("reusable and may receive follow-up questions")
+        expect(captured).toContain("original objective, constraints, acceptance criteria")
+        expect(captured.indexOf("Subagent task brief")).toBeLessThan(captured.indexOf("[User]:"))
+      }).pipe(withCompaction({ llm: stub.llmLayer }))
+    },
+    { git: true },
+    { timeout: 20_000 },
+  )
+
+  itCompaction.instance(
+    "falls back to the first user text for legacy subagent sessions without metadata",
+    () => {
+      const stub = llm()
+      let captured = ""
+      stub.push(
+        reply("summary", (input) => {
+          captured = JSON.stringify(input.messages)
+        }),
+      )
+      return Effect.gen(function* () {
+        const ssn = yield* SessionNs.Service
+        const root = yield* ssn.create({})
+        const session = yield* ssn.create({ parentID: root.id })
+        yield* createUserMessage(session.id, "legacy original objective")
+        yield* createUserMessage(session.id, "follow-up request")
+        yield* createCompactionMarker(session.id)
+
+        const msgs = yield* ssn.messages({ sessionID: session.id })
+        const parent = msgs.at(-1)?.info.id
+        expect(parent).toBeTruthy()
+        yield* SessionCompaction.use.process({ parentID: parent!, messages: msgs, sessionID: session.id, auto: false })
+
+        expect(captured).toContain("Subagent task brief (preserve across compaction):")
+        expect(captured).toContain("Task:\\nlegacy original objective")
+        expect(captured).toContain("reusable and may receive follow-up questions")
+      }).pipe(withCompaction({ llm: stub.llmLayer }))
+    },
+    { git: true },
+    { timeout: 20_000 },
+  )
+
+  itCompaction.instance(
+    "does not add the subagent brief for normal sessions",
+    () => {
+      const stub = llm()
+      let captured = ""
+      stub.push(
+        reply("summary", (input) => {
+          captured = JSON.stringify(input.messages)
+        }),
+      )
+      return Effect.gen(function* () {
+        const ssn = yield* SessionNs.Service
+        const session = yield* ssn.create({})
+        yield* createUserMessage(session.id, "normal objective")
+        yield* createCompactionMarker(session.id)
+
+        const msgs = yield* ssn.messages({ sessionID: session.id })
+        const parent = msgs.at(-1)?.info.id
+        expect(parent).toBeTruthy()
+        yield* SessionCompaction.use.process({ parentID: parent!, messages: msgs, sessionID: session.id, auto: false })
+
+        expect(captured).toContain("[User]: normal objective")
+        expect(captured).toContain("## Objective")
+        expect(captured).not.toContain("Subagent task brief")
+        expect(captured).not.toContain("reusable and may receive follow-up questions")
+      }).pipe(withCompaction({ llm: stub.llmLayer }))
+    },
+    { git: true },
+    { timeout: 20_000 },
+  )
 })
 
 describe("util.token.estimate", () => {
