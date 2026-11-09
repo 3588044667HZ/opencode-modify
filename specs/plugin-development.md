@@ -24,10 +24,11 @@
 | 子进程 Pack Runtime | 已实现 | `src/pack/runtime.ts` |
 | 产品内发现 `packs/*/pack.json` | 部分接入 | `packages/opencode/src/pack/pack.ts:31` |
 | Prompt 贡献拼进会话 system 数组 | 部分接入 | `packages/opencode/src/session/prompt.ts:1281` / `1296` |
+| Tool 贡献接入 ToolRegistry | 已实现（MVP） | `packages/opencode/src/pack/tool.ts`、`src/tool/registry.ts` |
 
 ### 1.2 尚未接入的部分
 
-- **ToolRegistry adapter 未接入**：`tool` 贡献只是账本条目，没有注册到核心工具注册表。模型看不到这些工具，核心也无法按工具名执行它们。
+- **Tool adapter 只做了最小接线**：`tool` 贡献现在会进入模型工具列表，通过 `PackTool.method`（缺省回退到工具 id）调用 `host.call`；`inputSchema` 只作为 wire schema，不做运行时校验，工具变更也不会热刷新。
 - **Agent adapter 未接入**：`agent` 贡献没有进入核心 Agent 注册流程。
 - **SystemPrompt Service adapter 未接入**：`SystemPrompt.Service` 没有读取 Pack。当前只有 `Pack.Service.prompts()` 的结果在 `packages/opencode/src/session/prompt.ts:1281` / `1296` 被直接拼进 `system` 数组，属于最小接线，不是完整适配器。
 - **Web RPC 未接入**：`rpc` 贡献没有服务器路由暴露，也没有前端调用链。
@@ -38,7 +39,7 @@
 
 ### 1.3 不要做出的错误假设
 
-- 不要把 pack 放进目录后就宣称“产品 UI 会自动出现工具/Agent/设置页”。**目前不会。** 工具和 Agent 贡献不会被核心消费，UI 贡献没有渲染器。
+- 不要把 pack 放进目录后就宣称“产品 UI 会自动出现完整工具/Agent/设置页”。工具贡献已能进入 ToolRegistry，但 Agent/UI 贡献仍未接入；UI 贡献没有渲染器。
 - 当前产品发现逻辑会扫描配置目录下的 `packs/*/pack.json`，并**自动 `install` + `enable` 每个发现的 pack**（`packages/opencode/src/pack/pack.ts:88-91`，enable 失败被忽略）。`enable` 会启动子进程。因此只应把可信 pack 放进这些目录；这不是一个带信任确认的安装流程。
 - 不要假设 `packages/plugin` 的 README 示例之外的字段会生效。manifest 顶层是 Zod 对象，未知字段默认被剥离，不会报错。
 - `onUnmount`/`onDelete` 现在会收到 mount 时的 `scope`/`project`/`config`；但不要依赖它们一定执行（进程可能崩溃或被强杀）。
@@ -85,7 +86,7 @@ my-pack/
 说明：
 
 - `entry: "plugin.ts"` 只在 `manifest.command` 不存在时使用，执行器默认是宿主进程的 `process.execPath`。本仓库的 opencode 由 Bun 运行，所以 `.ts` 能跑；要分发给普通 Node 宿主，用 `.js`，或显式声明 `"command": ["bun", "plugin.ts"]`。
-- `tools[].id` 和 `rpc[].id` 允许点号（点号在 id 正则内）。manifest 里的工具条目**没有**“执行方法名”字段；本文示例自行约定 method 与工具 id 相同，这不是平台保证。
+- `tools[].id` 和 `rpc[].id` 允许点号（点号在 id 正则内）。工具条目可用可选 `method` 指定 IPC 方法；缺省时适配器使用工具 id。
 - `prompts[].slot` 是自由字符串；当前没有任何内置 slot 注册表。
 
 ### 2.3 最小 entry
@@ -196,7 +197,7 @@ interface Interface {
 }
 ```
 
-其中只有 `prompts()` 被 `session/prompt.ts` 消费；不要把 `contributions()` 的返回误认为已经注册到核心。工具与 Agent 仍然要等适配器。
+其中 `prompts()` 被 `session/prompt.ts` 消费，`contributions("tool")` 已由 V1 ToolRegistry 最小接入；Agent、RPC、UI 仍然要等适配器。
 
 ### 2.6 产品内最小接入（当前）
 
@@ -244,7 +245,7 @@ This repository uses tabs. Run the package tests before claiming success.
 
 - 没有产品内 enable/disable/uninstall API 或 UI；删除目录后需要实例重建才会消失。
 - 全局目录中的 pack 会对使用该全局配置的所有项目生效。
-- 当前只有 prompt 被核心消费；工具/Agent/UI 仍需适配器。
+- 当前 prompt 与 tool 已被核心消费；Agent/UI 仍需适配器。
 - 自动启用意味着 **只把可信 pack 放进这些目录**。
 
 ---
@@ -280,6 +281,7 @@ This repository uses tabs. Run the package tests before claiming success.
 type PackTool = {
   id: string
   description: string
+  method?: string
   inputSchema?: unknown
   outputSchema?: unknown
 }
@@ -288,7 +290,7 @@ type PackTool = {
 - `id`：贡献 id，规则同上。
 - `description`：`min(1)`，必填。
 - `inputSchema` / `outputSchema`：任意 JSON 值，不做校验；适配器自行决定如何转成核心 schema。
-- **没有 `method` 字段**。当前核心未接入工具适配器；如果自行实现适配器，需要自己约定“工具 id -> IPC method”的映射。不要假设平台会自动把 `review.diff` 路由到同名方法。
+- `method`：可选 IPC 方法名；缺省时 ToolRegistry 使用工具 id 作为方法。适配器不会检查该 method 是否存在于插件进程。
 
 #### agents
 
@@ -578,7 +580,7 @@ type PluginPeer = {
 
 - 用 `<packId>.<name>`，例如 `review.diff`、`review.status`；
 - 与 manifest 的 `rpc[].method` 保持一致（适配器/调用方可以据此展示和调用）；
-- 工具贡献目前没有 method 字段，若要自行映射，建议同样使用工具 id 作为 method，但这是约定，不是 API 保证。
+- 工具贡献的 `method` 可选；缺省时适配器使用工具 id 作为 method。调用方仍需自行确认插件进程是否注册了该方法。
 
 请求与通知：
 
@@ -1119,7 +1121,7 @@ const uis = host.contributions("ui")
 - 只信任 `Contribution.value` 的结构做防御性解析；不要在核心中 import pack 代码。
 - Tool adapter：
   - 读取 `value.id`、`value.description`、`inputSchema`/`outputSchema`；
-  - 执行时需要自己决定 IPC method 映射（manifest 没有 method 字段）；
+  - 执行时使用 `value.method ?? value.id` 作为 IPC method；
   - 通过 `host.call(packId, method, params)` 调用；
   - 处理 `Pack not mounted`（禁用/卸载/崩溃）并返回可读错误。
 - Agent adapter：
@@ -1388,7 +1390,7 @@ Pack <id> entry escapes its target directory
 
 ### 11.5 待接的核心适配器
 
-1. **ToolRegistry adapter**：把 `host.contributions("tool")` 转成核心工具定义；解决“工具 id -> IPC method”的映射（manifest 当前没有该字段）；处理禁用/卸载/崩溃后的调用错误。
+1. **Tool adapter（MVP 已完成）**：`packages/opencode/src/pack/tool.ts` 把 `tool` 贡献转成 V1 `Tool.Def`，缺省 method 为工具 id；后续仍需补输入 schema 校验、工具变更热刷新、禁用/卸载后的目录清理和权限/审计。
 2. **Agent adapter**：把 `agent` 贡献注册到现有 Agent 注册流程；`PackAgent` 是 passthrough，需要防御性校验。
 3. **SystemPrompt adapter**：让 prompt 贡献通过 `SystemPrompt.Service` 组装，而不是在 `session/prompt.ts` 手工拼接；明确 `slot` 的语义（当前没有枚举）。
 4. **Web RPC**：为 `rpc` 贡献增加服务器路由/权限校验，前端通过现有 HTTP/SSE 链路调用；不要用 MessagePort 替代 Web 协议。
@@ -1405,6 +1407,6 @@ Pack <id> entry escapes its target directory
 1. **`remove()` 不总是先 `onUnmount` 再 `onDelete`**。`src/ipc/process.ts` 只在 `lifecycle === "mounted"` 时先 `unmount("uninstall")`；如果已经 unmounted/created，直接发 `onDelete`。如果 `onUnmount` 失败，`onDelete` 会被跳过，但进程仍被强杀。
 2. **onUnmount 失败时 Host 的兜底范围**。代码会强杀进程，`PackHost.uninstall` 会继续 `store.remove`，但插件侧的 `onDelete` 不会被调用；持久数据只能由 Host 命名空间清理兜底。
 3. **`FilePackStore` 路径经过 `encodeURIComponent`**。README 写的是 `data/<pack>/<scope>/<key>.json`；实际 scope 的 `:` 会变成 `%3A`，key 的 `/` 会变成 `%2F`。
-4. **pack README 的“核心 adapter 未接入”需要更精确**。ToolRegistry/Agent/SystemPrompt Service 确实未接入；但 `packages/opencode/src/pack/pack.ts` 已经做了发现和 prompt 最小接线，prompt 贡献会进入 system 数组。这不等于工具/Agent/UI 可用。
+4. **pack README 的“核心 adapter 未接入”需要更精确**。ToolRegistry 已完成最小接入（`src/pack/tool.ts` + `src/tool/registry.ts`）；Agent/SystemPrompt Service 仍未接入。`packages/opencode/src/pack/pack.ts` 负责发现和 prompt 最小接线，prompt 贡献会进入 system 数组。这不等于 Agent/UI 可用。
 5. **`api`/`permissions` 只解析不执行**。README 没有声称执行，但开发者容易误以为 manifest 的 permissions 是强制边界；当前不是。
 6. **产品发现会自动启用**。README 没有描述 `packs/*/pack.json` 的自动 install+enable 行为；这是当前的实现事实，也是安全上必须知道的点。

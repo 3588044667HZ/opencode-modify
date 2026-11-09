@@ -42,6 +42,8 @@ import type { JSONSchema7, JSONSchema7Definition } from "@ai-sdk/provider"
 import { Schema } from "effect"
 import z from "zod"
 import { Plugin } from "../plugin"
+import { Pack } from "../pack"
+import { PackTools } from "../pack/tool"
 import { Provider } from "@/provider/provider"
 
 import { WebSearchTool } from "./websearch"
@@ -115,6 +117,7 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const config = yield* Config.Service
     const plugin = yield* Plugin.Service
+    const pack = yield* Pack.Service
     const agents = yield* Agent.Service
     const truncate = yield* Truncate.Service
     const flags = yield* RuntimeFlags.Service
@@ -237,6 +240,12 @@ const layer = Layer.effect(
           for (const [id, def] of Object.entries(p.tool ?? {})) {
             custom.push(fromPlugin(id, def))
           }
+        }
+
+        for (const tool of PackTools.fromContributions(yield* pack.contributions("tool"), (packId, method, params) =>
+          pack.call(packId, method, params),
+        )) {
+          if (!custom.some((item) => item.id === tool.id)) custom.push(tool)
         }
 
         const cfg = yield* config.get()
@@ -519,6 +528,7 @@ export const node = LayerNode.make({
   deps: [
     Config.node,
     Plugin.node,
+    Pack.node,
     Question.node,
     Todo.node,
     Agent.node,

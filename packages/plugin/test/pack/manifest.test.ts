@@ -8,7 +8,7 @@ describe("pack manifest", () => {
       version: "1.0.0",
       entry: "index.js",
       contributes: {
-        tools: [{ id: "review.diff", description: "Review a diff" }],
+        tools: [{ id: "review.diff", description: "Review a diff", method: "review.diff" }],
         agents: [{ id: "reviewer", prompt: "You review code." }],
         prompts: [{ id: "review.style", content: "Be precise." }],
         rpc: [{ id: "review.status", method: "review.status" }],
@@ -18,6 +18,7 @@ describe("pack manifest", () => {
 
     expect(manifest.id).toBe("review")
     expect(manifest.contributes?.tools?.[0]?.id).toBe("review.diff")
+    expect(manifest.contributes?.tools?.[0]?.method).toBe("review.diff")
   })
 
   test("rejects duplicate ids within the same contribution kind", () => {

@@ -4,6 +4,7 @@ const id = z.string().min(1).regex(/^[A-Za-z0-9._-]+$/, "Pack ids may contain le
 export const PackTool = z.object({
   id,
   description: z.string().min(1),
+  method: z.string().min(1).optional(),
   inputSchema: z.unknown().optional(),
   outputSchema: z.unknown().optional(),
 })

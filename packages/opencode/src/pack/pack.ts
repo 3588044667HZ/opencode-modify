@@ -14,6 +14,7 @@ import { dirname } from "node:path"
 export interface Interface {
   readonly prompts: () => Effect.Effect<string[]>
   readonly contributions: (kind?: ContributionKind) => Effect.Effect<readonly Contribution[]>
+  readonly call: (packId: string, method: string, params?: unknown) => Effect.Effect<unknown, unknown>
   readonly reload: () => Effect.Effect<void>
 }
 
@@ -124,6 +125,13 @@ const layer = Layer.effect(
       prompts: () => InstanceState.useEffect(state, (host) => Effect.sync(() => prompts(host))),
       contributions: (kind) =>
         InstanceState.useEffect(state, (host) => Effect.sync(() => host.contributions(kind))),
+      call: (packId, method, params) =>
+        InstanceState.useEffect(state, (host) =>
+          Effect.tryPromise({
+            try: () => host.call(packId, method, params),
+            catch: (error) => error,
+          }),
+        ),
       reload: () => InstanceState.useEffect(state, (host) => Effect.tryPromise(() => host.reload()).pipe(Effect.ignore)),
     })
   }),

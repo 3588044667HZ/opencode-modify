@@ -11,6 +11,7 @@ import { testEffect } from "../lib/effect"
 import { TestConfig } from "../fixture/config"
 import { Config } from "@/config/config"
 import { Plugin } from "@/plugin"
+import { Pack } from "@/pack"
 import { Agent } from "@/agent/agent"
 import { InstanceState } from "@/effect/instance-state"
 
@@ -50,10 +51,21 @@ const brokenPluginLayer = Layer.succeed(
   }),
 )
 
+const noopPackLayer = Layer.succeed(
+  Pack.Service,
+  Pack.Service.of({
+    prompts: () => Effect.succeed([]),
+    contributions: () => Effect.succeed([]),
+    call: () => Effect.succeed(undefined),
+    reload: () => Effect.void,
+  }),
+)
+
 const root = LayerNode.group([ToolRegistry.node, Agent.node])
 const replacements = [
   [Config.node, configLayer],
   [RuntimeFlags.node, RuntimeFlags.layer()],
+  [Pack.node, noopPackLayer],
 ] as const
 
 const it = testEffect(LayerNode.compile(root, replacements))
@@ -61,6 +73,7 @@ const withCodeMode = testEffect(
   LayerNode.compile(root, [
     [Config.node, configLayer],
     [RuntimeFlags.node, RuntimeFlags.layer({ experimentalCodeMode: true })],
+    [Pack.node, noopPackLayer],
     [
       MCP.node,
       Layer.mock(MCP.Service, {
@@ -84,6 +97,7 @@ const withEmptyCodeMode = testEffect(
   LayerNode.compile(root, [
     [Config.node, configLayer],
     [RuntimeFlags.node, RuntimeFlags.layer({ experimentalCodeMode: true })],
+    [Pack.node, noopPackLayer],
     [
       MCP.node,
       Layer.mock(MCP.Service, {
@@ -105,6 +119,7 @@ const withSemanticDefault = testEffect(
   LayerNode.compile(root, [
     [Config.node, semanticLayer()],
     [RuntimeFlags.node, RuntimeFlags.layer()],
+    [Pack.node, noopPackLayer],
   ]),
 )
 const withSemanticAll = testEffect(
@@ -121,6 +136,7 @@ const withSemanticAll = testEffect(
       ]),
     ],
     [RuntimeFlags.node, RuntimeFlags.layer()],
+    [Pack.node, noopPackLayer],
   ]),
 )
 

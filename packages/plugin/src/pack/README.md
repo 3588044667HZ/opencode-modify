@@ -60,7 +60,7 @@ await host.uninstall("review") // onUnmount + onDelete + 删除命名空间数�
 - 进程崩溃不会留下已注册贡献
 - `onUnmount` 失败也会强杀进程；Host 注入 `OPENCODE_PACK_TOKEN`，插件 helper 默认校验
 - `onDelete` 失败时 Host 仍然删除安装记录和命名空间数据
-- 已卸载的工具调用由核心的 fallback renderer 处理，不改历史
+- 工具贡献由 V1 ToolRegistry 最小接入；禁用/卸载后已注册的工具不会自动移出当前工具快照，调用会返回 `Pack not mounted` 的可读错误
 
 ## Store
 
@@ -83,6 +83,7 @@ await host.uninstall("review") // onUnmount + onDelete + 删除命名空间数�
 ## 当前边界
 
 - `ContributionLedger` 已提供工具、Agent、Prompt、RPC、UI 五类贡献
-- 核心 ToolRegistry、Agent、SystemPrompt 的 adapter 还未接入；当前 `contributions()` 是待消费的快照
+- Tool 贡献已通过 `packages/opencode/src/pack/tool.ts` 接入 V1 ToolRegistry（MVP；缺省 method 为工具 id）
+- Agent、SystemPrompt、RPC、UI 的 adapter 还未接入；当前 `contributions()` 对这几类仍是待消费的快照
 - 第三方 pack 必须走子进程；进程内插件没有安全隔离
 - 卸载不会删除 session 历史或用户通过工具主动修改的文件
