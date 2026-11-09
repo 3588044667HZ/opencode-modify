@@ -26,6 +26,24 @@ semantic_product_rank() {
   esac
 }
 
+# IDE 的 bin 目录在 PATH 中时，反推安装根目录；覆盖手工安装/绿色版（不依赖注册表）。
+semantic_path_idea_dirs() {
+  local entry parent
+  [ -n "${PATH:-}" ] || return 0
+  while IFS= read -r entry; do
+    [ -n "$entry" ] || continue
+    case "$entry" in
+      */bin|*/bin/) parent="${entry%/bin}"; parent="${parent%/}" ;;
+      *) continue ;;
+    esac
+    if [ -f "$parent/product-info.json" ] && [ -d "$parent/lib" ]; then
+      printf '%s
+' "$parent"
+    fi
+  done <<< "$(printf '%s' "$PATH" | tr ':' '
+')"
+}
+
 # Windows 卸载表（HKLM + HKCU Uninstall）：DisplayName 匹配产品族 → InstallLocation
 semantic_registry_idea_dirs() {
   command -v reg >/dev/null 2>&1 || return 0
@@ -101,6 +119,7 @@ semantic_resolve_idea_dir() {
   local candidate code resolved
   resolved="$(
     {
+      semantic_path_idea_dirs
       semantic_registry_idea_dirs
       semantic_toolbox_and_common_idea_dirs
     } | while IFS= read -r candidate; do
@@ -156,6 +175,7 @@ semantic_resolve_jdk_home() {
 semantic_ide_jbr_candidates() {
   local dir
   {
+    semantic_path_idea_dirs
     semantic_registry_idea_dirs
     semantic_toolbox_and_common_idea_dirs
     semantic_android_studio_dirs

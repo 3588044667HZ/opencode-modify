@@ -33,7 +33,11 @@ JAVAC="$TOOL_HOME/bin/javac.exe"
 JAR="$TOOL_HOME/bin/jar.exe"
 [ -x "$JAR" ] || JAR="$TOOL_HOME/bin/jar"
 
-CP="$IDEA_DIR/lib/*;$IDEA_DIR/plugins/java/lib/*;$IDEA_DIR/plugins/java/lib/modules/*"
+IDEA_DIR_WIN="$IDEA_DIR"
+if command -v cygpath >/dev/null 2>&1; then
+  IDEA_DIR_WIN="$(cygpath -w "$IDEA_DIR")"
+fi
+CP="$IDEA_DIR_WIN/lib/*;$IDEA_DIR_WIN/plugins/java/lib/*;$IDEA_DIR_WIN/plugins/java/lib/modules/*"
 
 OUT="$ROOT/build-local"
 rm -rf "$OUT/classes"
