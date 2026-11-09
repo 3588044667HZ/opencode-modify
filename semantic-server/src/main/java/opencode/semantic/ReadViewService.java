@@ -39,6 +39,7 @@ import com.intellij.psi.PsiRecursiveElementWalkingVisitor;
 import com.intellij.psi.PsiReference;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.PsiShortNamesCache;
+import com.intellij.psi.util.PsiTreeUtil;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -152,6 +153,10 @@ final class ReadViewService {
       }
     }
 
+    if ("definition".equals(view) && symbol != null && !symbol.isEmpty() && definition == null) {
+      throw new JsonRpcServer.RpcException(-32002, "symbol not found: " + symbol, null);
+    }
+
     String version = versionOf(virtualFile);
     String fullText = null;
     if (document != null) {
@@ -210,6 +215,10 @@ final class ReadViewService {
         psiFile == null || document == null
             ? List.of()
             : safeStep(warnings, List.of(), () -> collectSymbols(psiFile, document, warnings));
+    if (symbols.isEmpty() && psiFile != null && document != null && !analysisSupported(psiFile, warnings)
+        && warnings.size() < MAX_WARNINGS) {
+      warnings.add("symbol analysis unavailable for this language; content is still usable");
+    }
     int startLine = computeStartLine(view, definition, document, line, totalLines);
     int endLine = Math.min(totalLines, startLine + CHUNK_LINES - 1);
 
@@ -246,11 +255,25 @@ final class ReadViewService {
     int currentLine = line != null ? clamp(line, 1, totalLines) : startLine;
     position.addProperty("current", currentLine);
     position.addProperty("total", totalLines);
-    position.addProperty(
-        "in_symbol", symbolAt(symbols, currentLine, psiFile != null ? psiFile.getName() : virtualFile.getName()));
+    String inSymbol = symbolAt(symbols, currentLine);
+    if (inSymbol != null) position.addProperty("in_symbol", inSymbol);
     position.addProperty(
         "remaining_symbols", symbols.stream().filter(s -> s.startLine > endLine).count());
     result.add("position", position);
+
+    // entry 首屏给符号索引：大文件的 imports/常量之后仍能快速定位定义。
+    if ("entry".equals(view) && line == null && !symbols.isEmpty()) {
+      JsonArray outline = new JsonArray();
+      for (Symbol outlineSymbol : symbols.subList(0, Math.min(symbols.size(), 20))) {
+        JsonObject item = new JsonObject();
+        item.addProperty("name", outlineSymbol.name);
+        item.addProperty("line", outlineSymbol.startLine);
+        item.addProperty("kind", symbolKindName(outlineSymbol.kind));
+        outline.add(item);
+      }
+      result.add("outline", outline);
+      result.addProperty("outline_total", symbols.size());
+    }
 
     JsonArray content = new JsonArray();
     Map<Integer, Diagnostic> diagnosticsByLine = new HashMap<>();
@@ -427,20 +450,28 @@ final class ReadViewService {
     return element != null && element.getClass().getName().startsWith("com.jetbrains.python");
   }
 
-  private static String symbolAt(List<Symbol> symbols, int line, String fallbackName) {
+  private static String symbolKindName(int kind) {
+    return switch (kind) {
+      case 0 -> "class";
+      case 1 -> "method";
+      case 2 -> "field";
+      default -> "symbol";
+    };
+  }
+
+  private static String symbolAt(List<Symbol> symbols, int line) {
     Symbol best = null;
+    int bestSpan = Integer.MAX_VALUE;
     for (Symbol symbol : symbols) {
       if (symbol.startLine <= line && line <= symbol.endLine) {
-        if (best == null
-            || symbol.kind < best.kind
-            || (symbol.kind == best.kind && symbol.endLine - symbol.startLine < best.endLine - best.startLine)) {
+        int span = symbol.endLine - symbol.startLine;
+        if (best == null || span < bestSpan || (span == bestSpan && symbol.kind < best.kind)) {
           best = symbol;
+          bestSpan = span;
         }
       }
     }
-    if (best != null) return best.name;
-    int dot = fallbackName.lastIndexOf('.');
-    return dot > 0 ? fallbackName.substring(0, dot) : fallbackName;
+    return best == null ? null : best.name;
   }
 
   // ---- 诊断（DaemonCodeAnalyzer，headless best-effort） ----
@@ -758,6 +789,8 @@ final class ReadViewService {
       return null;
     }
     if (resolved == null || resolved == element || !resolved.isValid()) return null;
+    if (resolved instanceof PsiFile) return null; // import 解析到模块文件时没有可用的定义行
+    if (PsiTreeUtil.isAncestor(resolved, element, false)) return null; // 不要指向包围函数/字段自身
     if (resolved instanceof PsiCompiledElement) return null; // 跳过 JDK/库的 .class 锚点
     PsiFile resolvedFile = resolved.getContainingFile();
     if (resolvedFile == null || resolvedFile.getVirtualFile() == null) return null;
@@ -768,12 +801,23 @@ final class ReadViewService {
       // 项目外目标（SDK/库/stub，如 Python typeshed）不产出锚点：绝对路径对项目阅读无意义
       if (!resolvedPath.equals(base) && !resolvedPath.startsWith(base + "/")) return null;
     }
-    TextRange range = resolved.getTextRange();
+    TextRange range = resolved instanceof PsiNameIdentifierOwner owner && owner.getNameIdentifier() != null
+        ? owner.getNameIdentifier().getTextRange()
+        : resolved.getTextRange();
     if (range == null) return null;
     Document resolvedDocument = PsiDocumentManager.getInstance(project).getDocument(resolvedFile);
     if (resolvedDocument == null) return null;
     int offset = clamp(range.getStartOffset(), 0, resolvedDocument.getTextLength());
     int line = resolvedDocument.getLineNumber(offset) + 1;
+    // 同一行上的自引用（例如 self.actor = actor）没有导航价值。
+    if (resolvedFile == psiFile) {
+      Document sourceDocument = PsiDocumentManager.getInstance(project).getDocument(psiFile);
+      TextRange sourceRange = element.getTextRange();
+      if (sourceDocument != null && sourceRange != null) {
+        int sourceLine = sourceDocument.getLineNumber(clamp(sourceRange.getStartOffset(), 0, sourceDocument.getTextLength())) + 1;
+        if (sourceLine == line) return null;
+      }
+    }
 
     JsonObject anchor = new JsonObject();
     anchor.addProperty("symbol", element.getText());
@@ -947,29 +991,9 @@ final class ReadViewService {
     if (warnings.size() < MAX_WARNINGS) warnings.add(analysisWarning(t));
   }
 
-  /** 有界、去重的降级警告：`analysis unavailable: <exception class>`；异常链含 CNF 时附缺失类名。 */
+  /** 有界、去重的降级警告：不泄露内部异常类名，只说明某类分析降级且内容仍可用。 */
   private static String analysisWarning(Throwable t) {
-    String label = t.getClass().getSimpleName();
-    if (label.isEmpty()) label = t.getClass().getName();
-    String missing = firstToken(missingClassName(t));
-    return "analysis unavailable: " + label + (missing == null || missing.isEmpty() ? "" : ": " + missing);
-  }
-
-  /** 平台常把 ClassNotFoundException 包在 RuntimeException 里，沿 cause 链找（防自引用循环）。 */
-  private static String missingClassName(Throwable t) {
-    int depth = 0;
-    for (Throwable current = t; current != null && depth < 10; current = current.getCause(), depth++) {
-      if (current instanceof ClassNotFoundException found) return found.getMessage();
-      if (current.getCause() == current) break;
-    }
-    return null;
-  }
-
-  private static String firstToken(String value) {
-    if (value == null) return null;
-    int space = value.indexOf(' ');
-    String token = space < 0 ? value : value.substring(0, space);
-    return token.length() > 160 ? token.substring(0, 160) : token;
+    return "some analysis is unavailable; content is still usable";
   }
 
   private static boolean isPythonFile(String file) {

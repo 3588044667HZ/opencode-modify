@@ -70,10 +70,34 @@ describe("semantic render", () => {
 
     const lines = render(result).split("\n")
     expect(lines[0]).toBe("b.py [M, v:v2] · L1-2 · symbols: 1")
-    expect(lines[1]).toBe("pos: L2/2 (100%), 0 symbols below")
+    expect(lines[1]).toBe("pos: L2/2 (100%), module scope, 0 symbols below")
     expect(lines[3]).toBe("L1  y = 2" + " ".repeat(36 - "L1  y = 2".length) + "→ def@b.py:1")
     expect(lines[4]).toContain("L2  return y")
     expect(lines[4]!.indexOf("⚠ unused")).toBe(36)
+  })
+
+  test("renders the entry outline before content", () => {
+    const result: Protocol.ReadViewResult = {
+      ...SAMPLE_RESULT,
+      outline: [
+        { name: "load", line: 40, kind: "method" },
+        { name: "helper", line: 44, kind: "method" },
+      ],
+      outline_total: 5,
+    }
+
+    const lines = render(result).split("\n")
+    expect(lines[1]).toBe("pos: L43/320 (13%), in load(), 4 symbols below")
+    expect(lines[2]).toBe("outline: L40 method load, L44 method helper (+3 more)")
+  })
+
+  test("labels a position outside any symbol as module scope", () => {
+    const result: Protocol.ReadViewResult = {
+      ...SAMPLE_RESULT,
+      position: { current: 1, total: 320, remaining_symbols: 2 },
+    }
+
+    expect(render(result).split("\n")[1]).toBe("pos: L1/320 (0%), module scope, 2 symbols below")
   })
 
   test("renders multiple coverage ranges", () => {

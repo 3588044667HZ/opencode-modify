@@ -43,6 +43,7 @@ const mode = {
   forever: flags.includes("--indexing-forever"),
   readViewError: flags.find((flag) => flag.startsWith("--read-view-error="))?.split("=")[1],
   readViewReconcile: flags.find((flag) => flag.startsWith("--read-view-reconcile="))?.split("=")[1],
+  readViewWindow: flags.includes("--read-view-window"),
   blastRadiusError: flags.find((flag) => flag.startsWith("--blast-radius-error="))?.split("=")[1],
   editBatchError: flags.find((flag) => flag.startsWith("--edit-batch-error="))?.split("=")[1],
   editTransactionError: flags.find((flag) => flag.startsWith("--edit-transaction-error="))?.split("=")[1],
@@ -167,6 +168,29 @@ async function handle(socket: net.Socket, message: any) {
       }
       if (mode.readViewError === "notfound") {
         respondError(socket, message.id, -32001, "file not found")
+        return
+      }
+      if (mode.readViewWindow) {
+        const start = Math.max(1, Number(message.params?.position?.line ?? 1))
+        const end = Math.min(320, start + 79)
+        const content = Array.from({ length: end - start + 1 }, (_, index) => ({
+          line: start + index,
+          text: `line ${start + index}`,
+        }))
+        const read = [[start, end]]
+        const unread: number[][] = []
+        if (start > 1) unread.push([1, start - 1])
+        if (end < 320) unread.push([end + 1, 320])
+        respond(socket, message.id, {
+          file: "engine.ts",
+          version: "win",
+          size: { lines: 320, symbols: 0 },
+          status: { modified: false, errors: 0 },
+          position: { current: start, total: 320, remaining_symbols: 0 },
+          content,
+          coverage: { read, unread },
+          diagnostics: [],
+        })
         return
       }
       if (mode.readViewReconcile === "delta") {

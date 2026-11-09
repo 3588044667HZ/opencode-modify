@@ -67,14 +67,14 @@ describe("semantic client", () => {
       await server.close()
     })
 
-    test("rejects malformed reconcile responses instead of silently ignoring fields", async () => {
+    test("rejects malformed reconcile responses", async () => {
       const server = await listenServer((message, socket) => {
         if (message.method !== "read_view") return
         socket.write(
           frame({
             jsonrpc: "2.0",
             id: message.id,
-            result: { ...SAMPLE_RESULT_UNCHANGED, file: "engine.ts" },
+            result: { ...SAMPLE_RESULT_UNCHANGED, version: 42 },
           }),
         )
       })
@@ -213,14 +213,38 @@ describe("semantic client", () => {
       expect(Protocol.decodeOption(Protocol.ReadViewResult, SAMPLE_READ_RECONCILE_FULL)).toEqual(SAMPLE_READ_RECONCILE_FULL)
     })
 
-    test("rejects unknown fields at the top level and inside delta hunks", () => {
-      expect(Protocol.decodeOption(Protocol.ReadViewResult, { ...SAMPLE_RESULT_UNCHANGED, extra: true })).toBeUndefined()
+    test("ignores unknown fields at the top level and inside delta hunks", () => {
+      expect(
+        Protocol.decodeOption(Protocol.ReadViewResult, { ...SAMPLE_RESULT_UNCHANGED, extra: true }),
+      ).toEqual(SAMPLE_RESULT_UNCHANGED)
       expect(
         Protocol.decodeOption(Protocol.ReadViewResult, {
           ...SAMPLE_READ_DELTA,
-          reconciliation: { ...SAMPLE_DELTA, hunks: [{ ...SAMPLE_DELTA.hunks[0], extra: true }] },
+          extra: true,
+          reconciliation: {
+            ...SAMPLE_DELTA,
+            extra: true,
+            hunks: [{ ...SAMPLE_DELTA.hunks[0], extra: true }, ...SAMPLE_DELTA.hunks.slice(1)],
+          },
         }),
-      ).toBeUndefined()
+      ).toEqual(SAMPLE_READ_DELTA)
+      expect(
+        Protocol.decodeOption(Protocol.ReadViewResult, { ...SAMPLE_READ_DELTA, delta: SAMPLE_DELTA }),
+      ).toEqual(SAMPLE_READ_DELTA)
+    })
+
+    test("ignores unknown top-level and nested fields on a stable content result", () => {
+      const withExtras = {
+        ...SAMPLE_RESULT,
+        extra: "top-level",
+        size: { ...SAMPLE_RESULT.size, extra: "nested" },
+        content: SAMPLE_RESULT.content.map((line) => ({ ...line, extra: "line" })),
+      }
+
+      expect(Protocol.decodeOption(Protocol.ReadViewResult, withExtras)).toEqual(SAMPLE_RESULT)
+    })
+
+    test("still rejects unknown delta ops and invalid reconciliation discriminants", () => {
       expect(
         Protocol.decodeOption(Protocol.ReadViewResult, {
           ...SAMPLE_READ_DELTA,
@@ -228,13 +252,17 @@ describe("semantic client", () => {
         }),
       ).toBeUndefined()
       expect(
-        Protocol.decodeOption(Protocol.ReadViewResult, { ...SAMPLE_READ_DELTA, delta: SAMPLE_DELTA }),
+        Protocol.decodeOption(Protocol.ReadViewResult, {
+          ...SAMPLE_READ_DELTA,
+          reconciliation: { mode: "partial" },
+        }),
       ).toBeUndefined()
     })
 
-    test("rejects a mixed response that is neither unchanged nor a content view", () => {
+    test("rejects a response that matches no union branch", () => {
+      expect(Protocol.decodeOption(Protocol.ReadViewResult, { unchanged: false, version: "a3f9c2" })).toBeUndefined()
       expect(
-        Protocol.decodeOption(Protocol.ReadViewResult, { unchanged: true, version: "a3f9c2", content: [] }),
+        Protocol.decodeOption(Protocol.ReadViewResult, { file: "engine.ts", version: "a3f9c2" }),
       ).toBeUndefined()
     })
   })

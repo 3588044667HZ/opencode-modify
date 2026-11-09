@@ -89,7 +89,8 @@ describe("tool.read_view", () => {
 
         const result = yield* run(dir, { file: "engine.ts", view: "entry" }, next)
 
-        expect(result.output).toBe(SAMPLE_RENDER)
+        expect(result.output).toBe(`${SAMPLE_RENDER}
+hint: pass known_version=a3f9c2 to reconcile next read`)
         expect(result.title).toBe("engine.ts")
         expect(result.metadata).toMatchObject({ view: "entry", version: "a3f9c2", lines: 320, symbols: 6 })
         const read = asks.find((item) => item.permission === "read")
@@ -116,6 +117,32 @@ describe("tool.read_view", () => {
         expect(result.output).toContain("read_view unavailable:")
         expect(result.output).toContain("disabled")
         expect(result.metadata).toMatchObject({ unavailable: true })
+      }),
+    20_000,
+  )
+
+  it.live(
+    "continues from the previous window and persists cumulative coverage",
+    () =>
+      Effect.gen(function* () {
+        const dir = yield* tmpdirScoped({
+          config: { semantic: { enabled: true, command: command("--read-view-window") } },
+        })
+
+        const first = yield* run(dir, { file: "engine.ts", view: "entry" })
+        expect(first.output).toContain("read: L1-80 · unread: L81-320")
+
+        const next = yield* run(dir, { file: "engine.ts", view: "continue" })
+        expect(next.output).toContain("pos: L81/320")
+        expect(next.output).toContain("read: L1-160 · unread: L161-320")
+
+        const jump = yield* run(dir, { file: "engine.ts", view: "sequential", position: { line: 200 } })
+        expect(jump.output).toContain("pos: L200/320")
+        expect(jump.output).toContain("read: L1-160, L200-279 · unread: L161-199, L280-320")
+
+        const tail = yield* run(dir, { file: "engine.ts", view: "continue" })
+        expect(tail.output).toContain("pos: L280/320")
+        expect(tail.output).toContain("read: L1-160, L200-320 · unread: L161-199")
       }),
     20_000,
   )
@@ -178,6 +205,42 @@ describe("tool.read_view", () => {
         expect(result.output).toContain("read_view unavailable:")
         expect(result.output).toContain("could not find this file")
         expect(result.output).toContain("hint: call fallback_option_direct")
+      }),
+    20_000,
+  )
+
+  it.live(
+    "falls back to a plain read when the semantic engine is still indexing",
+    () =>
+      Effect.gen(function* () {
+        const dir = yield* tmpdirScoped({
+          config: { semantic: { enabled: true, command: command("--indexing-forever") } },
+        })
+        yield* Effect.promise(() => Bun.write(path.join(dir, "engine.ts"), "alpha\nbeta\n"))
+
+        const result = yield* provideInstance(dir)(
+          Effect.gen(function* () {
+            const semantic = yield* Semantic.Service
+            yield* semantic.init()
+            yield* semantic.readView({ file: "engine.ts", view: "entry" }).pipe(Effect.catch(() => Effect.void))
+            yield* pollWithTimeout(
+              Effect.gen(function* () {
+                const current = yield* semantic.status()
+                return current.status === "indexing" ? current : undefined
+              }),
+              "semantic engine never reported indexing",
+              "15 seconds",
+            )
+            const info = yield* ReadViewTool
+            const tool = yield* info.init()
+            return yield* tool.execute({ file: "engine.ts", view: "entry" }, ctx)
+          }),
+        )
+
+        expect(result.output).toContain("read_view unavailable:")
+        expect(result.output).toContain("fallback: plain read")
+        expect(result.output).toContain("L1  alpha")
+        expect(result.metadata).toMatchObject({ unavailable: true, fallback: true })
       }),
     20_000,
   )

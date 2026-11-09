@@ -123,14 +123,34 @@ describe("semantic blast_radius client", () => {
     await server.close()
   })
 
-  test("rejects responses with excess fields instead of silently ignoring them", async () => {
+  test("ignores unknown fields at the top level and in nested objects", async () => {
     const cases = [
-      { ...SAMPLE_BLAST_RESULT, extra: true },
+      {
+        ...SAMPLE_BLAST_RESULT,
+        extra: true,
+        definition: { ...SAMPLE_BLAST_RESULT.definition, extra: 1 },
+      },
       {
         ...SAMPLE_BLAST_RESULT,
         callers: [{ ...SAMPLE_BLAST_RESULT.callers[0], extra: 1 }, ...SAMPLE_BLAST_RESULT.callers.slice(1)],
       },
+    ]
+
+    for (const result of cases) {
+      const server = await serve(result)
+      const client = await Client.connect(server.endpoint, { connect_timeout_ms: 2_000 })
+
+      expect(await client.blastRadius({ symbol: "load" })).toEqual(SAMPLE_BLAST_RESULT)
+
+      client.close()
+      await server.close()
+    }
+  })
+
+  test("rejects invalid enum values and wrong field types", async () => {
+    const cases = [
       { ...SAMPLE_BLAST_RESULT, summary: { ...SAMPLE_BLAST_RESULT.summary, risk: "critical" } },
+      { ...SAMPLE_BLAST_RESULT, callers: [{ ...SAMPLE_BLAST_RESULT.callers[0], line: "42" }] },
     ]
 
     for (const result of cases) {

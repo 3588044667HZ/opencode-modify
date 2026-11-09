@@ -14,6 +14,8 @@ export function render(result: Protocol.ReadViewResult): string {
   const lines = [header(result)]
   const position = positionLine(result)
   if (position !== undefined) lines.push(position)
+  const outline = outlineLine(result)
+  if (outline !== undefined) lines.push(outline)
   lines.push("")
   for (const entry of result.content) lines.push(contentLine(entry, result.diagnostics))
   const coverage = coverageLine(result)
@@ -74,7 +76,7 @@ function positionLine(result: Protocol.ReadViewContent): string | undefined {
   if (!position) return undefined
   const percent = position.total > 0 ? Math.floor((position.current / position.total) * 100) : 0
   const parts = [
-    ...(position.in_symbol === undefined ? [] : [`in ${position.in_symbol}()`]),
+    position.in_symbol === undefined ? "module scope" : `in ${position.in_symbol}()`,
     `${position.remaining_symbols} symbols below`,
   ]
   return `pos: L${position.current}/${position.total} (${percent}%), ${parts.join(", ")}`
@@ -92,6 +94,12 @@ function contentLine(entry: Protocol.ContentLine, diagnostics: ReadonlyArray<Pro
   if (annotations.length === 0) return base
   const padded = base.length >= ANNOTATION_COLUMN ? `${base} ` : base.padEnd(ANNOTATION_COLUMN)
   return padded + annotations.join(" ")
+}
+
+function outlineLine(result: Protocol.ReadViewContent): string | undefined {
+  if (!result.outline || result.outline.length === 0) return undefined
+  const more = result.outline_total !== undefined ? result.outline_total - result.outline.length : 0
+  return `outline: ${result.outline.map((item) => `L${item.line} ${item.kind} ${item.name}`).join(", ")}${more > 0 ? ` (+${more} more)` : ""}`
 }
 
 function coverageLine(result: Protocol.ReadViewContent): string | undefined {

@@ -290,7 +290,7 @@ describe("semantic edit_transaction decoding", () => {
     expect(files[0]?.position_map).toHaveLength(2)
   })
 
-  test("rejects unknown reconciliation shapes on transaction errors", () => {
+  test("rejects invalid reconciliation shapes and malformed position maps", () => {
     expect(
       decode({
         ...SAMPLE_EDIT_TRANSACTION_MISMATCH,
@@ -328,29 +328,50 @@ describe("semantic edit_transaction decoding", () => {
     )
   })
 
-  test("rejects excess fields at the top level and in nested objects", () => {
+  test("ignores unknown fields at the top level and in nested objects", () => {
     const cases = [
-      { ...SAMPLE_EDIT_TRANSACTION_SUCCESS, extra: true },
+      { value: { ...SAMPLE_EDIT_TRANSACTION_SUCCESS, extra: true }, expected: SAMPLE_EDIT_TRANSACTION_SUCCESS },
       {
-        ...SAMPLE_EDIT_TRANSACTION_SUCCESS,
-        files: [{ ...SAMPLE_EDIT_TRANSACTION_SUCCESS.files[0], extra: true }],
+        value: {
+          ...SAMPLE_EDIT_TRANSACTION_SUCCESS,
+          files: [{ ...SAMPLE_EDIT_TRANSACTION_SUCCESS.files[0], extra: true }],
+        },
+        expected: { ...SAMPLE_EDIT_TRANSACTION_SUCCESS, files: [SAMPLE_EDIT_TRANSACTION_SUCCESS.files[0]] },
       },
       {
-        ...SAMPLE_EDIT_TRANSACTION_SUCCESS,
-        files: [{ ...SAMPLE_EDIT_TRANSACTION_SUCCESS.files[0], line_changes: [{ line: 1, action: "modified", extra: 1 }] }],
+        value: {
+          ...SAMPLE_EDIT_TRANSACTION_SUCCESS,
+          files: [{ ...SAMPLE_EDIT_TRANSACTION_SUCCESS.files[0], line_changes: [{ line: 1, action: "modified", extra: 1 }] }],
+        },
+        expected: {
+          ...SAMPLE_EDIT_TRANSACTION_SUCCESS,
+          files: [{ ...SAMPLE_EDIT_TRANSACTION_SUCCESS.files[0], line_changes: [{ line: 1, action: "modified" as const }] }],
+        },
       },
       {
-        ...SAMPLE_EDIT_TRANSACTION_SUCCESS,
-        diagnostics_delta: { "src/core/engine.ts": { errors: -2, warnings: 0, infos: 1 } },
+        value: {
+          ...SAMPLE_EDIT_TRANSACTION_SUCCESS,
+          diagnostics_delta: { "src/core/engine.ts": { errors: -2, warnings: 0, infos: 1 } },
+        },
+        expected: {
+          ...SAMPLE_EDIT_TRANSACTION_SUCCESS,
+          diagnostics_delta: { "src/core/engine.ts": { errors: -2, warnings: 0 } },
+        },
       },
-      { ...SAMPLE_EDIT_TRANSACTION_FAILURE, extra: true },
+      { value: { ...SAMPLE_EDIT_TRANSACTION_FAILURE, extra: true }, expected: SAMPLE_EDIT_TRANSACTION_FAILURE },
       {
-        ...SAMPLE_EDIT_TRANSACTION_FAILURE,
-        error: { ...SAMPLE_EDIT_TRANSACTION_FAILURE.error, detail: { change_index: 1, extra: true } },
+        value: {
+          ...SAMPLE_EDIT_TRANSACTION_FAILURE,
+          error: { ...SAMPLE_EDIT_TRANSACTION_FAILURE.error, detail: { change_index: 1, extra: true } },
+        },
+        expected: {
+          ...SAMPLE_EDIT_TRANSACTION_FAILURE,
+          error: { ...SAMPLE_EDIT_TRANSACTION_FAILURE.error, detail: { change_index: 1 } },
+        },
       },
     ]
 
-    for (const value of cases) expect(decode(value)).toBeUndefined()
+    for (const item of cases) expect(decode(item.value)).toEqual(item.expected)
   })
 
   test("rejects unknown error codes, the RPC-only journal code, and bad discriminators", () => {
@@ -358,7 +379,7 @@ describe("semantic edit_transaction decoding", () => {
       decode({ applied: false, error: { code: -32018, message: "JOURNAL_RECOVERY_FAILED" } }),
     ).toBeUndefined()
     expect(decode({ applied: false, error: { code: -32099, message: "UNKNOWN" } })).toBeUndefined()
-    expect(decode({ applied: false, error: { code: -32010, message: "ANCHOR_NOT_FOUND" }, file: "engine.ts" })).toBeUndefined()
+    expect(decode({ error: { code: -32010, message: "ANCHOR_NOT_FOUND" } })).toBeUndefined()
     expect(decode({ ...SAMPLE_EDIT_TRANSACTION_SUCCESS, applied: "yes" })).toBeUndefined()
   })
 })
@@ -422,11 +443,11 @@ describe("semantic edit_transaction client", () => {
     await server.close()
   })
 
-  test("rejects malformed results instead of silently ignoring fields", async () => {
+  test("rejects malformed results", async () => {
     const server = await listenServer((message, socket) => {
       if (message.method !== "edit_transaction") return
       socket.write(
-        frame({ jsonrpc: "2.0", id: message.id, result: { ...SAMPLE_EDIT_TRANSACTION_SUCCESS, extra: true } }),
+        frame({ jsonrpc: "2.0", id: message.id, result: { ...SAMPLE_EDIT_TRANSACTION_SUCCESS, changes_applied: "7" } }),
       )
     })
     const client = await Client.connect(server.endpoint, { connect_timeout_ms: 2_000 })

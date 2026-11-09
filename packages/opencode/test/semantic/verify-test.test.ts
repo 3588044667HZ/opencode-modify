@@ -181,15 +181,21 @@ describe("semantic verify_test decoding", () => {
     expect(decode(result)).toEqual(result)
   })
 
-  test("rejects excess fields at the top level and inside nested objects", () => {
+  test("ignores unknown fields at the top level and inside nested objects", () => {
     const cases = [
-      { ...SAMPLE_VERIFY_SUCCESS, extra: true },
-      { ...SAMPLE_VERIFY_SUCCESS, summary: { passed: 42, failed: 0, skipped: 3, total: 45, infos: 0 } },
-      { ...SAMPLE_VERIFY_FAILURE, failures: [{ ...SAMPLE_VERIFY_FAILURE.failures[0], output: "raw" }] },
-      { ...SAMPLE_VERIFY_UNRECOGNIZED, environment: { CI: "1" } },
+      { value: { ...SAMPLE_VERIFY_SUCCESS, extra: true }, expected: SAMPLE_VERIFY_SUCCESS },
+      {
+        value: { ...SAMPLE_VERIFY_SUCCESS, summary: { passed: 42, failed: 0, skipped: 3, total: 45, infos: 0 } },
+        expected: SAMPLE_VERIFY_SUCCESS,
+      },
+      {
+        value: { ...SAMPLE_VERIFY_FAILURE, failures: [{ ...SAMPLE_VERIFY_FAILURE.failures[0], output: "raw" }] },
+        expected: { ...SAMPLE_VERIFY_FAILURE, failures: [SAMPLE_VERIFY_FAILURE.failures[0]] },
+      },
+      { value: { ...SAMPLE_VERIFY_UNRECOGNIZED, environment: { CI: "1" } }, expected: SAMPLE_VERIFY_UNRECOGNIZED },
     ]
 
-    for (const value of cases) expect(decode(value)).toBeUndefined()
+    for (const item of cases) expect(decode(item.value)).toEqual(item.expected)
   })
 
   test("rejects wrong field types and missing required fields", () => {
@@ -237,10 +243,10 @@ describe("semantic verify_test client", () => {
     await server.close()
   })
 
-  test("rejects malformed results instead of silently ignoring fields", async () => {
+  test("rejects malformed results", async () => {
     const server = await listenServer((message, socket) => {
       if (message.method !== "verify_test") return
-      socket.write(frame({ jsonrpc: "2.0", id: message.id, result: { ...SAMPLE_VERIFY_SUCCESS, extra: true } }))
+      socket.write(frame({ jsonrpc: "2.0", id: message.id, result: { ...SAMPLE_VERIFY_SUCCESS, exit_code: "0" } }))
     })
     const client = await Client.connect(server.endpoint, { connect_timeout_ms: 2_000 })
 

@@ -250,10 +250,13 @@ describe("semantic edit_batch decoding", () => {
     expect(decode(SAMPLE_EDIT_BATCH_MISMATCH_FULL)).toEqual(SAMPLE_EDIT_BATCH_MISMATCH_FULL)
   })
 
-  test("rejects unknown reconciliation shapes and excess position_map fields", () => {
+  test("ignores unknown position_map fields but rejects unknown reconciliation shapes", () => {
     expect(
       decode({ ...SAMPLE_EDIT_BATCH_SUCCESS, position_map: [{ old_start: 1, old_end: 2, delta: 0, extra: 1 }] }),
-    ).toBeUndefined()
+    ).toEqual({
+      ...SAMPLE_EDIT_BATCH_SUCCESS,
+      position_map: [{ old_start: 1, old_end: 2, delta: 0 }],
+    })
     expect(
       decode({
         ...SAMPLE_EDIT_BATCH_MISMATCH_FULL,
@@ -310,28 +313,37 @@ describe("semantic edit_batch decoding", () => {
     ).toBeUndefined()
   })
 
-  test("rejects excess fields at the top level and in nested objects", () => {
+  test("ignores unknown fields at the top level and in nested objects", () => {
     const failing = SAMPLE_EDIT_BATCH_FAILURE
     const cases = [
-      { ...SAMPLE_EDIT_BATCH_SUCCESS, extra: true },
+      { value: { ...SAMPLE_EDIT_BATCH_SUCCESS, extra: true }, expected: SAMPLE_EDIT_BATCH_SUCCESS },
       {
-        ...SAMPLE_EDIT_BATCH_SUCCESS,
-        diagnostics_delta: { errors: -2, warnings: 0, infos: 1 },
-      },
-      {
-        ...SAMPLE_EDIT_BATCH_SUCCESS,
-        line_changes: [{ line: 42, action: "modified", extra: 1 }],
-      },
-      {
-        ...failing,
-        error: {
-          ...failing.error,
-          detail: { change_index: 1, extra: true },
+        value: {
+          ...SAMPLE_EDIT_BATCH_SUCCESS,
+          diagnostics_delta: { errors: -2, warnings: 0, infos: 1 },
         },
+        expected: SAMPLE_EDIT_BATCH_SUCCESS,
+      },
+      {
+        value: {
+          ...SAMPLE_EDIT_BATCH_SUCCESS,
+          line_changes: [{ line: 42, action: "modified", extra: 1 }],
+        },
+        expected: { ...SAMPLE_EDIT_BATCH_SUCCESS, line_changes: [{ line: 42, action: "modified" as const }] },
+      },
+      {
+        value: {
+          ...failing,
+          error: {
+            ...failing.error,
+            detail: { change_index: 1, extra: true },
+          },
+        },
+        expected: { ...failing, error: { ...failing.error, detail: { change_index: 1 } } },
       },
     ]
 
-    for (const value of cases) expect(decode(value)).toBeUndefined()
+    for (const item of cases) expect(decode(item.value)).toEqual(item.expected)
   })
 
   test("rejects unknown line actions and unknown error codes", () => {
@@ -388,10 +400,10 @@ describe("semantic edit_batch client", () => {
     await server.close()
   })
 
-  test("rejects malformed results instead of silently ignoring fields", async () => {
+  test("rejects malformed results", async () => {
     const server = await listenServer((message, socket) => {
       if (message.method !== "edit_batch") return
-      socket.write(frame({ jsonrpc: "2.0", id: message.id, result: { ...SAMPLE_EDIT_BATCH_SUCCESS, extra: true } }))
+      socket.write(frame({ jsonrpc: "2.0", id: message.id, result: { ...SAMPLE_EDIT_BATCH_SUCCESS, changes_total: "3" } }))
     })
     const client = await Client.connect(server.endpoint, { connect_timeout_ms: 2_000 })
 

@@ -108,18 +108,18 @@ export const SAMPLE_READ_WARNINGS: Protocol.ReadViewContent = {
   coverage: { read: [[1, 1]], unread: [[2, 320]] },
   diagnostics: [],
   warnings: [
-    "analysis unavailable: RuntimeException: com.intellij.pycharm.community.ide.impl.PyProjectScopeBuilder",
+    "some analysis is unavailable; content is still usable",
   ],
 }
 
 export const SAMPLE_READ_WARNINGS_RENDER = [
   "engine.ts [v:c8d2e6] · L1-320 · symbols: 0",
-  "pos: L1/320 (0%), 0 symbols below",
+  "pos: L1/320 (0%), module scope, 0 symbols below",
   "",
   "L1  def load(self, path):",
   "",
   "read: L1-1 · unread: L2-320",
-  "warning: analysis unavailable: RuntimeException: com.intellij.pycharm.community.ide.impl.PyProjectScopeBuilder",
+  "warning: some analysis is unavailable; content is still usable",
 ].join("\n")
 
 // Fixed blast_radius response used by the fake daemon. Crafted so

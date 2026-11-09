@@ -133,6 +133,10 @@ function progressOf(data: unknown): number | undefined {
   return typeof progress === "number" && Number.isFinite(progress) ? progress : undefined
 }
 
+// 协议冻结策略：结果/错误契约对新增字段开放（忽略未知字段），
+// 但必需字段、类型、联合判别式与已知错误码仍严格校验。
+// 请求侧选项（如 VerifyTestOptions）保持严格，不接受未知字段。
+
 export const PingResult = Schema.Struct({
   indexing: Schema.Boolean,
   progress: Schema.Number,
@@ -169,6 +173,13 @@ export const Anchor = Schema.Struct({
   location: Schema.String,
 })
 export type Anchor = typeof Anchor.Type
+
+export const OutlineSymbol = Schema.Struct({
+  name: Schema.String,
+  line: Schema.Int,
+  kind: Schema.String,
+})
+export type OutlineSymbol = typeof OutlineSymbol.Type
 
 export const ContentLine = Schema.Struct({
   line: Schema.Int,
@@ -213,19 +224,19 @@ export const ReconciliationDelta = Schema.Struct({
   to_version: Schema.String,
   hunks: Schema.Array(DeltaHunk),
   current_version: optional(Schema.String),
-}).annotate({ identifier: "ReconciliationDelta", parseOptions: { onExcessProperty: "error" } })
+}).annotate({ identifier: "ReconciliationDelta", parseOptions: { onExcessProperty: "ignore" } })
 export type ReconciliationDelta = typeof ReconciliationDelta.Type
 
 // 大变更降级标记：全量视图或 full 再读提示。
 export const ReconciliationFull = Schema.Struct({
   mode: Schema.Literal("full"),
   current_version: optional(Schema.String),
-}).annotate({ identifier: "ReconciliationFull", parseOptions: { onExcessProperty: "error" } })
+}).annotate({ identifier: "ReconciliationFull", parseOptions: { onExcessProperty: "ignore" } })
 export type ReconciliationFull = typeof ReconciliationFull.Type
 
 export const Reconciliation = Schema.Union([ReconciliationDelta, ReconciliationFull]).annotate({
   identifier: "Reconciliation",
-  parseOptions: { onExcessProperty: "error" },
+  parseOptions: { onExcessProperty: "ignore" },
 })
 export type Reconciliation = typeof Reconciliation.Type
 
@@ -233,7 +244,7 @@ export type Reconciliation = typeof Reconciliation.Type
 export const ReadViewUnchanged = Schema.Struct({
   unchanged: Schema.Literal(true),
   version: Schema.String,
-}).annotate({ identifier: "ReadViewUnchanged", parseOptions: { onExcessProperty: "error" } })
+}).annotate({ identifier: "ReadViewUnchanged", parseOptions: { onExcessProperty: "ignore" } })
 export type ReadViewUnchanged = typeof ReadViewUnchanged.Type
 
 // 读时对账的有界 delta 响应：只带 file/version/reconciliation，不重发内容。
@@ -241,11 +252,11 @@ export const ReadViewDeltaView = Schema.Struct({
   file: Schema.String,
   version: Schema.String,
   reconciliation: ReconciliationDelta,
-}).annotate({ identifier: "ReadViewDeltaView", parseOptions: { onExcessProperty: "error" } })
+}).annotate({ identifier: "ReadViewDeltaView", parseOptions: { onExcessProperty: "ignore" } })
 export type ReadViewDeltaView = typeof ReadViewDeltaView.Type
 
-// Strict decoding: the frozen read_view contract must not silently accept
-// fields the daemon is not supposed to send.
+// 冻结的 read_view 结果契约允许向前兼容新增字段：未知字段忽略，
+// 但必需字段、类型、联合判别式仍严格校验。
 export const ReadViewContent = Schema.Struct({
   file: Schema.String,
   version: Schema.String,
@@ -260,6 +271,8 @@ export const ReadViewContent = Schema.Struct({
     }),
   ),
   content: Schema.Array(ContentLine),
+  outline: optional(Schema.Array(OutlineSymbol)),
+  outline_total: optional(Schema.Int),
   coverage: Schema.Struct({
     read: Schema.Array(CoverageRange),
     unread: Schema.Array(CoverageRange),
@@ -268,12 +281,12 @@ export const ReadViewContent = Schema.Struct({
   // 发行版不完整等场景下分析节降级的可操作提示（有界、去重）；健康时省略。
   warnings: optional(Schema.Array(Schema.String)),
   reconciliation: optional(ReconciliationFull),
-}).annotate({ identifier: "ReadViewContent", parseOptions: { onExcessProperty: "error" } })
+}).annotate({ identifier: "ReadViewContent", parseOptions: { onExcessProperty: "ignore" } })
 export type ReadViewContent = typeof ReadViewContent.Type
 
 export const ReadViewResult = Schema.Union([ReadViewUnchanged, ReadViewDeltaView, ReadViewContent]).annotate({
   identifier: "ReadViewResult",
-  parseOptions: { onExcessProperty: "error" },
+  parseOptions: { onExcessProperty: "ignore" },
 })
 export type ReadViewResult = typeof ReadViewResult.Type
 
@@ -338,8 +351,8 @@ const BlastRadiusSummary = Schema.Struct({
   risk: Schema.Literals(BlastRadiusRisks),
 })
 
-// Strict decoding: the frozen blast_radius contract must not silently accept
-// fields the daemon is not supposed to send.
+// 冻结的 blast_radius 结果契约允许向前兼容新增字段：未知字段忽略，
+// 但必需字段、类型、联合判别式仍严格校验。
 export const BlastRadiusResult = Schema.Struct({
   symbol: Schema.String,
   definition: BlastRadiusDefinition,
@@ -349,7 +362,7 @@ export const BlastRadiusResult = Schema.Struct({
   entry_points: Schema.Array(BlastRadiusEntryPoint),
   tests_affected: Schema.Array(BlastRadiusTest),
   summary: BlastRadiusSummary,
-}).annotate({ identifier: "BlastRadiusResult", parseOptions: { onExcessProperty: "error" } })
+}).annotate({ identifier: "BlastRadiusResult", parseOptions: { onExcessProperty: "ignore" } })
 export type BlastRadiusResult = typeof BlastRadiusResult.Type
 
 export interface BlastRadiusRequest {
@@ -425,7 +438,7 @@ export const ChangedExcerpt = Schema.Struct({
   end_line: Schema.Int,
   text: Schema.String,
   truncated: Schema.Boolean,
-}).annotate({ identifier: "ChangedExcerpt", parseOptions: { onExcessProperty: "error" } })
+}).annotate({ identifier: "ChangedExcerpt", parseOptions: { onExcessProperty: "ignore" } })
 export type ChangedExcerpt = typeof ChangedExcerpt.Type
 
 export const EditBatchSuccess = Schema.Struct({
@@ -441,7 +454,7 @@ export const EditBatchSuccess = Schema.Struct({
   version: optional(Schema.String),
   changed: optional(ChangedExcerpt),
   position_map: optional(Schema.Array(PositionMapEntry)),
-}).annotate({ identifier: "EditBatchSuccess", parseOptions: { onExcessProperty: "error" } })
+}).annotate({ identifier: "EditBatchSuccess", parseOptions: { onExcessProperty: "ignore" } })
 export type EditBatchSuccess = typeof EditBatchSuccess.Type
 
 export const EditBatchDetail = Schema.Struct({
@@ -457,7 +470,7 @@ export const EditBatchDetail = Schema.Struct({
   reason: optional(Schema.String),
   file: optional(Schema.String),
   waited_ms: optional(Schema.Int),
-}).annotate({ identifier: "EditBatchDetail", parseOptions: { onExcessProperty: "error" } })
+}).annotate({ identifier: "EditBatchDetail", parseOptions: { onExcessProperty: "ignore" } })
 export type EditBatchDetail = typeof EditBatchDetail.Type
 
 export const EditBatchError = Schema.Struct({
@@ -466,7 +479,7 @@ export const EditBatchError = Schema.Struct({
   detail: optional(EditBatchDetail),
   hint: optional(Schema.String),
   reconciliation: optional(Reconciliation),
-}).annotate({ identifier: "EditBatchError", parseOptions: { onExcessProperty: "error" } })
+}).annotate({ identifier: "EditBatchError", parseOptions: { onExcessProperty: "ignore" } })
 export type EditBatchError = typeof EditBatchError.Type
 
 export const EditBatchFailure = Schema.Struct({
@@ -474,13 +487,13 @@ export const EditBatchFailure = Schema.Struct({
   file: optional(Schema.String),
   changes_total: Schema.Int,
   error: EditBatchError,
-}).annotate({ identifier: "EditBatchFailure", parseOptions: { onExcessProperty: "error" } })
+}).annotate({ identifier: "EditBatchFailure", parseOptions: { onExcessProperty: "ignore" } })
 export type EditBatchFailure = typeof EditBatchFailure.Type
 
-// 与 blast_radius 相同的严格性：discriminated union 也必须拒绝多余字段。
+// 与 blast_radius 相同的策略：discriminated union 的未知字段忽略，但 applied 判别式严格。
 export const EditBatchResult = Schema.Union([EditBatchSuccess, EditBatchFailure]).annotate({
   identifier: "EditBatchResult",
-  parseOptions: { onExcessProperty: "error" },
+  parseOptions: { onExcessProperty: "ignore" },
 })
 export type EditBatchResult = typeof EditBatchResult.Type
 
@@ -526,7 +539,7 @@ export interface EditTransactionRequest {
 const EditTransactionDiagnostics = Schema.Struct({
   errors: Schema.Int,
   warnings: Schema.Int,
-}).annotate({ identifier: "EditTransactionDiagnostics", parseOptions: { onExcessProperty: "error" } })
+}).annotate({ identifier: "EditTransactionDiagnostics", parseOptions: { onExcessProperty: "ignore" } })
 
 export const EditTransactionFile = Schema.Struct({
   file: Schema.String,
@@ -537,10 +550,10 @@ export const EditTransactionFile = Schema.Struct({
   version: optional(Schema.String),
   changed: optional(ChangedExcerpt),
   position_map: optional(Schema.Array(PositionMapEntry)),
-}).annotate({ identifier: "EditTransactionFile", parseOptions: { onExcessProperty: "error" } })
+}).annotate({ identifier: "EditTransactionFile", parseOptions: { onExcessProperty: "ignore" } })
 export type EditTransactionFile = typeof EditTransactionFile.Type
 
-// 与 blast_radius 相同的严格性：顶层与嵌套都必须拒绝多余字段。
+// 与 blast_radius 相同的策略：顶层与嵌套的未知字段忽略，但必需字段与类型严格。
 export const EditTransactionSuccess = Schema.Struct({
   applied: Schema.Literal(true),
   files_changed: Schema.Int,
@@ -549,7 +562,7 @@ export const EditTransactionSuccess = Schema.Struct({
   files: Schema.Array(EditTransactionFile),
   diagnostics_delta: Schema.Record(Schema.String, EditTransactionDiagnostics),
   diagnostics_after: Schema.Record(Schema.String, EditTransactionDiagnostics),
-}).annotate({ identifier: "EditTransactionSuccess", parseOptions: { onExcessProperty: "error" } })
+}).annotate({ identifier: "EditTransactionSuccess", parseOptions: { onExcessProperty: "ignore" } })
 export type EditTransactionSuccess = typeof EditTransactionSuccess.Type
 
 export const EditTransactionDetail = Schema.Struct({
@@ -566,7 +579,7 @@ export const EditTransactionDetail = Schema.Struct({
   conflict_with_index: optional(Schema.Int),
   waited_ms: optional(Schema.Int),
   reason: optional(Schema.String),
-}).annotate({ identifier: "EditTransactionDetail", parseOptions: { onExcessProperty: "error" } })
+}).annotate({ identifier: "EditTransactionDetail", parseOptions: { onExcessProperty: "ignore" } })
 export type EditTransactionDetail = typeof EditTransactionDetail.Type
 
 export const EditTransactionError = Schema.Struct({
@@ -575,18 +588,18 @@ export const EditTransactionError = Schema.Struct({
   detail: optional(EditTransactionDetail),
   hint: optional(Schema.String),
   reconciliation: optional(Reconciliation),
-}).annotate({ identifier: "EditTransactionError", parseOptions: { onExcessProperty: "error" } })
+}).annotate({ identifier: "EditTransactionError", parseOptions: { onExcessProperty: "ignore" } })
 export type EditTransactionError = typeof EditTransactionError.Type
 
 export const EditTransactionFailure = Schema.Struct({
   applied: Schema.Literal(false),
   error: EditTransactionError,
-}).annotate({ identifier: "EditTransactionFailure", parseOptions: { onExcessProperty: "error" } })
+}).annotate({ identifier: "EditTransactionFailure", parseOptions: { onExcessProperty: "ignore" } })
 export type EditTransactionFailure = typeof EditTransactionFailure.Type
 
 export const EditTransactionResult = Schema.Union([EditTransactionSuccess, EditTransactionFailure]).annotate({
   identifier: "EditTransactionResult",
-  parseOptions: { onExcessProperty: "error" },
+  parseOptions: { onExcessProperty: "ignore" },
 })
 export type EditTransactionResult = typeof EditTransactionResult.Type
 
@@ -595,7 +608,7 @@ export const VerifyTestSummary = Schema.Struct({
   failed: Schema.Int,
   skipped: Schema.Int,
   total: Schema.Int,
-}).annotate({ identifier: "VerifyTestSummary", parseOptions: { onExcessProperty: "error" } })
+}).annotate({ identifier: "VerifyTestSummary", parseOptions: { onExcessProperty: "ignore" } })
 export type VerifyTestSummary = typeof VerifyTestSummary.Type
 
 export const VerifyTestFailure = Schema.Struct({
@@ -603,7 +616,7 @@ export const VerifyTestFailure = Schema.Struct({
   file: optional(Schema.String),
   line: optional(Schema.Int),
   message: optional(Schema.String),
-}).annotate({ identifier: "VerifyTestFailure", parseOptions: { onExcessProperty: "error" } })
+}).annotate({ identifier: "VerifyTestFailure", parseOptions: { onExcessProperty: "ignore" } })
 export type VerifyTestFailure = typeof VerifyTestFailure.Type
 
 export const VerifyTestOptions = Schema.Struct({
@@ -618,8 +631,8 @@ export interface VerifyTestRequest {
   readonly options?: VerifyTestOptions
 }
 
-// Strict decoding: the frozen verify_test contract must not silently accept
-// fields the daemon is not supposed to send.
+// 冻结的 verify_test 结果契约允许向前兼容新增字段：未知字段忽略，
+// 但必需字段、类型、联合判别式仍严格校验。
 export const VerifyTestResult = Schema.Struct({
   command: Schema.String,
   exit_code: Schema.Int,
@@ -632,7 +645,7 @@ export const VerifyTestResult = Schema.Struct({
   framework: Schema.NullOr(Schema.String),
   timeout: optional(Schema.Boolean),
   total_failures: optional(Schema.Int),
-}).annotate({ identifier: "VerifyTestResult", parseOptions: { onExcessProperty: "error" } })
+}).annotate({ identifier: "VerifyTestResult", parseOptions: { onExcessProperty: "ignore" } })
 export type VerifyTestResult = typeof VerifyTestResult.Type
 
 export const ProjectMapViews = ["structure", "dependencies", "hot"] as const
@@ -652,7 +665,7 @@ const projectMapBuilding = {
 const ProjectMapProject = Schema.Struct({
   root: Schema.String,
   total_files: Schema.Int,
-}).annotate({ identifier: "ProjectMapProject", parseOptions: { onExcessProperty: "error" } })
+}).annotate({ identifier: "ProjectMapProject", parseOptions: { onExcessProperty: "ignore" } })
 
 const ProjectMapModule = Schema.Struct({
   name: Schema.String,
@@ -660,42 +673,42 @@ const ProjectMapModule = Schema.Struct({
   files: Schema.Array(Schema.String),
   is_entry: Schema.Boolean,
   hot: Schema.Boolean,
-}).annotate({ identifier: "ProjectMapModule", parseOptions: { onExcessProperty: "error" } })
+}).annotate({ identifier: "ProjectMapModule", parseOptions: { onExcessProperty: "ignore" } })
 
 const ProjectMapEntryPoint = Schema.Struct({
   file: Schema.String,
   line: Schema.Int,
   symbol: Schema.String,
   kind: Schema.String,
-}).annotate({ identifier: "ProjectMapEntryPoint", parseOptions: { onExcessProperty: "error" } })
+}).annotate({ identifier: "ProjectMapEntryPoint", parseOptions: { onExcessProperty: "ignore" } })
 
-// Strict decoding: the frozen project_map contract must not silently accept
-// fields the daemon is not supposed to send.
+// 冻结的 project_map 结果契约允许向前兼容新增字段：未知字段忽略，
+// 但必需字段、类型、联合判别式仍严格校验。
 export const ProjectMapStructure = Schema.Struct({
   ...projectMapBuilding,
   project: Schema.Struct({
     root: Schema.String,
     total_files: Schema.Int,
     total_modules: Schema.Int,
-  }).annotate({ identifier: "ProjectMapStructureProject", parseOptions: { onExcessProperty: "error" } }),
+  }).annotate({ identifier: "ProjectMapStructureProject", parseOptions: { onExcessProperty: "ignore" } }),
   modules: Schema.Array(ProjectMapModule),
   entry_points: Schema.Array(ProjectMapEntryPoint),
   root_files: Schema.Array(Schema.String),
-}).annotate({ identifier: "ProjectMapStructure", parseOptions: { onExcessProperty: "error" } })
+}).annotate({ identifier: "ProjectMapStructure", parseOptions: { onExcessProperty: "ignore" } })
 export type ProjectMapStructure = typeof ProjectMapStructure.Type
 
 const ProjectMapDependency = Schema.Struct({
   from: Schema.String,
   to: Schema.String,
   count: Schema.Int,
-}).annotate({ identifier: "ProjectMapDependency", parseOptions: { onExcessProperty: "error" } })
+}).annotate({ identifier: "ProjectMapDependency", parseOptions: { onExcessProperty: "ignore" } })
 
 export const ProjectMapDependencies = Schema.Struct({
   ...projectMapBuilding,
   project: ProjectMapProject,
   dependencies: Schema.Array(ProjectMapDependency),
   cycles: Schema.Array(Schema.Array(Schema.String)),
-}).annotate({ identifier: "ProjectMapDependencies", parseOptions: { onExcessProperty: "error" } })
+}).annotate({ identifier: "ProjectMapDependencies", parseOptions: { onExcessProperty: "ignore" } })
 export type ProjectMapDependencies = typeof ProjectMapDependencies.Type
 
 const ProjectMapHotFile = Schema.Struct({
@@ -703,20 +716,20 @@ const ProjectMapHotFile = Schema.Struct({
   read_count: Schema.Int,
   edit_count: Schema.Int,
   last_access: Schema.String,
-}).annotate({ identifier: "ProjectMapHotFile", parseOptions: { onExcessProperty: "error" } })
+}).annotate({ identifier: "ProjectMapHotFile", parseOptions: { onExcessProperty: "ignore" } })
 
 export const ProjectMapHot = Schema.Struct({
   ...projectMapBuilding,
   project: ProjectMapProject,
   hot_files: Schema.Array(ProjectMapHotFile),
   hot_modules: Schema.Array(Schema.String),
-}).annotate({ identifier: "ProjectMapHot", parseOptions: { onExcessProperty: "error" } })
+}).annotate({ identifier: "ProjectMapHot", parseOptions: { onExcessProperty: "ignore" } })
 export type ProjectMapHot = typeof ProjectMapHot.Type
 
 // 分支靠必需键区分：modules / dependencies / hot_files。
 export const ProjectMapResult = Schema.Union([ProjectMapStructure, ProjectMapDependencies, ProjectMapHot]).annotate({
   identifier: "ProjectMapResult",
-  parseOptions: { onExcessProperty: "error" },
+  parseOptions: { onExcessProperty: "ignore" },
 })
 export type ProjectMapResult = typeof ProjectMapResult.Type
 

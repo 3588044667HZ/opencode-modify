@@ -37,12 +37,12 @@ const READVIEW_DIR = path.join(SERVER_DIR, "fixtures", "read_view")
 const clientModule = await import(pathToFileURL(path.join(ROOT, "packages/opencode/src/semantic/client.ts")).href)
 const protocol = await import(pathToFileURL(path.join(ROOT, "packages/opencode/src/semantic/protocol.ts")).href)
 const renderModule = await import(pathToFileURL(path.join(ROOT, "packages/opencode/src/semantic/render.ts")).href)
-// 与 protocol.ts 解析到同一个 effect 实例；用于对原始帧做严格解码（多余字段报错）
+// 与 protocol.ts 解析到同一个 effect 实例；用于对原始帧做契约字段解码（未知字段忽略）
 const effect = await import(pathToFileURL(Bun.resolveSync("effect", path.join(ROOT, "packages/opencode/src/semantic"))).href)
 
 function strictDecode(schema: unknown, value: unknown): unknown {
   try {
-    return effect.Schema.decodeUnknownSync(schema as never, { onExcessProperty: "error" })(value)
+    return effect.Schema.decodeUnknownSync(schema as never, { onExcessProperty: "ignore" })(value)
   } catch {
     return undefined
   }
@@ -593,7 +593,7 @@ try {
   }
   const decodedNotes = notes.map((frame) => strictDecode(protocol.IndexingNotification, frame.params) as IndexingNotification | undefined)
   check(
-    "[2] 所有 notification 严格解码 IndexingNotification（无多余字段）",
+    "[2] 所有 notification 解码 IndexingNotification（忽略未知字段）",
     notes.length > 0 && decodedNotes.every((note) => note !== undefined),
     `${notes.length} 条中失败 ${decodedNotes.filter((note) => note === undefined).length} 条`,
     notes,
@@ -644,13 +644,13 @@ try {
     rawMissing.frame,
   )
   check(
-    "[10] raw ping result 严格解码 PingResult（无多余字段）",
+    "[10] raw ping result 解码 PingResult（忽略未知字段）",
     rawPing.frame.error === undefined && rawPing.frame.result !== undefined && strictDecode(protocol.PingResult, rawPing.frame.result) !== undefined,
     `result=${clip(JSON.stringify(rawPing.frame.result))}`,
     rawPing.frame,
   )
   check(
-    "[10] raw read_view result 严格解码 ReadViewResult（含嵌套字段）",
+    "[10] raw read_view result 解码 ReadViewResult（忽略未知字段）",
     rawView.frame.error === undefined && rawView.frame.result !== undefined && strictDecode(protocol.ReadViewResult, rawView.frame.result) !== undefined,
     rawView.frame.result === undefined
       ? `error=${clip(JSON.stringify(rawView.frame.error))}`

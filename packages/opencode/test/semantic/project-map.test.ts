@@ -133,35 +133,57 @@ describe("semantic project_map decoding", () => {
     expect(decode(SAMPLE_PROJECT_MAP_BUILDING)).toEqual(SAMPLE_PROJECT_MAP_BUILDING)
   })
 
-  test("rejects excess fields at the top level and in nested objects", () => {
+  test("ignores unknown fields at the top level and in nested objects", () => {
     const cases = [
-      { ...SAMPLE_PROJECT_MAP_STRUCTURE, extra: true },
-      { ...SAMPLE_PROJECT_MAP_STRUCTURE, project: { ...SAMPLE_PROJECT_MAP_STRUCTURE.project, extra: 1 } },
-      { ...SAMPLE_PROJECT_MAP_STRUCTURE, modules: [{ ...SAMPLE_PROJECT_MAP_STRUCTURE.modules[0], extra: true }] },
+      { value: { ...SAMPLE_PROJECT_MAP_STRUCTURE, extra: true }, expected: SAMPLE_PROJECT_MAP_STRUCTURE },
       {
-        ...SAMPLE_PROJECT_MAP_STRUCTURE,
-        entry_points: [{ ...SAMPLE_PROJECT_MAP_STRUCTURE.entry_points[0], extra: 1 }],
+        value: { ...SAMPLE_PROJECT_MAP_STRUCTURE, project: { ...SAMPLE_PROJECT_MAP_STRUCTURE.project, extra: 1 } },
+        expected: SAMPLE_PROJECT_MAP_STRUCTURE,
       },
-      { ...SAMPLE_PROJECT_MAP_DEPENDENCIES, extra: 1 },
-      { ...SAMPLE_PROJECT_MAP_DEPENDENCIES, project: { ...SAMPLE_PROJECT_MAP_DEPENDENCIES.project, total_modules: 1 } },
       {
-        ...SAMPLE_PROJECT_MAP_DEPENDENCIES,
-        dependencies: [{ ...SAMPLE_PROJECT_MAP_DEPENDENCIES.dependencies[0], extra: true }],
+        value: { ...SAMPLE_PROJECT_MAP_STRUCTURE, modules: [{ ...SAMPLE_PROJECT_MAP_STRUCTURE.modules[0], extra: true }] },
+        expected: { ...SAMPLE_PROJECT_MAP_STRUCTURE, modules: [SAMPLE_PROJECT_MAP_STRUCTURE.modules[0]] },
       },
-      { ...SAMPLE_PROJECT_MAP_HOT, extra: true },
-      { ...SAMPLE_PROJECT_MAP_HOT, hot_files: [{ ...SAMPLE_PROJECT_MAP_HOT.hot_files[0], extra: 1 }] },
+      {
+        value: {
+          ...SAMPLE_PROJECT_MAP_STRUCTURE,
+          entry_points: [{ ...SAMPLE_PROJECT_MAP_STRUCTURE.entry_points[0], extra: 1 }],
+        },
+        expected: { ...SAMPLE_PROJECT_MAP_STRUCTURE, entry_points: [SAMPLE_PROJECT_MAP_STRUCTURE.entry_points[0]] },
+      },
+      { value: { ...SAMPLE_PROJECT_MAP_DEPENDENCIES, extra: 1 }, expected: SAMPLE_PROJECT_MAP_DEPENDENCIES },
+      {
+        value: { ...SAMPLE_PROJECT_MAP_DEPENDENCIES, project: { ...SAMPLE_PROJECT_MAP_DEPENDENCIES.project, total_modules: 1 } },
+        expected: SAMPLE_PROJECT_MAP_DEPENDENCIES,
+      },
+      {
+        value: {
+          ...SAMPLE_PROJECT_MAP_DEPENDENCIES,
+          dependencies: [
+            { ...SAMPLE_PROJECT_MAP_DEPENDENCIES.dependencies[0], extra: true },
+            ...SAMPLE_PROJECT_MAP_DEPENDENCIES.dependencies.slice(1),
+          ],
+        },
+        expected: SAMPLE_PROJECT_MAP_DEPENDENCIES,
+      },
+      { value: { ...SAMPLE_PROJECT_MAP_HOT, extra: true }, expected: SAMPLE_PROJECT_MAP_HOT },
+      {
+        value: { ...SAMPLE_PROJECT_MAP_HOT, hot_files: [{ ...SAMPLE_PROJECT_MAP_HOT.hot_files[0], extra: 1 }] },
+        expected: { ...SAMPLE_PROJECT_MAP_HOT, hot_files: [SAMPLE_PROJECT_MAP_HOT.hot_files[0]] },
+      },
     ]
 
-    for (const value of cases) expect(decode(value)).toBeUndefined()
+    for (const item of cases) expect(decode(item.value)).toEqual(item.expected)
   })
 
-  test("rejects mixed shapes instead of picking a partial branch", () => {
+  test("rejects incomplete shapes that match no branch", () => {
     const cases = [
-      { ...SAMPLE_PROJECT_MAP_STRUCTURE, dependencies: [], cycles: [] },
-      { ...SAMPLE_PROJECT_MAP_DEPENDENCIES, hot_files: [], hot_modules: [] },
-      { ...SAMPLE_PROJECT_MAP_HOT, modules: [] },
-      { ...SAMPLE_PROJECT_MAP_HOT, entry_points: [], root_files: [] },
-      { ...SAMPLE_PROJECT_MAP_DEPENDENCIES, modules: [], total_modules: 1 },
+      { project: { root: "/p", total_files: 47 }, modules: [] },
+      { project: { root: "/p", total_files: 47 }, dependencies: [] },
+      { project: { root: "/p", total_files: 47 }, hot_modules: [] },
+      { ...SAMPLE_PROJECT_MAP_STRUCTURE, entry_points: undefined },
+      { ...SAMPLE_PROJECT_MAP_DEPENDENCIES, cycles: undefined },
+      { ...SAMPLE_PROJECT_MAP_HOT, hot_files: undefined },
     ]
 
     for (const value of cases) expect(decode(value)).toBeUndefined()
@@ -211,10 +233,10 @@ describe("semantic project_map client", () => {
     await server.close()
   })
 
-  test("rejects malformed results instead of silently ignoring fields", async () => {
+  test("rejects malformed results", async () => {
     const server = await listenServer((message, socket) => {
       if (message.method !== "project_map") return
-      socket.write(frame({ jsonrpc: "2.0", id: message.id, result: { ...SAMPLE_PROJECT_MAP_HOT, extra: true } }))
+      socket.write(frame({ jsonrpc: "2.0", id: message.id, result: { ...SAMPLE_PROJECT_MAP_HOT, hot_modules: "core" } }))
     })
     const client = await Client.connect(server.endpoint, { connect_timeout_ms: 2_000 })
 

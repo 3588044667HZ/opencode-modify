@@ -397,6 +397,7 @@ bun test --timeout 30000 test/tool/context.test.ts test/tool/task.test.ts test/t
 - `specs/agent-teams-backlog.md` — 后续计划（任务板、广播、成员超时等）
 - `specs/subagent-context.md` — 子 agent 复用、compaction task brief 与 `context` 使用率工具
 - `specs/independent-maintenance.md` — 独立维护：切断上游运行时/构建时联系
+- `specs/protocol-freeze.md` — 协议冻结：开放 schema、版本协商、契约测试与兼容性边界
 - `specs/build-markers.md` — 构建标记：`BUILD.md` 记录、GUI/服务端双标记与不匹配告警
 - `LLM-IDE-SPEC/main.md` — 语义引擎总体架构与工具契约
 - `LLM-IDE-SPEC/multilang.md` — 多语言支持、IDE 自动发现/选择与发行闸门

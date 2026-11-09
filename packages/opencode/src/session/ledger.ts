@@ -22,6 +22,7 @@ const DIGEST_HEADER = "<reconciliation>"
 const DIGEST_FOOTER = "</reconciliation>"
 
 export type Role = "read" | "edit"
+export type CoverageRange = readonly [from: number, to: number]
 
 export interface Entry {
   file: string
@@ -31,6 +32,10 @@ export interface Entry {
   role: Role
   /** 本会话第几次请求装配时使用 */
   lastUseTurn: number
+  /** 最近一次读视图结束行；continue 从这里继续 */
+  cursor?: number
+  /** 本会话累计读过的行区间；用于跨调用的覆盖展示 */
+  coverage?: readonly CoverageRange[]
   /** 自己的编辑取代了早先读取时的新版本；标记只通知一次 */
   supersededBy?: string
   supersededVersion?: string
@@ -48,8 +53,18 @@ interface Store {
 }
 
 export interface Interface {
-  /** read_view 结果（full/delta/unchanged）：登记或刷新文件版本 */
-  readonly noteRead: (input: { sessionID: SessionID; file: string; version: string }) => Effect.Effect<void>
+  /** read_view 结果（full/delta/unchanged）：登记或刷新文件版本，并可更新 cursor/coverage */
+  readonly noteRead: (input: {
+    sessionID: SessionID
+    file: string
+    version: string
+    cursor?: number
+    coverage?: readonly CoverageRange[]
+  }) => Effect.Effect<void>
+  /** 最近一次读视图结束行 + 1；没有记录时返回 undefined */
+  readonly cursor: (sessionID: SessionID, file: string) => Effect.Effect<number | undefined>
+  /** 本会话累计读取区间（已合并） */
+  readonly coverage: (sessionID: SessionID, file: string) => Effect.Effect<readonly CoverageRange[]>
   /** edit_batch / edit_transaction 成功：标记自身编辑取代旧读取 */
   readonly noteEdit: (input: { sessionID: SessionID; file: string; newVersion: string }) => Effect.Effect<void>
   /** 有界 digest 文本；无过期项时返回 undefined */
@@ -120,15 +135,29 @@ const layer = Layer.effect(
       sessionID: SessionID
       file: string
       version: string
+      cursor?: number
+      coverage?: readonly CoverageRange[]
     }) {
       const store = yield* InstanceState.get(state)
       const session = touch(store, input.sessionID)
+      const previous = session.entries.get(input.file)
+      const sameVersion = previous?.version === input.version
       put(session, {
         file: input.file,
         version: input.version,
         mtimeAtRead: yield* mtimeOf(input.file),
         role: "read",
         lastUseTurn: session.turn,
+        ...(input.cursor !== undefined
+          ? { cursor: input.cursor }
+          : sameVersion && previous?.cursor !== undefined
+            ? { cursor: previous.cursor }
+            : {}),
+        ...(input.coverage !== undefined
+          ? { coverage: input.coverage }
+          : sameVersion && previous?.coverage !== undefined
+            ? { coverage: previous.coverage }
+            : {}),
       })
     })
 
@@ -235,12 +264,22 @@ const layer = Layer.effect(
       return new Map(session ? [...session.entries] : [])
     })
 
+    const cursor = Effect.fn("SessionLedger.cursor")(function* (sessionID: SessionID, file: string) {
+      const store = yield* InstanceState.get(state)
+      return store.sessions.get(sessionID)?.entries.get(file)?.cursor
+    })
+
+    const coverage = Effect.fn("SessionLedger.coverage")(function* (sessionID: SessionID, file: string) {
+      const store = yield* InstanceState.get(state)
+      return store.sessions.get(sessionID)?.entries.get(file)?.coverage ?? []
+    })
+
     const clear = Effect.fn("SessionLedger.clear")(function* (sessionID: SessionID) {
       const store = yield* InstanceState.get(state)
       store.sessions.delete(sessionID)
     })
 
-    return Service.of({ noteRead, noteEdit, digest, apply, entries, clear })
+    return Service.of({ noteRead, noteEdit, digest, apply, entries, cursor, coverage, clear })
   }),
 )
 
