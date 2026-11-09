@@ -16,7 +16,6 @@ import { type ServerHealth } from "@/utils/server-health"
 import { useGlobal } from "@/context/global"
 import { useSettings } from "@/context/settings"
 import { useMcpToggle } from "@/context/mcp"
-import { useServerProtocol } from "@/context/server-sdk"
 
 const pluginEmptyMessage = (value: string, file: string): JSXElement => {
   const parts = value.split(file)
@@ -258,7 +257,6 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
   const language = useLanguage()
   const navigate = useNavigate()
   const settings = useSettings()
-  const protocol = useServerProtocol()
 
   const fail = (err: unknown) => {
     showToast({
@@ -286,13 +284,14 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
   })
   const toggleMcp = useMcpToggle()
   const defaultServer = useDefaultServerKey(platform.getDefaultServer)
-  const mcpNames = createMemo(() => Object.keys(sync().data.mcp ?? {}).sort((a, b) => a.localeCompare(b)))
-  const mcpStatus = (name: string) => sync().data.mcp?.[name]?.status
+  const data = () => sync().data
+  const mcpNames = createMemo(() => Object.keys(data()?.mcp ?? {}).sort((a, b) => a.localeCompare(b)))
+  const mcpStatus = (name: string) => data()?.mcp?.[name]?.status
   const mcpConnected = createMemo(() => mcpNames().filter((name) => mcpStatus(name) === "connected").length)
-  const lspItems = createMemo(() => sync().data.lsp ?? [])
+  const lspItems = createMemo(() => data()?.lsp ?? [])
   const lspCount = createMemo(() => lspItems().length)
   const plugins = createMemo(() =>
-    (sync().data.config.plugin ?? []).map((item) => (typeof item === "string" ? item : item[0])),
+    (data()?.config?.plugin ?? []).map((item) => (typeof item === "string" ? item : item[0])),
   )
   const pluginCount = createMemo(() => plugins().length)
   const pluginEmpty = createMemo(() => pluginEmptyMessage(language.t("dialog.plugins.empty"), "opencode.json"))
@@ -307,7 +306,11 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
         defaultValue={settings.general.newLayoutDesigns() ? "mcp" : "servers"}
         variant="alt"
       >
-        <Tabs.List data-slot="tablist" class="bg-transparent border-b-0 px-4 pt-2 pb-0 gap-4 h-10">
+        <Tabs.List
+          data-slot="tablist"
+          class="bg-transparent border-b-0 px-4 pt-2 pb-0 gap-4"
+          style={{ height: "auto", "min-height": "40px", "flex-wrap": "wrap", "row-gap": "0" }}
+        >
           {!settings.general.newLayoutDesigns() && (
             <Tabs.Trigger value="servers" data-slot="tab" class="text-12-regular">
               {sortedServers().length > 0 ? `${sortedServers().length} ` : ""}
@@ -322,12 +325,10 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
             {lspCount() > 0 ? `${lspCount()} ` : ""}
             {language.t("status.popover.tab.lsp")}
           </Tabs.Trigger>
-          <Show when={protocol() === "v1"}>
-            <Tabs.Trigger value="plugins" data-slot="tab" class="text-12-regular">
-              {pluginCount() > 0 ? `${pluginCount()} ` : ""}
-              {language.t("status.popover.tab.plugins")}
-            </Tabs.Trigger>
-          </Show>
+          <Tabs.Trigger value="plugins" data-slot="tab" class="text-12-regular">
+            {pluginCount() > 0 ? `${pluginCount()} ` : ""}
+            {language.t("status.popover.tab.plugins")}
+          </Tabs.Trigger>
         </Tabs.List>
 
         {!settings.general.newLayoutDesigns() && (
@@ -487,7 +488,6 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
           </div>
         </Tabs.Content>
 
-        <Show when={protocol() === "v1"}>
           <Tabs.Content value="plugins">
             <div class="flex flex-col px-2 pb-2">
               <div class="flex flex-col p-3 bg-background-base rounded-sm min-h-14">
@@ -507,7 +507,6 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
               </div>
             </div>
           </Tabs.Content>
-        </Show>
       </Tabs>
     </div>
   )

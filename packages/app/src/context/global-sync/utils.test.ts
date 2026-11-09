@@ -41,6 +41,23 @@ describe("normalizeAgentList", () => {
       },
     ])
   })
+
+  test("does not throw when a V2 agent request has no settings", () => {
+    const result = normalizeAgentList([
+      {
+        id: "build",
+        name: "build",
+        mode: "primary",
+        hidden: false,
+        request: { headers: {}, body: {} },
+        permissions: [],
+      },
+    ] as unknown as AgentListOutput["data"])
+
+    expect(result[0]?.temperature).toBeUndefined()
+    expect(result[0]?.topP).toBeUndefined()
+    expect(result[0]?.options).toEqual({})
+  })
 })
 
 describe("normalizePermissionRequest", () => {
