@@ -82,6 +82,7 @@ import {
 } from "./layout/sidebar-workspace"
 import { ProjectDragOverlay, SortableProject, type ProjectSidebarContext } from "./layout/sidebar-project"
 import { SidebarContent } from "./layout/sidebar-shell"
+import { MobileSessionTabs } from "./layout/mobile-session-tabs"
 
 export default function LegacyLayout(props: ParentProps) {
   const serverSDK = useServerSDK()
@@ -327,6 +328,16 @@ export default function LegacyLayout(props: ParentProps) {
     navigate(href)
     layout.mobileSidebar.hide()
   }
+
+  createEffect(
+    on(
+      () => [params.dir, params.id] as const,
+      () => {
+        if (layout.mobileSidebar.opened()) layout.mobileSidebar.hide()
+      },
+      { defer: true },
+    ),
+  )
 
   function cycleTheme(direction = 1) {
     const ids = availableThemeEntries().map(([id]) => id)
@@ -1977,6 +1988,13 @@ export default function LegacyLayout(props: ParentProps) {
           width: panelProps.mobile ? undefined : `${panel()}px`,
         }}
       >
+        <Show when={panelProps.mobile}>
+          <MobileSessionTabs
+            class="shrink-0 -mx-3 max-h-[40vh] overflow-y-auto no-scrollbar border-b border-border-weaker-base px-2 pb-2"
+            onNavigate={() => layout.mobileSidebar.hide()}
+          />
+        </Show>
+
         <Show
           when={project()}
           fallback={
