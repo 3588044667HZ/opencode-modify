@@ -131,22 +131,15 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   const measure = () => {
     if (!root) return
 
-    const scroller = document.querySelector(".scroll-view__viewport")
-    const head = scroller instanceof HTMLElement ? scroller.firstElementChild : undefined
-    const top =
-      head instanceof HTMLElement && head.classList.contains("sticky") ? head.getBoundingClientRect().bottom : 0
-    if (!top) {
-      root.style.removeProperty("--question-prompt-max-height")
-      return
-    }
-
+    const viewport = window.visualViewport
+    const viewportTop = viewport?.offsetTop ?? 0
+    const viewportBottom = viewport ? viewportTop + viewport.height : window.innerHeight
+    const rect = root.getBoundingClientRect()
     const dock = root.closest('[data-component="session-prompt-dock"]')
-    if (!(dock instanceof HTMLElement)) return
-
-    const dockBottom = dock.getBoundingClientRect().bottom
-    const below = Math.max(0, dockBottom - root.getBoundingClientRect().bottom)
-    const gap = 8
-    const max = Math.max(240, Math.floor(dockBottom - top - gap - below))
+    const dockBottom = dock instanceof HTMLElement ? dock.getBoundingClientRect().bottom : rect.bottom
+    const below = Math.max(0, dockBottom - rect.bottom)
+    const top = Math.max(viewportTop, rect.top)
+    const max = Math.max(240, Math.floor(viewportBottom - top - below))
     root.style.setProperty("--question-prompt-max-height", `${max}px`)
   }
 
@@ -186,6 +179,7 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
     update()
 
     makeEventListener(window, "resize", update)
+    if (window.visualViewport) makeEventListener(window.visualViewport, "resize", update)
 
     const dock = root?.closest('[data-component="session-prompt-dock"]')
     const scroller = document.querySelector(".scroll-view__viewport")
