@@ -319,8 +319,8 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     )
   }
 
-  // Agent-team panels prefer a dedicated desktop window so they do not cover
-  // the session being worked on; browsers fall back to in-app dialogs.
+  // Agent-team panels open in a dedicated desktop window or browser tab so they
+  // do not cover the session being worked on; unsupported platforms use dialogs.
   const openAgentTeams = (view: AgentTeamsView) => {
     const id = params.id
     if (!id) return

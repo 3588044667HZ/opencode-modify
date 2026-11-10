@@ -22,10 +22,7 @@ const tabKeys: Record<AgentTeamsView, "agentTeams.tab.blackboard" | "agentTeams.
   team: "agentTeams.tab.team",
 }
 
-const titleKeys: Record<
-  AgentTeamsView,
-  "dialog.blackboard.title" | "dialog.peerInbox.title" | "dialog.team.title"
-> = {
+const titleKeys: Record<AgentTeamsView, "dialog.blackboard.title" | "dialog.peerInbox.title" | "dialog.team.title"> = {
   blackboard: "dialog.blackboard.title",
   inbox: "dialog.peerInbox.title",
   team: "dialog.team.title",
@@ -41,16 +38,19 @@ const descriptionKeys: Record<
 }
 
 /**
- * Standalone agent-teams page. The desktop app opens it in its own window via
- * `Platform.openAppWindow` so the blackboard/inbox/team panels do not cover the
- * session being worked on.
+ * Standalone agent-teams page. Desktop opens it in its own window and the web
+ * app opens it in a new browser tab via `Platform.openAppWindow`, so the
+ * blackboard/inbox/team panels do not cover the session being worked on.
  */
 export function AgentTeamsPage() {
   const params = useParams<{ serverKey: string; id: string }>()
   const serverSDK = useServerSDK()
   const [session] = createResource(
     () => params.id,
-    (sessionID) => serverSDK().client.session.get({ sessionID }).then((result) => result.data),
+    (sessionID) =>
+      serverSDK()
+        .client.session.get({ sessionID })
+        .then((result) => result.data),
   )
   const directory = createMemo(() => session()?.directory)
 
@@ -92,7 +92,8 @@ function AgentTeamsView(props: { sessionID: string; title: () => string | undefi
     try {
       const result = await serverSDK().client.global.health()
       const data: unknown = result.data
-      if (typeof data === "object" && data !== null && "build" in data && typeof data.build === "string") return data.build
+      if (typeof data === "object" && data !== null && "build" in data && typeof data.build === "string")
+        return data.build
     } catch {}
     const http = server.current?.http
     if (!http) return undefined
@@ -116,8 +117,8 @@ function AgentTeamsView(props: { sessionID: string; title: () => string | undefi
   const stop = platform.onAppWindowView?.((next) => {
     if (isAgentTeamsView(next)) setSearch({ view: next })
   })
-  // Member rows open the subagent session in its own window (web falls back to
-  // in-window navigation).
+  // Member rows open the subagent session in its own window/tab; platforms
+  // without window support navigate in place.
   const openMember = (sessionID: string) => {
     const route = sessionHref(requireServerKey(params.serverKey), sessionID)
     if (platform.openAppWindow) {

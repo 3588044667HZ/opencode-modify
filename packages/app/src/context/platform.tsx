@@ -129,7 +129,7 @@ type PlatformBase = {
   /** Run a desktop-only menu action from the app chrome */
   runDesktopMenuAction?(action: DesktopMenuAction): Promise<void> | void
 
-  /** Open an app route in a dedicated desktop window; refocuses an existing window for the same route (desktop only) */
+  /** Open an app route in a dedicated desktop window or browser tab; reuses the existing window/tab for the same route */
   openAppWindow?(input: { route: string; view?: string }): Promise<void> | void
 
   /** Observe view switches sent to a window opened with openAppWindow (desktop only) */

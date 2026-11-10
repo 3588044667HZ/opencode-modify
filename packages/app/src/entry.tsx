@@ -91,6 +91,20 @@ const restart: Platform["restart"] = async () => {
   window.location.reload()
 }
 
+const openAppWindow: NonNullable<Platform["openAppWindow"]> = ({ route }) => {
+  if (!route.startsWith("/") || route.startsWith("//")) return
+  const url = new URL(route, window.location.origin)
+  // Reuse one browser tab per app route, mirroring the desktop route window
+  // registry. Team panel views share the same pathname, so switching view
+  // focuses and reuses the existing tab instead of stacking duplicates.
+  const tab = window.open(url.href, `opencode:${url.pathname}`)
+  if (!tab) {
+    window.location.assign(url.href)
+    return
+  }
+  tab.opener = null
+}
+
 const root = document.getElementById("root")
 if (!(root instanceof HTMLElement) && import.meta.env.DEV) {
   throw new Error(getRootNotFoundError())
@@ -121,6 +135,7 @@ const platform: Platform = {
   draftStore: createBrowserDraftStore(),
   version: pkg.version,
   openExternal,
+  openAppWindow,
   restart,
   notify,
   getDefaultServer: async () => {
