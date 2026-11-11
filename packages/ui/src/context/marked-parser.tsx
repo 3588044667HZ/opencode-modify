@@ -21,6 +21,9 @@ const inlineMathRegex = /^\\\(((?:\\.|[^\\\n])*?)\\\)/
 const blockMathRegex = /^\$\$\n([\s\S]+?)\n\$\$(?:\n|$)/
 const displayBracketRegex = /^\\\[([\s\S]+?)\\\]/
 const blockBracketRegex = /^[ \t]{0,3}\\\[([\s\S]+?)\\\]/
+// Some models emit display math as `[ ... ]`; only treat a whole bracket block as math
+// when it contains a LaTeX command or a math-only operator.
+const blockSingleBracketMathRegex = /^[ \t]{0,3}\[\s*([\s\S]*?(?:\\[A-Za-z]+|[=^])[\s\S]*?)\s*\](?:\n|$)/
 const blockDollarMathRegex = /^[ \t]{0,3}\$\$([\s\S]+?)\$\$/
 const displayDollarRegex = /^\$\$([\s\S]+?)\$\$/
 const inlineDollarRegex = /^\$(?!\$)(?![ \t\n])((?:\\.|[^\\\n$])+?)(?<![ \t\n\\])\$(?!\$)/
@@ -117,6 +120,21 @@ const katexExtension: MarkedExtension = {
         if (!match) return
         return {
           type: "blockBracketKatex",
+          raw: match[0],
+          text: match[1].trim(),
+          displayMode: true,
+        }
+      },
+      renderer: renderKatexToken,
+    },
+    {
+      name: "blockSingleBracketKatex",
+      level: "block",
+      tokenizer(src) {
+        const match = src.match(blockSingleBracketMathRegex)
+        if (!match) return
+        return {
+          type: "blockSingleBracketKatex",
           raw: match[0],
           text: match[1].trim(),
           displayMode: true,

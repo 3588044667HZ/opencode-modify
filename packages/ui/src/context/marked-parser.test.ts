@@ -28,17 +28,23 @@ test("renders display math delimiters", async () => {
 })
 
 test("renders display math containing blank lines", async () => {
-  expect(await parser.parse(String.raw`\[x^2
+  expect(
+    await parser.parse(String.raw`\[x^2
 
-y\]`)).toContain('<span class="katex-display">')
-  expect(await parser.parse(String.raw`\[
+y\]`),
+  ).toContain('<span class="katex-display">')
+  expect(
+    await parser.parse(String.raw`\[
 
 x^2
 
-\]`)).toContain('<span class="katex-display">')
-  expect(await parser.parse(String.raw`$$x^2
+\]`),
+  ).toContain('<span class="katex-display">')
+  expect(
+    await parser.parse(String.raw`$$x^2
 
-y$$`)).toContain('<span class="katex-display">')
+y$$`),
+  ).toContain('<span class="katex-display">')
 })
 
 test("does not render invalid delimiters", async () => {
@@ -64,6 +70,16 @@ test("renders real deepseek export samples", async () => {
       "\\[\n\\begin{bmatrix} 1 & 1 \\\\ 1 & 1 \\end{bmatrix}\n\\underbrace{x(k\\Delta)}_{\\text{面积}=x(k\\Delta)\\Delta}\n\\]",
     ),
   ).toContain('<span class="katex-display">')
+})
+
+test("renders bracket-wrapped display math", async () => {
+  expect(
+    await parser.parse(String.raw`[ \alpha_0= -\frac{g_0^Td_0}{d_0^TAd_0}
+\frac23 ]`),
+  ).toContain('<span class="katex-display">')
+  expect(await parser.parse(String.raw`[ g_1=Ax_1-b ]`)).toContain('<span class="katex-display">')
+  expect(await parser.parse("[not math](https://example.com)")).not.toContain("katex")
+  expect(await parser.parse("[see foo]")).not.toContain("katex")
 })
 
 test("uses the configured code highlighter", async () => {
