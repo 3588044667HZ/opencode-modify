@@ -21,7 +21,7 @@
   2. 服务端启动日志一行 `build=<id>`。
 
 ### GUI
-- 构建时注入 `import.meta.env.OPENCODE_BUILD_ID`（`packages/desktop/electron.vite.config.ts` 的 main 与 renderer `define`，与 `OPENCODE_CHANNEL` 同模式）。
+- 构建时注入 `import.meta.env.OPENCODE_BUILD_ID`：桌面主进程与 renderer 由 `packages/desktop/electron.vite.config.ts` 注入，Web UI 由 `packages/app/vite.js` 注入（与 `OPENCODE_CHANNEL` 同模式）。
 - 可见位置：
   1. Agent Teams 窗口页头显示弱化文本 `build <id>`（`packages/app/src/pages/agent-teams.tsx`）；
   2. 若 GUI Build ID 与服务端 `build` 不一致，页头显示警示条（提示 `bun run build:local` 重新构建）——这是"防误用老客户端"的核心检查；

@@ -12,6 +12,8 @@ const channel = (() => {
   return "dev"
 })()
 
+const buildId = process.env.OPENCODE_BUILD_ID ?? "local"
+
 /**
  * @type {import("vite").PluginOption}
  */
@@ -27,6 +29,7 @@ export default [
         },
         define: {
           "import.meta.env.VITE_OPENCODE_CHANNEL": JSON.stringify(channel),
+          "import.meta.env.OPENCODE_BUILD_ID": JSON.stringify(buildId),
         },
         worker: {
           format: "es",
