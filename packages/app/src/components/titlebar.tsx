@@ -73,7 +73,7 @@ export function Titlebar(props: { update?: TitlebarUpdate; debugTools?: { visibl
   const params = useParams()
   const useV2Titlebar = createMemo(() => settings.general.newLayoutDesigns())
   const mobile = createMediaQuery("(max-width: 767px)")
-  const compactNav = createMediaQuery("(max-width: 1279px)")
+  const mobileTabs = createMemo(() => platform.platform !== "desktop" && mobile())
   const bottom = createMemo(() => useV2Titlebar() && mobile() && settings.general.mobileTitlebarPosition() === "bottom")
 
   const mac = createMemo(() => platform.platform === "desktop" && platform.os === "macos")
@@ -372,7 +372,7 @@ export function Titlebar(props: { update?: TitlebarUpdate; debugTools?: { visibl
                   "md:pl-4": !macTrafficLights(),
                 }}
               >
-                <Show when={compactNav() && tabsStore.length > 0}>
+                <Show when={mobileTabs() && tabsStore.length > 0}>
                   <TooltipV2 placement="bottom" value={language.t("sidebar.menu.toggle")} class="shrink-0">
                     <IconButtonV2
                       type="button"
@@ -414,7 +414,7 @@ export function Titlebar(props: { update?: TitlebarUpdate; debugTools?: { visibl
                   />
                 </TooltipV2>
 
-                <div classList={{ hidden: compactNav(), contents: !compactNav() }}>
+                <div classList={{ hidden: mobileTabs(), contents: !mobileTabs() }}>
                   <TitlebarTabStrip
                     tabs={tabsStore}
                     currentTab={currentTab}
