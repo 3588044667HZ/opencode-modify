@@ -140,10 +140,10 @@ const cors = (corsOptions?: CorsOptions) =>
 // - ptyConnectApiRoutes: typed WebSocket upgrade route with ticket-aware auth.
 // - instanceApiRoutes: remaining typed instance routes.
 // - uiRoute: raw catch-all fallback; auth is router middleware so public static assets can bypass it.
-const authOnlyRouterLayer = authorizationRouterMiddleware.layer.pipe(Layer.provide(ServerAuth.Config.layer))
-const httpApiAuthLayer = authorizationLayer.pipe(Layer.provide(ServerAuth.Config.layer))
-const ptyConnectHttpApiAuthLayer = ptyConnectAuthorizationLayer.pipe(Layer.provide(ServerAuth.Config.layer))
-const serverHttpApiAuthLayer = serverAuthorizationLayer.pipe(Layer.provide(ServerAuth.Config.layer))
+const authOnlyRouterLayer = authorizationRouterMiddleware.layer
+const httpApiAuthLayer = authorizationLayer
+const ptyConnectHttpApiAuthLayer = ptyConnectAuthorizationLayer
+const serverHttpApiAuthLayer = serverAuthorizationLayer
 const workspaceRoutingLive = workspaceRoutingLayer.pipe(Layer.provide(Socket.layerWebSocketConstructorGlobal))
 const rootApiRoutes = HttpApiBuilder.layer(RootHttpApi).pipe(
   Layer.provide([controlHandlers, controlPlaneHandlers, globalHandlers]),
@@ -284,6 +284,7 @@ const app = LayerNode.group([
 
 export function createRoutes(
   corsOptions?: CorsOptions,
+  auth: Layer.Layer<ServerAuth.Config, EffectConfig.ConfigError> = ServerAuth.Config.layer,
 ): Layer.Layer<never, EffectConfig.ConfigError, RouteRequirements> {
   const locationServiceMapV2 = buildLocationServiceMap()
 
@@ -297,6 +298,7 @@ export function createRoutes(
     uiRoute,
   ).pipe(
     Layer.provide([
+      auth,
       errorLayer,
       compressionLayer,
       corsVaryFix,
