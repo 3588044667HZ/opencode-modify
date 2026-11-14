@@ -124,9 +124,34 @@ export namespace Flock {
     }
   }
 
+  function alive(pid: number) {
+    try {
+      process.kill(pid, 0)
+      return true
+    } catch (error) {
+      return code(error) === "EPERM"
+    }
+  }
+
+  async function ownerDead(metaPath: string) {
+    const raw = await readFile(metaPath, "utf8").catch(() => undefined)
+    if (!raw) return false
+    try {
+      const parsed: unknown = JSON.parse(raw)
+      if (typeof parsed !== "object" || parsed === null) return false
+      const hostname = "hostname" in parsed ? parsed.hostname : undefined
+      const pid = "pid" in parsed ? parsed.pid : undefined
+      if (hostname !== os.hostname() || typeof pid !== "number" || !Number.isInteger(pid)) return false
+      return !alive(pid)
+    } catch {
+      return false
+    }
+  }
+
   async function stale(lockDir: string, heartbeatPath: string, metaPath: string, staleMs: number) {
     // Stale detection allows automatic recovery after crashed owners.
     const now = wall()
+    if (await ownerDead(metaPath)) return true
     const heartbeat = await stats(heartbeatPath)
     if (heartbeat) {
       return now - heartbeat.mtimeMs > staleMs

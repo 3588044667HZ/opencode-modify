@@ -54,6 +54,8 @@ import { Truncate } from "@/tool/truncate"
 import { Worktree } from "@/worktree"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { MoveSession } from "@opencode-ai/core/control-plane/move-session"
+import { Backup } from "@opencode-ai/core/backup/backup"
+import { BackupScheduler } from "@opencode-ai/core/backup/scheduler"
 import { Database } from "@opencode-ai/core/database/database"
 import { AppNodeBuilderV1 } from "@/effect/app-node-builder-v1"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
@@ -219,6 +221,8 @@ const app = LayerNode.group([
   Npm.node,
   FSUtil.node,
   Database.node,
+  Backup.node,
+  BackupScheduler.node,
   Auth.node,
   Account.node,
   Config.node,

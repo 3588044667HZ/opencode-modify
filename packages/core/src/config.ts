@@ -12,6 +12,7 @@ import { Policy } from "./policy"
 import { AbsolutePath } from "./schema"
 import { ConfigAgent } from "./config/agent"
 import { ConfigAttachments } from "./config/attachments"
+import { ConfigBackup } from "./config/backup"
 import { ConfigCompaction } from "./config/compaction"
 import { ConfigCommand } from "./config/command"
 import { ConfigExperimental } from "./config/experimental"
@@ -83,6 +84,9 @@ export class Info extends Schema.Class<Info>("Config.Info")({
   }),
   mcp: ConfigMCP.Info.pipe(Schema.optional).annotate({
     description: "MCP server configuration",
+  }),
+  backup: ConfigBackup.Info.pipe(Schema.optional).annotate({
+    description: "Backup client configuration",
   }),
   compaction: ConfigCompaction.Info.pipe(Schema.optional).annotate({
     description: "Conversation compaction behavior",

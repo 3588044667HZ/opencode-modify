@@ -101,6 +101,14 @@ export type ProjectCopyError = {
 export const isProjectCopyError = (value: unknown): value is ProjectCopyError =>
   typeof value === "object" && value !== null && "name" in value && value["name"] === "ProjectCopyError"
 
+export type BackupError = { readonly _tag: "BackupError"; readonly message: string }
+export const isBackupError = (value: unknown): value is BackupError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "BackupError"
+
+export type ForbiddenError = { readonly _tag: "ForbiddenError"; readonly message: string }
+export const isForbiddenError = (value: unknown): value is ForbiddenError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ForbiddenError"
+
 export type HealthGetOutput = {
   readonly healthy: true
   readonly device: { readonly name: string; readonly platform: string; readonly hostname: string }
@@ -2808,3 +2816,98 @@ export type ProjectCopiesRefreshInput = {
 }
 
 export type ProjectCopiesRefreshOutput = void
+
+export type BackupStatusOutput = {
+  readonly running: boolean
+  readonly lastRunAt?: string
+  readonly lastSuccessAt?: string
+  readonly lastError?: string
+  readonly lastSnapshotID?: string
+  readonly lastLogicalBytes?: number
+  readonly lastUploadedBytes?: number
+  readonly lastDurationMs?: number
+  readonly configured: boolean
+  readonly enabled: boolean
+  readonly server?: string
+  readonly username?: string
+  readonly schedule: string
+  readonly retention: number
+  readonly tokenConfigured: boolean
+}
+
+export type BackupRunOutput = {
+  readonly running: boolean
+  readonly skipped: boolean
+  readonly snapshotID?: string
+  readonly logicalBytes?: number
+  readonly uploadedBytes?: number
+  readonly files?: number
+  readonly chunks?: number
+  readonly durationMs: number
+  readonly reason?: string
+}
+
+export type BackupSnapshotsInput = { readonly limit?: { readonly limit?: number | undefined }["limit"] }
+
+export type BackupSnapshotsOutput = ReadonlyArray<{
+  readonly id: string
+  readonly createdAt: string
+  readonly totalBytes?: number
+  readonly fileCount?: number
+}>
+
+export type BackupConfigureInput = {
+  readonly enabled?: {
+    readonly enabled?: boolean
+    readonly server?: string
+    readonly username?: string
+    readonly token?: string
+    readonly schedule?: string
+  }["enabled"]
+  readonly server?: {
+    readonly enabled?: boolean
+    readonly server?: string
+    readonly username?: string
+    readonly token?: string
+    readonly schedule?: string
+  }["server"]
+  readonly username?: {
+    readonly enabled?: boolean
+    readonly server?: string
+    readonly username?: string
+    readonly token?: string
+    readonly schedule?: string
+  }["username"]
+  readonly token?: {
+    readonly enabled?: boolean
+    readonly server?: string
+    readonly username?: string
+    readonly token?: string
+    readonly schedule?: string
+  }["token"]
+  readonly schedule?: {
+    readonly enabled?: boolean
+    readonly server?: string
+    readonly username?: string
+    readonly token?: string
+    readonly schedule?: string
+  }["schedule"]
+}
+
+export type BackupConfigureOutput = {
+  readonly running: boolean
+  readonly lastRunAt?: string
+  readonly lastSuccessAt?: string
+  readonly lastError?: string
+  readonly lastSnapshotID?: string
+  readonly lastLogicalBytes?: number
+  readonly lastUploadedBytes?: number
+  readonly lastDurationMs?: number
+  readonly configured: boolean
+  readonly enabled: boolean
+  readonly server?: string
+  readonly username?: string
+  readonly schedule: string
+  readonly retention: number
+  readonly tokenConfigured: boolean
+}

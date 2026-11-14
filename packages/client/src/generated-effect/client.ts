@@ -681,6 +681,43 @@ const adaptGroup17 = (raw: RawClient["server.projectCopy"]) => ({
   refresh: Endpoint17_2(raw),
 })
 
+const Endpoint18_0 = (raw: RawClient["server.backup"]) => () =>
+  raw["backup.status"]({}).pipe(Effect.mapError(mapClientError))
+
+const Endpoint18_1 = (raw: RawClient["server.backup"]) => () =>
+  raw["backup.run"]({}).pipe(Effect.mapError(mapClientError))
+
+type Endpoint18_2Request = Parameters<RawClient["server.backup"]["backup.snapshots"]>[0]
+type Endpoint18_2Input = { readonly limit?: Endpoint18_2Request["query"]["limit"] }
+const Endpoint18_2 = (raw: RawClient["server.backup"]) => (input?: Endpoint18_2Input) =>
+  raw["backup.snapshots"]({ query: { limit: input?.["limit"] } }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint18_3Request = Parameters<RawClient["server.backup"]["backup.configure"]>[0]
+type Endpoint18_3Input = {
+  readonly enabled?: Endpoint18_3Request["payload"]["enabled"]
+  readonly server?: Endpoint18_3Request["payload"]["server"]
+  readonly username?: Endpoint18_3Request["payload"]["username"]
+  readonly token?: Endpoint18_3Request["payload"]["token"]
+  readonly schedule?: Endpoint18_3Request["payload"]["schedule"]
+}
+const Endpoint18_3 = (raw: RawClient["server.backup"]) => (input?: Endpoint18_3Input) =>
+  raw["backup.configure"]({
+    payload: {
+      enabled: input?.["enabled"],
+      server: input?.["server"],
+      username: input?.["username"],
+      token: input?.["token"],
+      schedule: input?.["schedule"],
+    },
+  }).pipe(Effect.mapError(mapClientError))
+
+const adaptGroup18 = (raw: RawClient["server.backup"]) => ({
+  status: Endpoint18_0(raw),
+  run: Endpoint18_1(raw),
+  snapshots: Endpoint18_2(raw),
+  configure: Endpoint18_3(raw),
+})
+
 const adaptClient = (raw: RawClient) => ({
   health: adaptGroup0(raw["server.health"]),
   location: adaptGroup1(raw["server.location"]),
@@ -700,6 +737,7 @@ const adaptClient = (raw: RawClient) => ({
   questions: adaptGroup15(raw["server.question"]),
   references: adaptGroup16(raw["server.reference"]),
   projectCopies: adaptGroup17(raw["server.projectCopy"]),
+  backup: adaptGroup18(raw["server.backup"]),
 })
 
 export const make = (options?: { readonly baseUrl?: URL | string }) =>

@@ -1,3 +1,5 @@
+import { Backup } from "@opencode-ai/core/backup/backup"
+import { BackupScheduler } from "@opencode-ai/core/backup/scheduler"
 import { Database } from "@opencode-ai/core/database/database"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
@@ -25,6 +27,8 @@ import { sessionLocationLayer } from "./middleware/session-location"
 
 const applicationServices = LayerNode.group([
   Database.node,
+  Backup.node,
+  BackupScheduler.node,
   EventV2.node,
   httpClient,
   ToolOutputStore.cleanupNode,

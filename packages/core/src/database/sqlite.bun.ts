@@ -1,4 +1,6 @@
 import { Database } from "bun:sqlite"
+import { chmodSync, existsSync, mkdirSync, rmSync } from "node:fs"
+import { dirname } from "node:path"
 import { drizzle } from "drizzle-orm/bun-sqlite"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
@@ -180,4 +182,140 @@ export const layer = (config: Config) => {
   return Layer.merge(native, Layer.merge(sqliteLayer(config), drizzleLayer).pipe(Layer.provide(native))).pipe(
     Layer.provide(Reactivity.layer),
   )
+}
+
+export interface SnapshotInput {
+  readonly source: string
+  readonly target: string
+  readonly quickCheck?: boolean
+}
+
+/** Copies a live SQLite database through a separate read-only connection without loading it into memory. */
+export function snapshotDatabase(input: SnapshotInput) {
+  if (input.source === input.target) throw new Error("snapshot source and target must differ")
+  if (input.source === ":memory:") throw new Error("cannot snapshot an in-memory database")
+  rmSync(input.target, { force: true })
+  mkdirSync(dirname(input.target), { recursive: true, mode: 0o700 })
+
+  const source = new Database(input.source, { readonly: true, create: false, readwrite: false })
+  let failure: unknown
+  try {
+    source.run("VACUUM INTO ?", [input.target])
+  } catch (error) {
+    failure = error
+  } finally {
+    source.close()
+  }
+  if (failure) {
+    rmSync(input.target, { force: true })
+    throw failure
+  }
+  try {
+    chmodSync(input.target, 0o600)
+  } catch {}
+
+  if (input.quickCheck === true) {
+    const snapshot = new Database(input.target, { readonly: true, create: false, readwrite: false })
+    let checkFailure: string | undefined
+    try {
+      const rows = snapshot.query("PRAGMA quick_check").values() as Array<Array<string>>
+      const result = rows.flat().join("; ")
+      if (result.toLowerCase() !== "ok") checkFailure = result
+    } finally {
+      snapshot.close()
+    }
+    if (checkFailure !== undefined) {
+      rmSync(input.target, { force: true })
+      throw new Error(`SQLite quick_check failed: ${checkFailure.slice(0, 500)}`)
+    }
+  }
+}
+
+export function readProjectDirectories(filename: string): string[] {
+  if (!existsSync(filename)) return []
+  const db = new Database(filename, { readonly: true, create: false, readwrite: false })
+  try {
+    const rows = db.query("SELECT DISTINCT directory FROM project_directory").values() as Array<[string]>
+    const worktrees = db.query("SELECT DISTINCT worktree FROM project").values() as Array<[string]>
+    return [
+      ...new Set(
+        [...rows, ...worktrees].flatMap((row) =>
+          typeof row[0] === "string" && row[0] ? [row[0]] : [],
+        ),
+      ),
+    ]
+  } catch {
+    return []
+  } finally {
+    db.close()
+  }
+}
+
+const SNAPSHOT_WORKER_SOURCE = `
+const { Database } = require("bun:sqlite");
+const fs = require("node:fs");
+const path = require("node:path");
+self.onmessage = (event) => {
+  const input = event.data;
+  try {
+    fs.rmSync(input.target, { force: true });
+    fs.mkdirSync(path.dirname(input.target), { recursive: true, mode: 0o700 });
+    const source = new Database(input.source, { readonly: true, create: false, readwrite: false });
+    let failure;
+    try {
+      source.run("VACUUM INTO ?", [input.target]);
+    } catch (error) {
+      failure = error;
+    } finally {
+      source.close();
+    }
+    if (failure) throw failure;
+    try {
+      fs.chmodSync(input.target, 0o600);
+    } catch {}
+    if (input.quickCheck === true) {
+      const snapshot = new Database(input.target, { readonly: true, create: false, readwrite: false });
+      let result = "";
+      try {
+        const rows = snapshot.query("PRAGMA quick_check").values();
+        result = rows.flat().join("; ");
+      } finally {
+        snapshot.close();
+      }
+      if (result.toLowerCase() !== "ok") throw new Error("SQLite quick_check failed: " + result.slice(0, 500));
+    }
+    self.postMessage({ ok: true });
+  } catch (error) {
+    try {
+      fs.rmSync(input.target, { force: true });
+    } catch {}
+    self.postMessage({ ok: false, message: error && error.message ? error.message : String(error) });
+  }
+};
+`;
+
+/** Runs the snapshot in a worker so the server event loop and Flock heartbeat stay responsive. */
+export function snapshotDatabaseAsync(input: SnapshotInput, signal?: AbortSignal): Promise<void> {
+  if (input.source === input.target) return Promise.reject(new Error("snapshot source and target must differ"))
+  if (input.source === ":memory:") return Promise.reject(new Error("cannot snapshot an in-memory database"))
+  if (signal?.aborted) return Promise.reject(signal.reason ?? new Error("snapshot aborted"))
+
+  return new Promise((resolve, reject) => {
+    const worker = new Worker("data:text/javascript," + encodeURIComponent(SNAPSHOT_WORKER_SOURCE))
+    let settled = false
+    const finish = (error?: Error) => {
+      if (settled) return
+      settled = true
+      signal?.removeEventListener("abort", abort)
+      void worker.terminate()
+      if (error) reject(error)
+      else resolve()
+    }
+    const abort = () => finish(new Error("snapshot aborted"))
+    signal?.addEventListener("abort", abort, { once: true })
+    worker.onmessage = (event: MessageEvent<{ ok: boolean; message?: string }>) =>
+      finish(event.data.ok ? undefined : new Error(event.data.message ?? "snapshot failed"))
+    worker.onerror = (event) => finish(new Error(event.message || "snapshot worker failed"))
+    worker.postMessage(input)
+  })
 }

@@ -1,3 +1,4 @@
+import { Backup } from "@opencode-ai/core/backup/backup"
 import { OpenCode } from "@opencode-ai/client/effect"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
@@ -11,7 +12,7 @@ export const create = Effect.fn("OpenCode.create")(function* () {
   const scope = yield* Scope.Scope
   const memoMap = yield* Layer.makeMemoMap
   const context = yield* Layer.buildWithMemoMap(
-    AppNodeBuilder.build(LayerNode.group([ApplicationTools.node, PermissionSaved.node])),
+    AppNodeBuilder.build(LayerNode.group([ApplicationTools.node, PermissionSaved.node, Backup.node])),
     memoMap,
     scope,
   )
@@ -29,7 +30,7 @@ export const create = Effect.fn("OpenCode.create")(function* () {
     ),
     (web) => Effect.promise(web.dispose),
   )
-  const fetch = Object.assign((input: RequestInfo | URL, init?: RequestInit) => web.handler(new Request(input, init)), {
+  const fetch = Object.assign((input: RequestInfo | URL, init?: RequestInit) => web.handler(new Request(input, init), Context.pick(Backup.Service)(context)), {
     preconnect: () => undefined,
   }) satisfies typeof globalThis.fetch
   const client = yield* OpenCode.make({ baseUrl: "http://opencode.local" }).pipe(

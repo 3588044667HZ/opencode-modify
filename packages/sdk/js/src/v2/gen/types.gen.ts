@@ -2148,6 +2148,7 @@ export type Config = {
     max_lines?: number
     max_bytes?: number
   }
+  backup?: ConfigV2Backup
   compaction?: {
     auto?: boolean
     prune?: boolean
@@ -3109,6 +3110,11 @@ export type ProjectCopyError = {
   }
 }
 
+export type BackupError = {
+  _tag: "BackupError"
+  message: string
+}
+
 export type EffectHttpApiErrorForbidden = {
   _tag: "Forbidden"
 }
@@ -3986,6 +3992,17 @@ export type ConfigV2ReferenceLocal = {
   path: string
   description?: string
   hidden?: boolean
+}
+
+export type ConfigV2Backup = {
+  enabled?: boolean
+  server?: string
+  username?: string
+  schedule?: string
+  retention?: number
+  include_tool_output?: boolean
+  include_snapshots?: boolean
+  include_project_config?: boolean
 }
 
 export type PolicyEffect = "allow" | "deny"
@@ -6453,6 +6470,51 @@ export type ReferenceInfo = {
 
 export type ProjectCopyCopy = {
   directory: string
+}
+
+export type BackupStatus = {
+  running: boolean
+  lastRunAt?: string
+  lastSuccessAt?: string
+  lastError?: string
+  lastSnapshotID?: string
+  lastLogicalBytes?: number
+  lastUploadedBytes?: number
+  lastDurationMs?: number
+  configured: boolean
+  enabled: boolean
+  server?: string
+  username?: string
+  schedule: string
+  retention: number
+  tokenConfigured: boolean
+}
+
+export type BackupRunResult = {
+  running: boolean
+  skipped: boolean
+  snapshotID?: string
+  logicalBytes?: number
+  uploadedBytes?: number
+  files?: number
+  chunks?: number
+  durationMs: number
+  reason?: string
+}
+
+export type BackupSnapshotSummary = {
+  id: string
+  createdAt: string
+  totalBytes?: number
+  fileCount?: number
+}
+
+export type BackupConfigureInput = {
+  enabled?: boolean
+  server?: string
+  username?: string
+  token?: string
+  schedule?: string
 }
 
 export type EventModelsDevRefreshed = {
@@ -14276,6 +14338,144 @@ export type V2ProjectCopyRefreshResponses = {
 }
 
 export type V2ProjectCopyRefreshResponse = V2ProjectCopyRefreshResponses[keyof V2ProjectCopyRefreshResponses]
+
+export type V2BackupStatusData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/backup/status"
+}
+
+export type V2BackupStatusErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * BackupError
+   */
+  500: BackupError
+}
+
+export type V2BackupStatusError = V2BackupStatusErrors[keyof V2BackupStatusErrors]
+
+export type V2BackupStatusResponses = {
+  /**
+   * Backup.Status
+   */
+  200: BackupStatus
+}
+
+export type V2BackupStatusResponse = V2BackupStatusResponses[keyof V2BackupStatusResponses]
+
+export type V2BackupRunData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/backup/run"
+}
+
+export type V2BackupRunErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * BackupError
+   */
+  500: BackupError
+}
+
+export type V2BackupRunError = V2BackupRunErrors[keyof V2BackupRunErrors]
+
+export type V2BackupRunResponses = {
+  /**
+   * Backup.RunResult
+   */
+  202: BackupRunResult
+}
+
+export type V2BackupRunResponse = V2BackupRunResponses[keyof V2BackupRunResponses]
+
+export type V2BackupSnapshotsData = {
+  body?: never
+  path?: never
+  query?: {
+    limit?: number
+  }
+  url: "/api/backup/snapshots"
+}
+
+export type V2BackupSnapshotsErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * BackupError
+   */
+  500: BackupError
+}
+
+export type V2BackupSnapshotsError = V2BackupSnapshotsErrors[keyof V2BackupSnapshotsErrors]
+
+export type V2BackupSnapshotsResponses = {
+  /**
+   * Success
+   */
+  200: Array<BackupSnapshotSummary>
+}
+
+export type V2BackupSnapshotsResponse = V2BackupSnapshotsResponses[keyof V2BackupSnapshotsResponses]
+
+export type V2BackupConfigureData = {
+  body: BackupConfigureInput
+  path?: never
+  query?: never
+  url: "/api/backup/configure"
+}
+
+export type V2BackupConfigureErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
+   * BackupError
+   */
+  500: BackupError
+}
+
+export type V2BackupConfigureError = V2BackupConfigureErrors[keyof V2BackupConfigureErrors]
+
+export type V2BackupConfigureResponses = {
+  /**
+   * Backup.Status
+   */
+  200: BackupStatus
+}
+
+export type V2BackupConfigureResponse = V2BackupConfigureResponses[keyof V2BackupConfigureResponses]
 
 export type PtyConnectData = {
   body?: never

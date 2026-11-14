@@ -112,6 +112,12 @@ import type {
   ProjectCopiesRemoveOutput,
   ProjectCopiesRefreshInput,
   ProjectCopiesRefreshOutput,
+  BackupStatusOutput,
+  BackupRunOutput,
+  BackupSnapshotsInput,
+  BackupSnapshotsOutput,
+  BackupConfigureInput,
+  BackupConfigureOutput,
 } from "./types"
 import { ClientError } from "./client-error"
 
@@ -983,6 +989,60 @@ export function make(options: ClientOptions) {
             successStatus: 204,
             declaredStatuses: [400, 401],
             empty: true,
+          },
+          requestOptions,
+        ),
+    },
+    backup: {
+      status: (requestOptions?: RequestOptions) =>
+        request<BackupStatusOutput>(
+          {
+            method: "GET",
+            path: `/api/backup/status`,
+            successStatus: 200,
+            declaredStatuses: [500, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      run: (requestOptions?: RequestOptions) =>
+        request<BackupRunOutput>(
+          {
+            method: "POST",
+            path: `/api/backup/run`,
+            successStatus: 202,
+            declaredStatuses: [400, 500, 401],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      snapshots: (input?: BackupSnapshotsInput, requestOptions?: RequestOptions) =>
+        request<BackupSnapshotsOutput>(
+          {
+            method: "GET",
+            path: `/api/backup/snapshots`,
+            query: { limit: input?.["limit"] },
+            successStatus: 200,
+            declaredStatuses: [400, 500, 401],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      configure: (input?: BackupConfigureInput, requestOptions?: RequestOptions) =>
+        request<BackupConfigureOutput>(
+          {
+            method: "POST",
+            path: `/api/backup/configure`,
+            body: {
+              enabled: input?.["enabled"],
+              server: input?.["server"],
+              username: input?.["username"],
+              token: input?.["token"],
+              schedule: input?.["schedule"],
+            },
+            successStatus: 200,
+            declaredStatuses: [400, 403, 500, 401],
+            empty: false,
           },
           requestOptions,
         ),

@@ -1,4 +1,5 @@
 export { Agent } from "./agent"
+export { BackupStatus, BackupSnapshotSummary, BackupConfigureInput, BackupRunResult } from "./backup"
 export { Command } from "./command"
 export { Connection } from "./connection"
 export { Credential } from "./credential"

@@ -1,4 +1,7 @@
 import { DatabaseSync, type SQLInputValue } from "node:sqlite"
+import { Worker } from "node:worker_threads"
+import { chmodSync, existsSync, mkdirSync, rmSync } from "node:fs"
+import { dirname } from "node:path"
 import { drizzle } from "drizzle-orm/node-sqlite"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
@@ -175,4 +178,142 @@ export const layer = (config: Config) => {
   return Layer.merge(native, Layer.merge(sqliteLayer(config), drizzleLayer).pipe(Layer.provide(native))).pipe(
     Layer.provide(Reactivity.layer),
   )
+}
+
+export interface SnapshotInput {
+  readonly source: string
+  readonly target: string
+  readonly quickCheck?: boolean
+}
+
+/** Copies a live SQLite database through a separate read-only connection without loading it into memory. */
+export function snapshotDatabase(input: SnapshotInput) {
+  if (input.source === input.target) throw new Error("snapshot source and target must differ")
+  if (input.source === ":memory:") throw new Error("cannot snapshot an in-memory database")
+  rmSync(input.target, { force: true })
+  mkdirSync(dirname(input.target), { recursive: true, mode: 0o700 })
+
+  const source = new DatabaseSync(input.source, { readOnly: true })
+  let failure: unknown
+  try {
+    source.prepare("VACUUM INTO ?").run(input.target)
+  } catch (error) {
+    failure = error
+  } finally {
+    source.close()
+  }
+  if (failure) {
+    rmSync(input.target, { force: true })
+    throw failure
+  }
+  try {
+    chmodSync(input.target, 0o600)
+  } catch {}
+
+  if (input.quickCheck === true) {
+    const snapshot = new DatabaseSync(input.target, { readOnly: true })
+    let checkFailure: string | undefined
+    try {
+      const rows = snapshot.prepare("PRAGMA quick_check").all() as Array<Record<string, unknown>>
+      const result = rows.map((row) => String(Object.values(row)[0])).join("; ")
+      if (result.toLowerCase() !== "ok") checkFailure = result
+    } finally {
+      snapshot.close()
+    }
+    if (checkFailure !== undefined) {
+      rmSync(input.target, { force: true })
+      throw new Error(`SQLite quick_check failed: ${checkFailure.slice(0, 500)}`)
+    }
+  }
+}
+
+export function readProjectDirectories(filename: string): string[] {
+  if (!existsSync(filename)) return []
+  const db = new DatabaseSync(filename, { readOnly: true })
+  try {
+    const rows = db.prepare("SELECT DISTINCT directory FROM project_directory").all() as Array<{
+      directory?: unknown
+    }>
+    const worktrees = db.prepare("SELECT DISTINCT worktree FROM project").all() as Array<{
+      worktree?: unknown
+    }>
+    return [
+      ...new Set([
+        ...rows.flatMap((row) => (typeof row.directory === "string" && row.directory ? [row.directory] : [])),
+        ...worktrees.flatMap((row) => (typeof row.worktree === "string" && row.worktree ? [row.worktree] : [])),
+      ]),
+    ]
+  } catch {
+    return []
+  } finally {
+    db.close()
+  }
+}
+
+const SNAPSHOT_WORKER_SOURCE = `
+const { parentPort, workerData } = require("node:worker_threads");
+const { DatabaseSync } = require("node:sqlite");
+const fs = require("node:fs");
+const path = require("node:path");
+const input = workerData;
+try {
+  fs.rmSync(input.target, { force: true });
+  fs.mkdirSync(path.dirname(input.target), { recursive: true, mode: 0o700 });
+  const source = new DatabaseSync(input.source, { readOnly: true });
+  let failure;
+  try {
+    source.prepare("VACUUM INTO ?").run(input.target);
+  } catch (error) {
+    failure = error;
+  } finally {
+    source.close();
+  }
+  if (failure) throw failure;
+  try {
+    fs.chmodSync(input.target, 0o600);
+  } catch {}
+  if (input.quickCheck === true) {
+    const snapshot = new DatabaseSync(input.target, { readOnly: true });
+    let result = "";
+    try {
+      const rows = snapshot.prepare("PRAGMA quick_check").all();
+      result = rows.map((row) => String(Object.values(row)[0])).join("; ");
+    } finally {
+      snapshot.close();
+    }
+    if (result.toLowerCase() !== "ok") throw new Error("SQLite quick_check failed: " + result.slice(0, 500));
+  }
+  parentPort.postMessage({ ok: true });
+} catch (error) {
+  try {
+    fs.rmSync(input.target, { force: true });
+  } catch {}
+  parentPort.postMessage({ ok: false, message: error && error.message ? error.message : String(error) });
+}
+`;
+
+/** Runs the snapshot in a worker so the server event loop and Flock heartbeat stay responsive. */
+export function snapshotDatabaseAsync(input: SnapshotInput, signal?: AbortSignal): Promise<void> {
+  if (input.source === input.target) return Promise.reject(new Error("snapshot source and target must differ"))
+  if (input.source === ":memory:") return Promise.reject(new Error("cannot snapshot an in-memory database"))
+  if (signal?.aborted) return Promise.reject(signal.reason ?? new Error("snapshot aborted"))
+
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(SNAPSHOT_WORKER_SOURCE, { eval: true, workerData: input })
+    let settled = false
+    const finish = (error?: Error) => {
+      if (settled) return
+      settled = true
+      signal?.removeEventListener("abort", abort)
+      void worker.terminate()
+      if (error) reject(error)
+      else resolve()
+    }
+    const abort = () => finish(new Error("snapshot aborted"))
+    signal?.addEventListener("abort", abort, { once: true })
+    worker.once("message", (message: { ok: boolean; message?: string }) =>
+      finish(message.ok ? undefined : new Error(message.message ?? "snapshot failed")),
+    )
+    worker.once("error", (error) => finish(error instanceof Error ? error : new Error(String(error))))
+  })
 }

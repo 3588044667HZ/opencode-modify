@@ -23,6 +23,7 @@ import type {
   AuthRemoveResponses,
   AuthSetErrors,
   AuthSetResponses,
+  BackupConfigureInput,
   CommandListErrors,
   CommandListResponses,
   Config as Config3,
@@ -281,6 +282,14 @@ import type {
   TuiSubmitPromptResponses,
   V2AgentListErrors,
   V2AgentListResponses,
+  V2BackupConfigureErrors,
+  V2BackupConfigureResponses,
+  V2BackupRunErrors,
+  V2BackupRunResponses,
+  V2BackupSnapshotsErrors,
+  V2BackupSnapshotsResponses,
+  V2BackupStatusErrors,
+  V2BackupStatusResponses,
   V2CommandListErrors,
   V2CommandListResponses,
   V2CredentialRemoveErrors,
@@ -7256,6 +7265,75 @@ export class ProjectCopy2 extends HeyApiClient {
   }
 }
 
+export class Backup extends HeyApiClient {
+  /**
+   * Get backup status
+   *
+   * Return local backup configuration state and the latest run status.
+   */
+  public status<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<V2BackupStatusResponses, V2BackupStatusErrors, ThrowOnError>({
+      url: "/api/backup/status",
+      ...options,
+    })
+  }
+
+  /**
+   * Start a backup
+   *
+   * Start a backup in the background and return immediately.
+   */
+  public run<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).post<V2BackupRunResponses, V2BackupRunErrors, ThrowOnError>({
+      url: "/api/backup/run",
+      ...options,
+    })
+  }
+
+  /**
+   * List backup snapshots
+   *
+   * List snapshots stored on the configured backup server.
+   */
+  public snapshots<ThrowOnError extends boolean = false>(
+    parameters?: {
+      limit?: number
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "limit" }] }])
+    return (options?.client ?? this.client).get<V2BackupSnapshotsResponses, V2BackupSnapshotsErrors, ThrowOnError>({
+      url: "/api/backup/snapshots",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Configure backup
+   *
+   * Store backup configuration in the global config and the token in the state directory. Tokens are never returned.
+   */
+  public configure<ThrowOnError extends boolean = false>(
+    parameters: {
+      backupConfigureInput: BackupConfigureInput
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ key: "backupConfigureInput", map: "body" }] }])
+    return (options?.client ?? this.client).post<V2BackupConfigureResponses, V2BackupConfigureErrors, ThrowOnError>({
+      url: "/api/backup/configure",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
 export class V2 extends HeyApiClient {
   private _health?: Health
   get health(): Health {
@@ -7340,6 +7418,11 @@ export class V2 extends HeyApiClient {
   private _projectCopy?: ProjectCopy2
   get projectCopy(): ProjectCopy2 {
     return (this._projectCopy ??= new ProjectCopy2({ client: this.client }))
+  }
+
+  private _backup?: Backup
+  get backup(): Backup {
+    return (this._backup ??= new Backup({ client: this.client }))
   }
 }
 
