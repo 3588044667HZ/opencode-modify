@@ -1,0 +1,10 @@
+[project]
+name = "opencode-backup-server"
+version = "1.0.0"
+description = "Standard-library-only chunked backup server for OpenCode"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.setuptools]
+py-modules = ["server"]
