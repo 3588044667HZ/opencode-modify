@@ -1224,4 +1224,8 @@ export const dict = {
   "settings.backup.toast.saveFailed": "Nepavyko išsaugoti atsarginės kopijos nustatymų",
   "settings.backup.toast.started": "Atsarginė kopija pradėta",
   "settings.backup.toast.runFailed": "Nepavyko paleisti atsarginės kopijos",
+  "settings.backup.form.credentialType": "Prisijungimo duomenų tipas",
+  "settings.backup.form.credentialTypeDescription": "Pasirinkite, ar atsarginių kopijų serverio prisijungimo duomuo yra prieigos raktas, ar naudotojo slaptažodis.",
+  "settings.backup.form.methodToken": "Prieigos raktas",
+  "settings.backup.form.methodPassword": "Slaptažodis",
 }

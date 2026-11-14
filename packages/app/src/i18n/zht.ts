@@ -1274,4 +1274,8 @@ export const dict = {
   "settings.backup.toast.saveFailed": "儲存備份設定失敗",
   "settings.backup.toast.started": "備份已開始",
   "settings.backup.toast.runFailed": "啟動備份失敗",
+  "settings.backup.form.credentialType": "憑證類型",
+  "settings.backup.form.credentialTypeDescription": "選擇備份伺服器憑證是 Token 還是使用者密碼。",
+  "settings.backup.form.methodToken": "Token",
+  "settings.backup.form.methodPassword": "密碼",
 } satisfies Partial<Record<Keys, string>>

@@ -1206,4 +1206,8 @@ export const dict = {
   "settings.backup.toast.saveFailed": "ذخیره تنظیمات پشتیبان ناموفق بود",
   "settings.backup.toast.started": "پشتیبان‌گیری آغاز شد",
   "settings.backup.toast.runFailed": "آغاز پشتیبان‌گیری ناموفق بود",
+  "settings.backup.form.credentialType": "نوع اطلاعات ورود",
+  "settings.backup.form.credentialTypeDescription": "انتخاب کنید که اطلاعات ورود سرور پشتیبان توکن است یا گذرواژه کاربر.",
+  "settings.backup.form.methodToken": "توکن",
+  "settings.backup.form.methodPassword": "گذرواژه",
 }

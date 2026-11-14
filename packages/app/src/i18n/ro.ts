@@ -1213,4 +1213,8 @@ export const dict = {
   "settings.backup.toast.saveFailed": "Salvarea setărilor de backup a eșuat",
   "settings.backup.toast.started": "Backupul a început",
   "settings.backup.toast.runFailed": "Pornirea backupului a eșuat",
+  "settings.backup.form.credentialType": "Tip de credențial",
+  "settings.backup.form.credentialTypeDescription": "Alegeți dacă credențialul serverului de backup este un token sau o parolă de utilizator.",
+  "settings.backup.form.methodToken": "Token",
+  "settings.backup.form.methodPassword": "Parolă",
 }

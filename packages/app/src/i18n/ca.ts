@@ -1224,4 +1224,8 @@ export const dict = {
   "settings.backup.toast.saveFailed": "No s'ha pogut desar la configuració de còpia",
   "settings.backup.toast.started": "Còpia iniciada",
   "settings.backup.toast.runFailed": "No s'ha pogut iniciar la còpia",
+  "settings.backup.form.credentialType": "Tipus de credencial",
+  "settings.backup.form.credentialTypeDescription": "Trieu si la credencial del servidor de còpies és un token o una contrasenya d'usuari.",
+  "settings.backup.form.methodToken": "Token",
+  "settings.backup.form.methodPassword": "Contrasenya",
 }

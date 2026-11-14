@@ -1222,4 +1222,8 @@ export const dict = {
   "settings.backup.toast.saveFailed": "تعذّر حفظ إعدادات النسخ الاحتياطي",
   "settings.backup.toast.started": "بدأ النسخ الاحتياطي",
   "settings.backup.toast.runFailed": "تعذّر بدء النسخ الاحتياطي",
+  "settings.backup.form.credentialType": "نوع بيانات الاعتماد",
+  "settings.backup.form.credentialTypeDescription": "اختر ما إذا كانت بيانات اعتماد خادم النسخ الاحتياطي رمزًا أم كلمة مرور مستخدم.",
+  "settings.backup.form.methodToken": "الرمز",
+  "settings.backup.form.methodPassword": "كلمة المرور",
 }

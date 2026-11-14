@@ -1250,4 +1250,8 @@ export const dict = {
   "settings.backup.toast.saveFailed": "Impossible d’enregistrer les paramètres de sauvegarde",
   "settings.backup.toast.started": "Sauvegarde démarrée",
   "settings.backup.toast.runFailed": "Impossible de démarrer la sauvegarde",
+  "settings.backup.form.credentialType": "Type d’identifiant",
+  "settings.backup.form.credentialTypeDescription": "Choisissez si l’identifiant du serveur de sauvegarde est un jeton ou un mot de passe utilisateur.",
+  "settings.backup.form.methodToken": "Jeton",
+  "settings.backup.form.methodPassword": "Mot de passe",
 }

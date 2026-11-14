@@ -1316,4 +1316,8 @@ export const dict = {
   "settings.backup.toast.saveFailed": "No se pudo guardar la configuración de copia",
   "settings.backup.toast.started": "Copia iniciada",
   "settings.backup.toast.runFailed": "No se pudo iniciar la copia",
+  "settings.backup.form.credentialType": "Tipo de credencial",
+  "settings.backup.form.credentialTypeDescription": "Elige si la credencial del servidor de copias es un token o una contraseña de usuario.",
+  "settings.backup.form.methodToken": "Token",
+  "settings.backup.form.methodPassword": "Contraseña",
 }

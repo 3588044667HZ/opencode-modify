@@ -1313,4 +1313,8 @@ export const dict = {
   "settings.backup.toast.saveFailed": "Не удалось сохранить настройки копии",
   "settings.backup.toast.started": "Копирование начато",
   "settings.backup.toast.runFailed": "Не удалось запустить копирование",
+  "settings.backup.form.credentialType": "Тип учётных данных",
+  "settings.backup.form.credentialTypeDescription": "Выберите, является ли учётная запись сервера резервных копий токеном или паролем пользователя.",
+  "settings.backup.form.methodToken": "Токен",
+  "settings.backup.form.methodPassword": "Пароль",
 }

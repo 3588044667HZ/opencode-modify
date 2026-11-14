@@ -1214,4 +1214,8 @@ export const dict = {
   "settings.backup.toast.saveFailed": "Nastavení zálohy se nepodařilo uložit",
   "settings.backup.toast.started": "Záloha spuštěna",
   "settings.backup.toast.runFailed": "Zálohu se nepodařilo spustit",
+  "settings.backup.form.credentialType": "Typ přihlašovacích údajů",
+  "settings.backup.form.credentialTypeDescription": "Vyberte, zda je přihlašovací údaj záložního serveru token nebo heslo uživatele.",
+  "settings.backup.form.methodToken": "Token",
+  "settings.backup.form.methodPassword": "Heslo",
 }

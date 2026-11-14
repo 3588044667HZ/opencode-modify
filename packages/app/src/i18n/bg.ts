@@ -1221,4 +1221,8 @@ export const dict = {
   "settings.backup.toast.saveFailed": "Запазването на настройките за резервно копие не бе успешно",
   "settings.backup.toast.started": "Резервното копиране започна",
   "settings.backup.toast.runFailed": "Резервното копиране не можа да започне",
+  "settings.backup.form.credentialType": "Тип идентификационни данни",
+  "settings.backup.form.credentialTypeDescription": "Изберете дали идентификационните данни на сървъра за резервни копия са токен или парола на потребителя.",
+  "settings.backup.form.methodToken": "Токен",
+  "settings.backup.form.methodPassword": "Парола",
 }

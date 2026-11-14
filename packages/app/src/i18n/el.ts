@@ -1224,4 +1224,8 @@ export const dict = {
   "settings.backup.toast.saveFailed": "Αποτυχία αποθήκευσης ρυθμίσεων αντιγράφου",
   "settings.backup.toast.started": "Το αντίγραφο ξεκίνησε",
   "settings.backup.toast.runFailed": "Αποτυχία έναρξης αντιγράφου",
+  "settings.backup.form.credentialType": "Τύπος διαπιστευτηρίων",
+  "settings.backup.form.credentialTypeDescription": "Επιλέξτε αν το διαπιστευτήριο του διακομιστή αντιγράφων είναι token ή κωδικός πρόσβασης χρήστη.",
+  "settings.backup.form.methodToken": "Token",
+  "settings.backup.form.methodPassword": "Κωδικός πρόσβασης",
 }

@@ -1219,4 +1219,8 @@ export const dict = {
   "settings.backup.toast.saveFailed": "Spremanje postavki sigurnosne kopije nije uspjelo",
   "settings.backup.toast.started": "Sigurnosna kopija pokrenuta",
   "settings.backup.toast.runFailed": "Pokretanje sigurnosne kopije nije uspjelo",
+  "settings.backup.form.credentialType": "Vrsta vjerodajnica",
+  "settings.backup.form.credentialTypeDescription": "Odaberite je li vjerodajnica poslužitelja sigurnosnih kopija token ili korisnička lozinka.",
+  "settings.backup.form.methodToken": "Token",
+  "settings.backup.form.methodPassword": "Lozinka",
 }

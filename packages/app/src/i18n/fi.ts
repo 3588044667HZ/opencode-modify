@@ -1219,4 +1219,8 @@ export const dict = {
   "settings.backup.toast.saveFailed": "Varmuuskopiointiasetusten tallentaminen epäonnistui",
   "settings.backup.toast.started": "Varmuuskopiointi aloitettu",
   "settings.backup.toast.runFailed": "Varmuuskopioinnin aloittaminen epäonnistui",
+  "settings.backup.form.credentialType": "Tunnistetietojen tyyppi",
+  "settings.backup.form.credentialTypeDescription": "Valitse, onko varmuuskopiointipalvelimen tunnistetieto token vai käyttäjän salasana.",
+  "settings.backup.form.methodToken": "Token",
+  "settings.backup.form.methodPassword": "Salasana",
 }

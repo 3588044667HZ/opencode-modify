@@ -1211,4 +1211,8 @@ export const dict = {
   "settings.backup.toast.saveFailed": "Det gick inte att spara säkerhetskopieringsinställningarna",
   "settings.backup.toast.started": "Säkerhetskopiering startad",
   "settings.backup.toast.runFailed": "Det gick inte att starta säkerhetskopieringen",
+  "settings.backup.form.credentialType": "Typ av inloggningsuppgift",
+  "settings.backup.form.credentialTypeDescription": "Välj om säkerhetskopieringsserverns inloggningsuppgift är en token eller ett användarlösenord.",
+  "settings.backup.form.methodToken": "Token",
+  "settings.backup.form.methodPassword": "Lösenord",
 }

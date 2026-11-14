@@ -1299,4 +1299,8 @@ export const dict = {
   "settings.backup.toast.saveFailed": "Kunne ikke gemme sikkerhedskopieringsindstillinger",
   "settings.backup.toast.started": "Sikkerhedskopiering startet",
   "settings.backup.toast.runFailed": "Kunne ikke starte sikkerhedskopiering",
+  "settings.backup.form.credentialType": "Type af legitimationsoplysninger",
+  "settings.backup.form.credentialTypeDescription": "Vælg, om sikkerhedskopieringsserverens legitimationsoplysning er et token eller en brugeradgangskode.",
+  "settings.backup.form.methodToken": "Token",
+  "settings.backup.form.methodPassword": "Adgangskode",
 }

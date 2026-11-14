@@ -1220,4 +1220,8 @@ export const dict = {
   "settings.backup.toast.saveFailed": "Không thể lưu cài đặt sao lưu",
   "settings.backup.toast.started": "Đã bắt đầu sao lưu",
   "settings.backup.toast.runFailed": "Không thể bắt đầu sao lưu",
+  "settings.backup.form.credentialType": "Loại thông tin đăng nhập",
+  "settings.backup.form.credentialTypeDescription": "Chọn xem thông tin đăng nhập của máy chủ sao lưu là mã thông báo hay mật khẩu người dùng.",
+  "settings.backup.form.methodToken": "Mã thông báo",
+  "settings.backup.form.methodPassword": "Mật khẩu",
 }

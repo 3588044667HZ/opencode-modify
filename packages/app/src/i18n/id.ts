@@ -1301,4 +1301,8 @@ export const dict = {
   "settings.backup.toast.saveFailed": "Gagal menyimpan pengaturan cadangan",
   "settings.backup.toast.started": "Cadangan dimulai",
   "settings.backup.toast.runFailed": "Gagal memulai cadangan",
+  "settings.backup.form.credentialType": "Jenis kredensial",
+  "settings.backup.form.credentialTypeDescription": "Pilih apakah kredensial server cadangan berupa token atau kata sandi pengguna.",
+  "settings.backup.form.methodToken": "Token",
+  "settings.backup.form.methodPassword": "Kata sandi",
 }

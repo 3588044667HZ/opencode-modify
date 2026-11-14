@@ -1208,4 +1208,8 @@ export const dict = {
   "settings.backup.toast.saveFailed": "Gagal menyimpan tetapan sandaran",
   "settings.backup.toast.started": "Sandaran dimulakan",
   "settings.backup.toast.runFailed": "Gagal memulakan sandaran",
+  "settings.backup.form.credentialType": "Jenis kelayakan",
+  "settings.backup.form.credentialTypeDescription": "Pilih sama ada kelayakan pelayan sandaran ialah token atau kata laluan pengguna.",
+  "settings.backup.form.methodToken": "Token",
+  "settings.backup.form.methodPassword": "Kata laluan",
 }

@@ -1214,4 +1214,8 @@ export const dict = {
   "settings.backup.toast.saveFailed": "Ruajtja e cilësimeve të rezervimit dështoi",
   "settings.backup.toast.started": "Rezervimi filloi",
   "settings.backup.toast.runFailed": "Fillimi i rezervimit dështoi",
+  "settings.backup.form.credentialType": "Lloji i kredencialit",
+  "settings.backup.form.credentialTypeDescription": "Zgjidhni nëse kredenciali i serverit të rezervimit është token ose fjalëkalim përdoruesi.",
+  "settings.backup.form.methodToken": "Token",
+  "settings.backup.form.methodPassword": "Fjalëkalim",
 }

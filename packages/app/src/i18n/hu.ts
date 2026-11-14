@@ -1221,4 +1221,8 @@ export const dict = {
   "settings.backup.toast.saveFailed": "Nem sikerült menteni a biztonsági mentési beállításokat",
   "settings.backup.toast.started": "A biztonsági mentés elindult",
   "settings.backup.toast.runFailed": "Nem sikerült elindítani a biztonsági mentést",
+  "settings.backup.form.credentialType": "Hitelesítő adat típusa",
+  "settings.backup.form.credentialTypeDescription": "Válassza ki, hogy a biztonsági mentési kiszolgáló hitelesítő adata token vagy felhasználói jelszó.",
+  "settings.backup.form.methodToken": "Token",
+  "settings.backup.form.methodPassword": "Jelszó",
 }

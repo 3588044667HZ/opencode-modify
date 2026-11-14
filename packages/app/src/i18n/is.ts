@@ -1208,4 +1208,8 @@ export const dict = {
   "settings.backup.toast.saveFailed": "Ekki tókst að vista öryggisafritastillingar",
   "settings.backup.toast.started": "Öryggisafrit hófst",
   "settings.backup.toast.runFailed": "Ekki tókst að hefja öryggisafrit",
+  "settings.backup.form.credentialType": "Tegund skilríkja",
+  "settings.backup.form.credentialTypeDescription": "Veldu hvort skilríki öryggisafritamiðilsins sé tákn eða lykilorð notanda.",
+  "settings.backup.form.methodToken": "Tákn",
+  "settings.backup.form.methodPassword": "Lykilorð",
 }

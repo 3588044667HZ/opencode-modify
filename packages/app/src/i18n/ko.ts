@@ -1218,4 +1218,8 @@ export const dict = {
   "settings.backup.toast.saveFailed": "백업 설정 저장에 실패했습니다",
   "settings.backup.toast.started": "백업이 시작되었습니다",
   "settings.backup.toast.runFailed": "백업 시작에 실패했습니다",
+  "settings.backup.form.credentialType": "자격 증명 유형",
+  "settings.backup.form.credentialTypeDescription": "백업 서버 자격 증명이 토큰인지 사용자 비밀번호인지 선택하세요.",
+  "settings.backup.form.methodToken": "토큰",
+  "settings.backup.form.methodPassword": "비밀번호",
 }

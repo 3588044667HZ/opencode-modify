@@ -1235,4 +1235,8 @@ export const dict = {
   "settings.backup.toast.saveFailed": "Nie udało się zapisać ustawień kopii",
   "settings.backup.toast.started": "Kopia rozpoczęta",
   "settings.backup.toast.runFailed": "Nie udało się rozpocząć kopii",
+  "settings.backup.form.credentialType": "Typ poświadczeń",
+  "settings.backup.form.credentialTypeDescription": "Wybierz, czy poświadczenie serwera kopii jest tokenem, czy hasłem użytkownika.",
+  "settings.backup.form.methodToken": "Token",
+  "settings.backup.form.methodPassword": "Hasło",
 }

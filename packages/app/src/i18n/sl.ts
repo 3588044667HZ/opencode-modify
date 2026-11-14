@@ -1214,4 +1214,8 @@ export const dict = {
   "settings.backup.toast.saveFailed": "Nastavitev varnostnega kopiranja ni bilo mogoče shraniti",
   "settings.backup.toast.started": "Varnostno kopiranje se je začelo",
   "settings.backup.toast.runFailed": "Varnostnega kopiranja ni bilo mogoče začeti",
+  "settings.backup.form.credentialType": "Vrsta poverilnic",
+  "settings.backup.form.credentialTypeDescription": "Izberite, ali je poverilnica strežnika varnostnih kopij žeton ali uporabniško geslo.",
+  "settings.backup.form.methodToken": "Žeton",
+  "settings.backup.form.methodPassword": "Geslo",
 }

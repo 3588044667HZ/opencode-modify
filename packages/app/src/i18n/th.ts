@@ -1289,4 +1289,8 @@ export const dict = {
   "settings.backup.toast.saveFailed": "บันทึกการตั้งค่าสำรองข้อมูลไม่สำเร็จ",
   "settings.backup.toast.started": "เริ่มสำรองข้อมูลแล้ว",
   "settings.backup.toast.runFailed": "เริ่มสำรองข้อมูลไม่สำเร็จ",
+  "settings.backup.form.credentialType": "ประเภทข้อมูลรับรอง",
+  "settings.backup.form.credentialTypeDescription": "เลือกว่าข้อมูลรับรองของเซิร์ฟเวอร์สำรองเป็นโทเค็นหรือรหัสผ่านของผู้ใช้",
+  "settings.backup.form.methodToken": "โทเค็น",
+  "settings.backup.form.methodPassword": "รหัสผ่าน",
 }

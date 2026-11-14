@@ -1318,4 +1318,8 @@ export const dict = {
   "settings.backup.toast.saveFailed": "Kunne ikke lagre sikkerhetskopiinnstillinger",
   "settings.backup.toast.started": "Sikkerhetskopiering startet",
   "settings.backup.toast.runFailed": "Kunne ikke starte sikkerhetskopiering",
+  "settings.backup.form.credentialType": "Type påloggingsinformasjon",
+  "settings.backup.form.credentialTypeDescription": "Velg om påloggingsinformasjonen til sikkerhetskopiserveren er et token eller et brukerpassord.",
+  "settings.backup.form.methodToken": "Token",
+  "settings.backup.form.methodPassword": "Passord",
 } satisfies Partial<Record<Keys, string>>

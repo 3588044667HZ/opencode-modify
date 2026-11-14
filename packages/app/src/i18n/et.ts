@@ -1202,4 +1202,8 @@ export const dict = {
   "settings.backup.toast.saveFailed": "Varukoopia seadete salvestamine ebaõnnestus",
   "settings.backup.toast.started": "Varukoopia algas",
   "settings.backup.toast.runFailed": "Varukoopiat ei õnnestunud käivitada",
+  "settings.backup.form.credentialType": "Volituste tüüp",
+  "settings.backup.form.credentialTypeDescription": "Valige, kas varukoopiate serveri volitus on luba või kasutaja parool.",
+  "settings.backup.form.methodToken": "Luba",
+  "settings.backup.form.methodPassword": "Parool",
 }

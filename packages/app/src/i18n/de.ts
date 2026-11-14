@@ -1236,4 +1236,8 @@ export const dict = {
   "settings.backup.toast.saveFailed": "Backup-Einstellungen konnten nicht gespeichert werden",
   "settings.backup.toast.started": "Backup gestartet",
   "settings.backup.toast.runFailed": "Backup konnte nicht gestartet werden",
+  "settings.backup.form.credentialType": "Anmeldetyp",
+  "settings.backup.form.credentialTypeDescription": "Wähle, ob die Zugangsdaten des Backup-Servers ein Token oder ein Benutzerpasswort sind.",
+  "settings.backup.form.methodToken": "Token",
+  "settings.backup.form.methodPassword": "Passwort",
 } satisfies Partial<Record<Keys, string>>

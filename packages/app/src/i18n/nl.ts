@@ -1222,4 +1222,8 @@ export const dict = {
   "settings.backup.toast.saveFailed": "Back-upinstellingen opslaan mislukt",
   "settings.backup.toast.started": "Back-up gestart",
   "settings.backup.toast.runFailed": "Back-up starten mislukt",
+  "settings.backup.form.credentialType": "Type inloggegevens",
+  "settings.backup.form.credentialTypeDescription": "Kies of de inloggegevens van de back-upserver een token of een gebruikerswachtwoord zijn.",
+  "settings.backup.form.methodToken": "Token",
+  "settings.backup.form.methodPassword": "Wachtwoord",
 }

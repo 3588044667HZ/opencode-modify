@@ -21,10 +21,13 @@ export interface BackupSettingsControllerOptions {
   pollAttempts?: number
 }
 
+export type BackupCredentialType = "token" | "password"
+
 export interface BackupForm {
   server: string
   username: string
   token: string
+  credentialType: BackupCredentialType
   schedule: string
   enabled: boolean
 }
@@ -58,6 +61,7 @@ export function createBackupSettingsController(options: BackupSettingsController
       server: "",
       username: "",
       token: "",
+      credentialType: "token",
       schedule: DEFAULT_SCHEDULE,
       enabled: false,
     },
@@ -77,6 +81,7 @@ export function createBackupSettingsController(options: BackupSettingsController
       username: next.username ?? "",
       schedule: next.schedule || DEFAULT_SCHEDULE,
       enabled: next.enabled,
+      credentialType: state.form.credentialType,
       token: resetToken ? "" : state.form.token,
     })
   }
@@ -129,7 +134,10 @@ export function createBackupSettingsController(options: BackupSettingsController
         username: state.form.username.trim(),
         schedule: state.form.schedule.trim(),
       }
-      if (state.form.token.length) input.token = state.form.token
+      if (state.form.token.length) {
+        if (state.form.credentialType === "password") input.password = state.form.token
+        else input.token = state.form.token
+      }
       const next = await options.api.configure(input)
       applyStatus(next, true)
       if (next.configured) await reloadSnapshots()

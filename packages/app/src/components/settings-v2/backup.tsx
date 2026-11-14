@@ -1,15 +1,17 @@
 import { Tag } from "@opencode-ai/ui/v2/badge-v2"
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
+import { SelectV2 } from "@opencode-ai/ui/v2/select-v2"
 import { Switch } from "@opencode-ai/ui/v2/switch-v2"
 import { TextInputV2 } from "@opencode-ai/ui/v2/text-input-v2"
 import { type Component, For, Show, createMemo, onMount } from "solid-js"
 import { useLanguage } from "@/context/language"
 import { useServerSDK } from "@/context/server-sdk"
 import { showToast } from "@/utils/toast"
-import { createBackupSettingsController, formatByteSize } from "./backup-controller"
+import { createBackupSettingsController, formatByteSize, type BackupCredentialType } from "./backup-controller"
 import { SettingsListV2 } from "./parts/list"
 import { SettingsRowV2 } from "./parts/row"
 import "./settings-v2.css"
+const credentialTypes: BackupCredentialType[] = ["token", "password"]
 
 export const SettingsBackupV2: Component = () => {
   const language = useLanguage()
@@ -17,8 +19,14 @@ export const SettingsBackupV2: Component = () => {
 
   const controller = createBackupSettingsController({
     api: {
-      status: () => serverSDK().client.v2.backup.status({ throwOnError: true }).then((result) => result.data),
-      run: () => serverSDK().client.v2.backup.run({ throwOnError: true }).then((result) => result.data),
+      status: () =>
+        serverSDK()
+          .client.v2.backup.status({ throwOnError: true })
+          .then((result) => result.data),
+      run: () =>
+        serverSDK()
+          .client.v2.backup.run({ throwOnError: true })
+          .then((result) => result.data),
       snapshots: (input) =>
         serverSDK()
           .client.v2.backup.snapshots({ limit: input?.limit }, { throwOnError: true })
@@ -94,10 +102,7 @@ export const SettingsBackupV2: Component = () => {
             when={status()}
             fallback={
               <div class="settings-v2-backup-status-fallback">
-                <Show
-                  when={controller.state.statusError}
-                  fallback={<span>{language.t("common.loading")}</span>}
-                >
+                <Show when={controller.state.statusError} fallback={<span>{language.t("common.loading")}</span>}>
                   {(message) => (
                     <>
                       <span>{language.t("settings.backup.error.status", { message: message() })}</span>
@@ -227,6 +232,23 @@ export const SettingsBackupV2: Component = () => {
               </div>
             </SettingsRowV2>
             <SettingsRowV2
+              title={language.t("settings.backup.form.credentialType")}
+              description={language.t("settings.backup.form.credentialTypeDescription")}
+            >
+              <SelectV2
+                appearance="inline"
+                options={credentialTypes}
+                current={controller.state.form.credentialType}
+                value={(option) => option}
+                label={(option) =>
+                  option === "password"
+                    ? language.t("settings.backup.form.methodPassword")
+                    : language.t("settings.backup.form.methodToken")
+                }
+                onSelect={(option) => option && controller.setField("credentialType", option)}
+              />
+            </SettingsRowV2>{" "}
+            <SettingsRowV2
               title={language.t("settings.backup.form.token")}
               description={language.t("settings.backup.form.tokenDescription")}
             >
@@ -277,20 +299,10 @@ export const SettingsBackupV2: Component = () => {
             </SettingsRowV2>
           </SettingsListV2>
           <div class="settings-v2-backup-actions">
-            <ButtonV2
-              size="normal"
-              variant="contrast"
-              disabled={controller.state.saving}
-              onClick={save}
-            >
+            <ButtonV2 size="normal" variant="contrast" disabled={controller.state.saving} onClick={save}>
               {controller.state.saving ? language.t("common.saving") : language.t("common.save")}
             </ButtonV2>
-            <ButtonV2
-              size="normal"
-              variant="outline"
-              disabled={!controller.canRun()}
-              onClick={run}
-            >
+            <ButtonV2 size="normal" variant="outline" disabled={!controller.canRun()} onClick={run}>
               {controller.state.running
                 ? language.t("settings.backup.form.running")
                 : language.t("settings.backup.form.run")}
@@ -352,9 +364,7 @@ export const SettingsBackupV2: Component = () => {
                       <div class="settings-v2-backup-snapshot">
                         <div class="settings-v2-backup-snapshot-main">
                           <span class="settings-v2-backup-value">{snapshot.id}</span>
-                          <span class="settings-v2-backup-snapshot-meta">
-                            {formatDate()(snapshot.createdAt)}
-                          </span>
+                          <span class="settings-v2-backup-snapshot-meta">{formatDate()(snapshot.createdAt)}</span>
                         </div>
                         <div class="settings-v2-backup-snapshot-meta settings-v2-backup-tags">
                           <span class="settings-v2-backup-value settings-v2-backup-value--numeric">

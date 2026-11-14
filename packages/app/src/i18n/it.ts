@@ -1227,4 +1227,8 @@ export const dict = {
   "settings.backup.toast.saveFailed": "Impossibile salvare le impostazioni di backup",
   "settings.backup.toast.started": "Backup avviato",
   "settings.backup.toast.runFailed": "Impossibile avviare il backup",
+  "settings.backup.form.credentialType": "Tipo di credenziale",
+  "settings.backup.form.credentialTypeDescription": "Scegli se la credenziale del server di backup è un token o la password di un utente.",
+  "settings.backup.form.methodToken": "Token",
+  "settings.backup.form.methodPassword": "Password",
 }

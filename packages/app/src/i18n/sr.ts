@@ -1212,4 +1212,8 @@ export const dict = {
   "settings.backup.toast.saveFailed": "Чување поставки сигурносне копије није успело",
   "settings.backup.toast.started": "Сигурносна копија је покренута",
   "settings.backup.toast.runFailed": "Покретање сигурносне копије није успело",
+  "settings.backup.form.credentialType": "Врста података за пријаву",
+  "settings.backup.form.credentialTypeDescription": "Изаберите да ли је податак за пријаву сервера сигурносних копија токен или корисничка лозинка.",
+  "settings.backup.form.methodToken": "Токен",
+  "settings.backup.form.methodPassword": "Лозинка",
 }

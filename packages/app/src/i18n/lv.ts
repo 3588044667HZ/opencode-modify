@@ -1213,4 +1213,8 @@ export const dict = {
   "settings.backup.toast.saveFailed": "Dublējuma iestatījumus neizdevās saglabāt",
   "settings.backup.toast.started": "Dublēšana sākta",
   "settings.backup.toast.runFailed": "Dublēšanu neizdevās sākt",
+  "settings.backup.form.credentialType": "Akreditācijas datu veids",
+  "settings.backup.form.credentialTypeDescription": "Izvēlieties, vai dublēšanas servera akreditācijas dati ir pilnvarojums vai lietotāja parole.",
+  "settings.backup.form.methodToken": "Pilnvarojums",
+  "settings.backup.form.methodPassword": "Parole",
 }

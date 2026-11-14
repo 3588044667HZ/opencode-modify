@@ -1311,4 +1311,8 @@ export const dict = {
   "settings.backup.toast.saveFailed": "Yedekleme ayarları kaydedilemedi",
   "settings.backup.toast.started": "Yedekleme başlatıldı",
   "settings.backup.toast.runFailed": "Yedekleme başlatılamadı",
+  "settings.backup.form.credentialType": "Kimlik bilgisi türü",
+  "settings.backup.form.credentialTypeDescription": "Yedekleme sunucusu kimlik bilgisinin belirteç mi yoksa kullanıcı parolası mı olduğunu seçin.",
+  "settings.backup.form.methodToken": "Belirteç",
+  "settings.backup.form.methodPassword": "Parola",
 } satisfies Partial<Record<Keys, string>>

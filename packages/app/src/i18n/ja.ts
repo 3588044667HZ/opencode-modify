@@ -1220,4 +1220,8 @@ export const dict = {
   "settings.backup.toast.saveFailed": "バックアップ設定の保存に失敗しました",
   "settings.backup.toast.started": "バックアップを開始しました",
   "settings.backup.toast.runFailed": "バックアップの開始に失敗しました",
+  "settings.backup.form.credentialType": "認証情報の種類",
+  "settings.backup.form.credentialTypeDescription": "バックアップサーバーの認証情報がトークンかユーザーのパスワードかを選択します。",
+  "settings.backup.form.methodToken": "トークン",
+  "settings.backup.form.methodPassword": "パスワード",
 }

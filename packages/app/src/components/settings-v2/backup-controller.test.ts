@@ -33,7 +33,12 @@ function snapshot(id: string): BackupSnapshotSummary {
 
 function setup(api: BackupApi) {
   return createRoot((dispose) => {
-    const controller = createBackupSettingsController({ api, sleep: async () => {}, pollIntervalMs: 1, pollAttempts: 5 })
+    const controller = createBackupSettingsController({
+      api,
+      sleep: async () => {},
+      pollIntervalMs: 1,
+      pollAttempts: 5,
+    })
     return { controller, dispose }
   })
 }
@@ -52,6 +57,7 @@ describe("backup settings controller", () => {
       expect(controller.state.form.username).toBe("alice")
       expect(controller.state.form.schedule).toBe("30 3 * * *")
       expect(controller.state.form.enabled).toBe(true)
+      expect(controller.state.form.credentialType).toBe("token")
       expect(controller.state.form.token).toBe("")
       expect(controller.state.status?.tokenConfigured).toBe(true)
     } finally {
@@ -78,6 +84,7 @@ describe("backup settings controller", () => {
       const result = await controller.save()
       expect(result.ok).toBe(true)
       expect(calls[0]?.token).toBe("secret-token")
+      expect(calls[0]?.password).toBeUndefined()
       expect(controller.state.form.token).toBe("")
       expect(controller.state.status?.tokenConfigured).toBe(true)
     } finally {
@@ -99,10 +106,12 @@ describe("backup settings controller", () => {
     try {
       controller.setField("server", "https://backup.example.com")
       controller.setField("username", "alice")
+      controller.setField("credentialType", "password")
       controller.setField("token", "user-password")
       const result = await controller.save()
       expect(result.ok).toBe(true)
-      expect(calls[0]?.token).toBe("user-password")
+      expect(calls[0]?.password).toBe("user-password")
+      expect(calls[0]?.token).toBeUndefined()
       expect(controller.state.form.token).toBe("")
       await controller.reloadStatus()
       expect(controller.state.form.token).toBe("")
@@ -110,7 +119,7 @@ describe("backup settings controller", () => {
       dispose()
     }
   })
-  test("does not send an empty token", async () => {
+  test("does not send an empty secret for either credential type", async () => {
     const calls: BackupConfigureInput[] = []
     const { controller, dispose } = setup({
       status: async () => status(),
@@ -125,6 +134,12 @@ describe("backup settings controller", () => {
       await controller.save()
       expect(calls[0]).toBeDefined()
       expect(calls[0] && "token" in calls[0]).toBe(false)
+      expect(calls[0] && "password" in calls[0]).toBe(false)
+      controller.setField("credentialType", "password")
+      await controller.save()
+      expect(calls[1]).toBeDefined()
+      expect(calls[1] && "token" in calls[1]).toBe(false)
+      expect(calls[1] && "password" in calls[1]).toBe(false)
     } finally {
       dispose()
     }

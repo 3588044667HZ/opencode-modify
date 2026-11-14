@@ -1214,4 +1214,8 @@ export const dict = {
   "settings.backup.toast.saveFailed": "बैकअप सेटिंग्स सहेजना विफल रहा",
   "settings.backup.toast.started": "बैकअप शुरू हुआ",
   "settings.backup.toast.runFailed": "बैकअप शुरू करना विफल रहा",
+  "settings.backup.form.credentialType": "क्रेडेंशियल प्रकार",
+  "settings.backup.form.credentialTypeDescription": "चुनें कि बैकअप सर्वर क्रेडेंशियल टोकन है या उपयोगकर्ता पासवर्ड।",
+  "settings.backup.form.methodToken": "टोकन",
+  "settings.backup.form.methodPassword": "पासवर्ड",
 }
