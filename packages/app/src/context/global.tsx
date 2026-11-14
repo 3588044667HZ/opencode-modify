@@ -10,6 +10,7 @@ import { getOwner } from "solid-js/web"
 import { QueryClient } from "@tanstack/solid-query"
 import type { ServerScope } from "@/utils/server-scope"
 import { authTokenFromCredentials } from "@/utils/server"
+import { recentSessionDirectories } from "./global-sync/session-projects"
 
 export const { use: useGlobal, provider: GlobalProvider } = createSimpleContext({
   name: "Global",
@@ -133,7 +134,9 @@ function createServerCtx(
   function enrich(project: { worktree: string; expanded: boolean }) {
     // Do not create a child store just to render the project list. A phone with
     // dozens of projects would otherwise hydrate dozens of stores on first paint.
-    const childStore = sync.hasChild(project.worktree) ? sync.child(project.worktree, { bootstrap: false })[0] : undefined
+    const childStore = sync.hasChild(project.worktree)
+      ? sync.child(project.worktree, { bootstrap: false })[0]
+      : undefined
     const projectID = childStore?.project
     const metadata = projectID
       ? sync.data.project.find((x) => x.id === projectID)
@@ -196,6 +199,31 @@ function createServerCtx(
           // The desktop list is newest-first; open() prepends, so reverse it.
           for (const directory of candidates.slice().reverse()) projects.open(directory)
           if (state.lastProject && !closed.has(pathKey(state.lastProject))) projects.touch(state.lastProject)
+        })
+      })
+      .catch(() => {})
+  })
+
+  // Headless servers group sessions from non-git directories under the single
+  // `global` project, so /project cannot enumerate them. Seed known projects
+  // from recent sessions for clients without a desktop-side project store.
+  let sessionProjectsRequested = false
+  createEffect(() => {
+    if (!sync.data.ready || sessionProjectsRequested) return
+    if (conn.type === "sidecar") return
+    sessionProjectsRequested = true
+    void sdk.client.v2.session
+      .list({ limit: 200, order: "desc" })
+      .then((result) => {
+        const candidates = recentSessionDirectories({
+          sessions: result.data?.data ?? [],
+          projects: sync.data.project,
+          recentlyClosed: projects.recentlyClosed(),
+        })
+        if (candidates.length === 0) return
+        batch(() => {
+          for (const directory of candidates.slice().reverse()) projects.open(directory)
+          if (!projects.last()) projects.touch(candidates[0])
         })
       })
       .catch(() => {})
