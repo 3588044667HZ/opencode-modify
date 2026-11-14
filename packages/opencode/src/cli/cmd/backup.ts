@@ -29,13 +29,16 @@ const SetupCommand = effectCmd({
       .option("token", { type: "string", describe: "backup token (stored in the state directory)" })
       .option("password-stdin", {
         type: "boolean",
-        describe: "validate Basic credentials from stdin for this invocation only; never persisted",
+        describe: "read a password from stdin, validate it, and store it as the backup credential",
       })
       .option("enable", { type: "boolean", describe: "enable the daily backup scheduler" })
       .option("disable", { type: "boolean", describe: "disable the daily backup scheduler" })
       .option("schedule", { type: "string", describe: "five-field cron expression in local time" }),
   handler: Effect.fn("Cli.backup.setup")(function* (input: SetupArgs) {
     if (input.enable && input.disable) return yield* fail("--enable and --disable cannot be combined")
+    if (input.token && input.passwordStdin) {
+      return yield* fail("choose either --token or --password-stdin, not both")
+    }
 
     const global = Global.make()
     const loaded = yield* Effect.tryPromise({
@@ -87,12 +90,12 @@ const SetupCommand = effectCmd({
         Effect.mapError((error) => error.message),
         Effect.catch((text) => fail(`Basic credential validation failed: ${text}`)),
       )
-      console.log("Basic credentials verified for this invocation. Nothing was saved.")
-      console.log("Create a token in the backup server admin page, then run `opencode backup setup --token ...`.")
+      console.log("Basic credentials verified.")
+      console.log("The password will be stored as the backup credential.")
     }
 
-    if (input.token && (!targetServer || !targetUsername)) {
-      return yield* fail("--server and --username are required when storing a token")
+    if ((input.token || input.passwordStdin) && (!targetServer || !targetUsername)) {
+      return yield* fail("--server and --username are required when storing a credential")
     }
     const configure: Backup.ConfigureInput = {
       ...(input.enable ? { enabled: true } : {}),
@@ -101,6 +104,7 @@ const SetupCommand = effectCmd({
       ...(server ? { server } : {}),
       ...(username ? { username } : {}),
       ...(input.token ? { server: targetServer!, username: targetUsername!, token: input.token } : {}),
+      ...(password ? { server: targetServer!, username: targetUsername!, password } : {}),
     }
 
     const changed =
@@ -108,12 +112,15 @@ const SetupCommand = effectCmd({
       configure.schedule !== undefined ||
       configure.server !== undefined ||
       configure.username !== undefined ||
-      configure.token !== undefined
+      configure.token !== undefined ||
+      configure.password !== undefined
     if (changed) {
       const backup = yield* Backup.Service
       yield* backup.configure(configure).pipe(Effect.catch((error) => fail(error.message)))
       console.log("backup configuration updated")
       if (input.token) console.log(`backup token stored in ${BackupSettings.authFile(global.state)}`)
+      if (password) console.log(`backup password stored in ${BackupSettings.authFile(global.state)}`)
+      console.log("Use only one credential: a token or a password, not both.")
       console.log(
         "Note: snapshots include auth.json and mcp-auth.json in plaintext; protect the backup server and its storage.",
       )

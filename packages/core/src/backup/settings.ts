@@ -36,17 +36,25 @@ export class SettingsError extends Schema.TaggedErrorClass<SettingsError>()("Bac
   message: Schema.String,
 }) {}
 
+export type AuthMethod = "token" | "password"
+
 export interface Auth {
   readonly server: string
   readonly username: string
-  readonly token: string
+  readonly secret: string
+  readonly method?: AuthMethod
   readonly savedAt: string
 }
+
+const AuthMethodSchema = Schema.Literals(["token", "password"])
 
 const AuthJson = Schema.Struct({
   server: Schema.String,
   username: Schema.String,
-  token: Schema.String,
+  method: Schema.optional(AuthMethodSchema),
+  secret: Schema.optional(Schema.String),
+  token: Schema.optional(Schema.String),
+  password: Schema.optional(Schema.String),
   savedAt: Schema.String,
 })
 
@@ -182,6 +190,13 @@ export function validateToken(input: string) {
   return input
 }
 
+export function validatePassword(input: string) {
+  if (!input || input.length > 1024) {
+    throw new SettingsError({ message: "backup password must be 1-1024 characters" })
+  }
+  return input
+}
+
 export function resolveToken(env: NodeJS.ProcessEnv = process.env) {
   const value = env.OPENCODE_BACKUP_TOKEN
   return value ? validateToken(value) : undefined
@@ -190,6 +205,7 @@ export function resolveToken(env: NodeJS.ProcessEnv = process.env) {
 export type Credential =
   | { readonly type: "bearer"; readonly token: string }
   | { readonly type: "basic"; readonly username: string; readonly password: string }
+  | { readonly type: "unknown"; readonly secret: string }
 
 export interface Connection {
   readonly server: string
@@ -225,25 +241,34 @@ export function resolveConnection(input: {
   if (!usernameInput) throw new SettingsError({ message: "backup username is not configured" })
   const server = normalizeServer(serverInput)
   const username = validateUsername(usernameInput)
-  const stateToken = auth && auth.server === server && auth.username === username ? auth.token : undefined
-  const token = envToken ?? stateToken
+  const stateSecret = auth && auth.server === server && auth.username === username ? auth.secret : undefined
+  const secret = envToken ?? stateSecret
 
-  if (!token) {
-    if (auth?.token && !envToken) {
+  if (!secret) {
+    if (auth?.secret && !envToken) {
       throw new SettingsError({
         message:
-          "stored backup token belongs to a different server or username; run `opencode backup setup --token ...` or set OPENCODE_BACKUP_TOKEN",
+          "stored backup token or password belongs to a different server or username; run `opencode backup setup` again",
       })
     }
     throw new SettingsError({
-      message: "backup token is not configured; run `opencode backup setup --token ...` or set OPENCODE_BACKUP_TOKEN",
+      message:
+        "backup token or password is not configured; run `opencode backup setup --token ...` or `--password-stdin`",
     })
   }
+
+  const credential: Credential = envToken
+    ? { type: "bearer", token: validateToken(envToken) }
+    : auth?.method === "password"
+      ? { type: "basic", username, password: validatePassword(auth.secret) }
+      : auth?.method === "token"
+        ? { type: "bearer", token: validateToken(auth.secret) }
+        : { type: "unknown", secret: auth!.secret }
 
   return {
     server,
     username,
-    credential: { type: "bearer", token: validateToken(token) },
+    credential,
     tokenSource: envToken ? "env" : "state",
   }
 }
@@ -273,7 +298,7 @@ export function statusFile(stateDirectory: string) {
   return path.join(backupDirectory(stateDirectory), "status.json")
 }
 
-export async function readAuth(stateDirectory: string) {
+export async function readAuth(stateDirectory: string): Promise<Auth | undefined> {
   const text = await readFile(authFile(stateDirectory), "utf8").catch((error: unknown) => {
     if (isCode(error, "ENOENT") || isCode(error, "ENOTDIR")) return undefined
     throw error
@@ -284,21 +309,33 @@ export async function readAuth(stateDirectory: string) {
   if (parsed._tag === "None") return undefined
   const decoded = decodeAuth(parsed.value)
   if (decoded._tag === "None") return undefined
-  if (!decoded.value.token) return undefined
-  return decoded.value satisfies Auth
+  const value = decoded.value
+  const secret =
+    value.secret ??
+    (value.method === "password" ? (value.password ?? value.token) : (value.token ?? value.password))
+  if (!secret) return undefined
+  return {
+    server: value.server,
+    username: value.username,
+    secret,
+    method: value.method,
+    savedAt: value.savedAt,
+  } satisfies Auth
 }
 
 export async function writeAuth(
   stateDirectory: string,
-  input: { server: string; username: string; token: string; savedAt?: string },
+  input: { server: string; username: string; method: AuthMethod; secret: string; savedAt?: string },
 ) {
   const file = authFile(stateDirectory)
+  const secret = input.method === "token" ? validateToken(input.secret) : validatePassword(input.secret)
   const content =
     JSON.stringify(
       {
         server: normalizeServer(input.server),
         username: validateUsername(input.username),
-        token: validateToken(input.token),
+        method: input.method,
+        secret,
         savedAt: input.savedAt ?? new Date().toISOString(),
       },
       null,

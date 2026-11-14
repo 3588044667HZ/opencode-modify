@@ -74,6 +74,7 @@ describe("backup handlers", () => {
       lastSnapshotID: status.lastSnapshotID,
     })
     expect(Object.hasOwn(result, "token")).toBe(false)
+    expect(Object.hasOwn(result, "secret")).toBe(false)
   })
 
   test("run rejects when the backup is not configured", async () => {
@@ -208,6 +209,27 @@ describe("backup handlers", () => {
       ),
     )
     expect(result.configured).toBe(true)
+  })
+
+  test("configure does not echo the password", async () => {
+    const inputs: unknown[] = []
+    const result = await run(
+      backupConfigure(
+        service({
+          configure: (input) => {
+            inputs.push(input)
+            return Effect.void
+          },
+        }),
+        { server: "https://backup.example.com", username: "alice", password: "secret-password" },
+      ),
+    )
+    expect(inputs[0]).toEqual({
+      server: "https://backup.example.com",
+      username: "alice",
+      password: "secret-password",
+    })
+    expect(JSON.stringify(result)).not.toContain("secret-password")
   })
 
   test("configure does not echo the token", async () => {

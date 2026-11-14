@@ -2862,6 +2862,7 @@ export type BackupConfigureInput = {
     readonly server?: string
     readonly username?: string
     readonly token?: string
+    readonly password?: string
     readonly schedule?: string
   }["enabled"]
   readonly server?: {
@@ -2869,6 +2870,7 @@ export type BackupConfigureInput = {
     readonly server?: string
     readonly username?: string
     readonly token?: string
+    readonly password?: string
     readonly schedule?: string
   }["server"]
   readonly username?: {
@@ -2876,6 +2878,7 @@ export type BackupConfigureInput = {
     readonly server?: string
     readonly username?: string
     readonly token?: string
+    readonly password?: string
     readonly schedule?: string
   }["username"]
   readonly token?: {
@@ -2883,13 +2886,23 @@ export type BackupConfigureInput = {
     readonly server?: string
     readonly username?: string
     readonly token?: string
+    readonly password?: string
     readonly schedule?: string
   }["token"]
+  readonly password?: {
+    readonly enabled?: boolean
+    readonly server?: string
+    readonly username?: string
+    readonly token?: string
+    readonly password?: string
+    readonly schedule?: string
+  }["password"]
   readonly schedule?: {
     readonly enabled?: boolean
     readonly server?: string
     readonly username?: string
     readonly token?: string
+    readonly password?: string
     readonly schedule?: string
   }["schedule"]
 }

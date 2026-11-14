@@ -16,17 +16,25 @@ function connection(server: string, token = "test-token"): BackupSettings.Connec
   }
 }
 
+function withConnection<A>(
+  input: BackupSettings.Connection,
+  body: (remote: BackupRemote.Interface) => Effect.Effect<A, BackupRemote.RemoteError>,
+  timeouts?: BackupRemote.Timeouts,
+) {
+  return Effect.gen(function* () {
+    const http = yield* HttpClient.HttpClient
+    const remote = BackupRemote.make(input, http, { timeouts })
+    return yield* body(remote)
+  }).pipe(Effect.provide(FetchHttpClient.layer), Effect.runPromise)
+}
+
 function withRemote<A>(
   server: string,
   body: (remote: BackupRemote.Interface) => Effect.Effect<A, BackupRemote.RemoteError>,
   token?: string,
   timeouts?: BackupRemote.Timeouts,
 ) {
-  return Effect.gen(function* () {
-    const http = yield* HttpClient.HttpClient
-    const remote = BackupRemote.make(connection(server, token), http, { timeouts })
-    return yield* body(remote)
-  }).pipe(Effect.provide(FetchHttpClient.layer), Effect.runPromise)
+  return withConnection(connection(server, token), body, timeouts)
 }
 
 describe("backup remote", () => {
@@ -153,6 +161,84 @@ describe("backup remote", () => {
       }).catch((cause: unknown) => cause)) as BackupRemote.RemoteError
       expect(error.message).toMatch(/timed out/)
       expect(error.retryable).toBe(true)
+    } finally {
+      await server.stop()
+    }
+  })
+
+  test("unknown method falls back from Bearer to Basic on safe requests", async () => {
+    const server = await startFakeServer({ basic: { username: "alice", password: "pw" } })
+    try {
+      const result = await withConnection(
+        { server: server.url, username: "alice", credential: { type: "unknown", secret: "pw" } },
+        (remote) => remote.listSnapshots(),
+      )
+      expect(result).toEqual([])
+      expect(server.requests.filter((request) => request.startsWith("GET /v1/users/alice/snapshots"))).toHaveLength(2)
+    } finally {
+      await server.stop()
+    }
+  })
+
+  test("unknown method resolves Bearer without retrying Basic", async () => {
+    const server = await startFakeServer({ token: "test-token" })
+    try {
+      const result = await withConnection(
+        { server: server.url, username: "alice", credential: { type: "unknown", secret: "test-token" } },
+        (remote) => remote.listSnapshots(),
+      )
+      expect(result).toEqual([])
+      expect(server.requests.filter((request) => request.startsWith("GET /v1/users/alice/snapshots"))).toHaveLength(1)
+    } finally {
+      await server.stop()
+    }
+  })
+
+  test("token method never silently falls back to Basic", async () => {
+    const server = await startFakeServer({ basic: { username: "alice", password: "pw" } })
+    try {
+      const error = (await withRemote(server.url, (remote) => remote.listSnapshots(), "pw").catch(
+        (cause: unknown) => cause,
+      )) as BackupRemote.RemoteError
+      expect(error.status).toBe(401)
+      expect(error.message).not.toContain("pw")
+      expect(server.requests.filter((request) => request.startsWith("GET /v1/users/alice/snapshots"))).toHaveLength(1)
+    } finally {
+      await server.stop()
+    }
+  })
+
+  test("password method never silently falls back to Bearer", async () => {
+    const server = await startFakeServer({ token: "test-token" })
+    try {
+      const error = (await withConnection(
+        {
+          server: server.url,
+          username: "alice",
+          credential: { type: "basic", username: "alice", password: "test-token" },
+        },
+        (remote) => remote.listSnapshots(),
+      ).catch((cause: unknown) => cause)) as BackupRemote.RemoteError
+      expect(error.status).toBe(401)
+      expect(server.requests.filter((request) => request.startsWith("GET /v1/users/alice/snapshots"))).toHaveLength(1)
+    } finally {
+      await server.stop()
+    }
+  })
+
+  test("does not retry side-effecting snapshot creation with another method", async () => {
+    const server = await startFakeServer({ basic: { username: "alice", password: "pw" } })
+    try {
+      const manifest = BackupManifest.create({
+        source: { hostname: "test", opencode_version: "1.0.0" },
+        files: [],
+      })
+      const error = (await withConnection(
+        { server: server.url, username: "alice", credential: { type: "unknown", secret: "pw" } },
+        (remote) => remote.createSnapshot(manifest),
+      ).catch((cause: unknown) => cause)) as BackupRemote.RemoteError
+      expect(error.status).toBe(401)
+      expect(server.requests.filter((request) => request.startsWith("POST /v1/users/alice/snapshots"))).toHaveLength(1)
     } finally {
       await server.stop()
     }

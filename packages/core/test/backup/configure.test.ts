@@ -65,7 +65,8 @@ describe("backup configure", () => {
       expect(auth).toMatchObject({
         server: "https://backup.example.com",
         username: "alice",
-        token: "secret-token",
+        method: "token",
+        secret: "secret-token",
       })
     } finally {
       await tmp[Symbol.asyncDispose]()
@@ -82,7 +83,7 @@ describe("backup configure", () => {
       })
       await configure(roots, { token: "", schedule: "0 5 * * *" })
 
-      expect((await BackupSettings.readAuth(roots.state))?.token).toBe("secret-token")
+      expect((await BackupSettings.readAuth(roots.state))?.secret).toBe("secret-token")
       expect(await config(roots)).toMatchObject({ backup: { schedule: "0 5 * * *" } })
     } finally {
       await tmp[Symbol.asyncDispose]()
@@ -108,6 +109,33 @@ describe("backup configure", () => {
         server: "https://backup.example.com",
         username: "alice",
       })
+    } finally {
+      await tmp[Symbol.asyncDispose]()
+    }
+  })
+
+  test("stores a password and prefers token when both are provided", async () => {
+    const { tmp, roots } = await fixture()
+    try {
+      await configure(roots, {
+        server: "https://backup.example.com",
+        username: "alice",
+        password: "secret-password",
+      })
+      expect(await BackupSettings.readAuth(roots.state)).toMatchObject({
+        method: "password",
+        secret: "secret-password",
+      })
+
+      await configure(roots, {
+        server: "https://backup.example.com",
+        username: "alice",
+        token: "secret-token",
+        password: "ignored-password",
+      })
+      const auth = await BackupSettings.readAuth(roots.state)
+      expect(auth).toMatchObject({ method: "token", secret: "secret-token" })
+      expect(JSON.stringify(auth)).not.toContain("ignored-password")
     } finally {
       await tmp[Symbol.asyncDispose]()
     }

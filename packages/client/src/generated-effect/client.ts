@@ -698,6 +698,7 @@ type Endpoint18_3Input = {
   readonly server?: Endpoint18_3Request["payload"]["server"]
   readonly username?: Endpoint18_3Request["payload"]["username"]
   readonly token?: Endpoint18_3Request["payload"]["token"]
+  readonly password?: Endpoint18_3Request["payload"]["password"]
   readonly schedule?: Endpoint18_3Request["payload"]["schedule"]
 }
 const Endpoint18_3 = (raw: RawClient["server.backup"]) => (input?: Endpoint18_3Input) =>
@@ -707,6 +708,7 @@ const Endpoint18_3 = (raw: RawClient["server.backup"]) => (input?: Endpoint18_3I
       server: input?.["server"],
       username: input?.["username"],
       token: input?.["token"],
+      password: input?.["password"],
       schedule: input?.["schedule"],
     },
   }).pipe(Effect.mapError(mapClientError))

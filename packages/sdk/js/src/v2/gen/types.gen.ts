@@ -6514,6 +6514,7 @@ export type BackupConfigureInput = {
   server?: string
   username?: string
   token?: string
+  password?: string
   schedule?: string
 }
 

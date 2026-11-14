@@ -64,6 +64,7 @@ export interface ConfigureInput {
   readonly server?: string
   readonly username?: string
   readonly token?: string
+  readonly password?: string
   readonly schedule?: string
 }
 
@@ -156,6 +157,9 @@ const layer = Layer.effect(
       const usernameInput = input.username?.trim()
       const scheduleInput = input.schedule?.trim()
       const token = input.token && input.token.length > 0 ? input.token : undefined
+      const password = input.password && input.password.length > 0 ? input.password : undefined
+      const method: BackupSettings.AuthMethod | undefined = token ? "token" : password ? "password" : undefined
+      const secret = token ?? password
 
       const server = serverInput
         ? yield* Effect.try({
@@ -175,32 +179,33 @@ const layer = Layer.effect(
           catch: (cause) => toBackupError("configure", cause),
         })
       }
-      if (token) {
+      if (method && secret) {
         yield* Effect.try({
-          try: () => BackupSettings.validateToken(token),
+          try: () =>
+            method === "token" ? BackupSettings.validateToken(secret) : BackupSettings.validatePassword(secret),
           catch: (cause) => toBackupError("configure", cause),
         })
         if (!server || !username) {
           return yield* Effect.fail(
             new BackupError({
               operation: "configure",
-              message: "backup server and username are required when storing a token",
+              message: "backup server and username are required when storing a credential",
             }),
           )
         }
       }
 
-      if (!token && !BackupSettings.resolveToken() && (serverInput || usernameInput)) {
+      if (!method && !BackupSettings.resolveToken() && (serverInput || usernameInput)) {
         const auth = yield* Effect.tryPromise({
           try: () => BackupSettings.readAuth(roots.state),
           catch: (cause) => toBackupError("configure", cause),
         })
-        if (auth?.token && !BackupSettings.authMatches(auth, server, username)) {
+        if (auth?.secret && !BackupSettings.authMatches(auth, server, username)) {
           return yield* Effect.fail(
             new BackupError({
               operation: "configure",
               message:
-                "stored backup token belongs to a different server or username; provide the new token with this change",
+                "stored backup credential belongs to a different server or username; provide the new token or password with this change",
             }),
           )
         }
@@ -211,9 +216,9 @@ const layer = Layer.effect(
       if (serverInput) patch.server = server
       if (usernameInput) patch.username = username
       if (scheduleInput) patch.schedule = scheduleInput
-      if (token) {
+      if (method && secret) {
         yield* Effect.tryPromise({
-          try: () => BackupSettings.writeAuth(roots.state, { server: server!, username: username!, token }),
+          try: () => BackupSettings.writeAuth(roots.state, { server: server!, username: username!, method, secret }),
           catch: (cause) => toBackupError("configure", cause),
         })
       }

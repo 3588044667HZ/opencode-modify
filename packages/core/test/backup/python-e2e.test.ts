@@ -63,7 +63,7 @@ suite("backup-server python e2e", () => {
         path.join(roots.config, "opencode.jsonc"),
         JSON.stringify({ backup: { enabled: true, server: base, username: "alice" } }),
       )
-      await BackupSettings.writeAuth(roots.state, { server: base, username: "alice", token })
+      await BackupSettings.writeAuth(roots.state, { server: base, username: "alice", method: "token", secret: token })
 
       const layer = AppNodeBuilder.build(LayerNode.group([Backup.node]), [
         [Global.node, Global.layerWith(roots)],

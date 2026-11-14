@@ -45,7 +45,8 @@ describe("opencode backup CLI", () => {
         expect(auth).toMatchObject({
           server: "http://127.0.0.1:9",
           username: "alice",
-          token: "secret-token",
+          method: "token",
+          secret: "secret-token",
         })
       }),
     60_000,
@@ -116,7 +117,7 @@ describe("opencode backup CLI", () => {
   )
 
   cliIt.concurrent(
-    "setup --password-stdin validates Basic credentials without persisting the password",
+    "setup --password-stdin validates and persists a password credential",
     ({ home, llm }) =>
       Effect.gen(function* () {
         const server = yield* Effect.promise(() =>
@@ -167,6 +168,7 @@ describe("opencode backup CLI", () => {
           const stderr = yield* Effect.promise(() => new Response(process_.stderr).text())
           expect(exitCode).toBe(0)
           expect(stdout).toContain("Basic credentials verified")
+          expect(stdout).toContain("backup password stored")
           expect(stdout).not.toContain("super-secret-password-123")
           expect(stderr).not.toContain("super-secret-password-123")
 
@@ -174,11 +176,41 @@ describe("opencode backup CLI", () => {
             Bun.file(path.join(home, ".config", "opencode", "opencode.jsonc")).text(),
           )
           expect(configText).not.toContain("super-secret-password-123")
-          const auth = Bun.file(path.join(home, ".local", "state", "opencode", "backup", "auth.json"))
-          expect(yield* Effect.promise(() => auth.exists())).toBe(false)
+          const authText = yield* Effect.promise(() =>
+            Bun.file(path.join(home, ".local", "state", "opencode", "backup", "auth.json")).text(),
+          )
+          const auth = JSON.parse(authText)
+          expect(auth).toMatchObject({
+            server: server.url,
+            username: "alice",
+            method: "password",
+            secret: "super-secret-password-123",
+          })
+          expect(authText).not.toContain("token")
         } finally {
           yield* Effect.promise(() => server.stop())
         }
+      }),
+    60_000,
+  )
+
+  cliIt.concurrent(
+    "setup rejects using a token and password together",
+    ({ opencode }) =>
+      Effect.gen(function* () {
+        const result = yield* opencode.spawn([
+          "backup",
+          "setup",
+          "--server",
+          "http://127.0.0.1:9",
+          "--username",
+          "alice",
+          "--token",
+          "secret-token",
+          "--password-stdin",
+        ])
+        opencode.expectExit(result, 1)
+        expect(result.stderr).toContain("choose either --token or --password-stdin")
       }),
     60_000,
   )

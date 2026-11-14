@@ -85,6 +85,31 @@ describe("backup settings controller", () => {
     }
   })
 
+  test("saves a password through the same write-only credential field and never refills it", async () => {
+    const calls: BackupConfigureInput[] = []
+    const { controller, dispose } = setup({
+      status: async () => status(),
+      run: async () => ({ running: true, skipped: false, durationMs: 0 }),
+      snapshots: async () => [],
+      configure: async (input) => {
+        calls.push(input)
+        return status({ tokenConfigured: true })
+      },
+    })
+    try {
+      controller.setField("server", "https://backup.example.com")
+      controller.setField("username", "alice")
+      controller.setField("token", "user-password")
+      const result = await controller.save()
+      expect(result.ok).toBe(true)
+      expect(calls[0]?.token).toBe("user-password")
+      expect(controller.state.form.token).toBe("")
+      await controller.reloadStatus()
+      expect(controller.state.form.token).toBe("")
+    } finally {
+      dispose()
+    }
+  })
   test("does not send an empty token", async () => {
     const calls: BackupConfigureInput[] = []
     const { controller, dispose } = setup({

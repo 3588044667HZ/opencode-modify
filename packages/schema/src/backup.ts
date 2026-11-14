@@ -33,6 +33,7 @@ export const BackupConfigureInput = Schema.Struct({
   server: optional(Schema.String),
   username: optional(Schema.String),
   token: optional(Schema.String),
+  password: optional(Schema.String),
   schedule: optional(Schema.String),
 }).annotate({ identifier: "Backup.ConfigureInput" })
 export interface BackupConfigureInput extends Schema.Schema.Type<typeof BackupConfigureInput> {}

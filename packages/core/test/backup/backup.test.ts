@@ -85,7 +85,8 @@ describe("backup engine", () => {
       await BackupSettings.writeAuth(roots.state, {
         server: server.url,
         username: "alice",
-        token: "test-token",
+        method: "token",
+        secret: "test-token",
       })
 
       const result = await runBackup(roots, {
@@ -157,7 +158,8 @@ describe("backup engine", () => {
       await BackupSettings.writeAuth(roots.state, {
         server: server.url,
         username: "alice",
-        token: "test-token",
+        method: "token",
+        secret: "test-token",
       })
 
       const now = new Date("2026-01-02T03:30:00.000Z")

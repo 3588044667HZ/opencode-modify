@@ -1038,6 +1038,7 @@ export function make(options: ClientOptions) {
               server: input?.["server"],
               username: input?.["username"],
               token: input?.["token"],
+              password: input?.["password"],
               schedule: input?.["schedule"],
             },
             successStatus: 200,

@@ -1,7 +1,7 @@
 export * as BackupRemote from "./remote"
 
 import { Cause, Duration, Effect, Exit, Option, Schema } from "effect"
-import { HttpClient, HttpClientRequest } from "effect/unstable/http"
+import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { BackupChunk } from "./chunk"
 import { BackupManifest } from "./manifest"
 import { BackupSettings } from "./settings"
@@ -73,10 +73,27 @@ export function make(
   const base = connection.server.replace(/\/+$/, "")
   const user = encodeURIComponent(connection.username)
 
-  const authorize = (request: HttpClientRequest.HttpClientRequest) =>
-    connection.credential.type === "bearer"
-      ? HttpClientRequest.bearerToken(request, connection.credential.token)
-      : HttpClientRequest.basicAuth(request, connection.credential.username, connection.credential.password)
+  type AuthorizedCredential =
+    | { readonly type: "bearer"; readonly token: string }
+    | { readonly type: "basic"; readonly username: string; readonly password: string }
+
+  let resolved: AuthorizedCredential | undefined
+  if (connection.credential.type === "bearer" || connection.credential.type === "basic") {
+    resolved = connection.credential
+  }
+
+  const authorizeWith = (request: HttpClientRequest.HttpClientRequest, credential: AuthorizedCredential) =>
+    credential.type === "bearer"
+      ? HttpClientRequest.bearerToken(request, credential.token)
+      : HttpClientRequest.basicAuth(request, credential.username, credential.password)
+
+  const fallbackCredentials = (): AuthorizedCredential[] => {
+    if (connection.credential.type !== "unknown") return [connection.credential]
+    return [
+      { type: "bearer", token: connection.credential.secret },
+      { type: "basic", username: connection.username, password: connection.credential.secret },
+    ]
+  }
 
   const timeout = (operation: string, duration: Duration.Duration) =>
     <A>(effect: Effect.Effect<A, RemoteError>) =>
@@ -94,19 +111,36 @@ export function make(
         }),
       )
 
-  const execute = (operation: string, request: HttpClientRequest.HttpClientRequest) =>
-    client.execute(authorize(request)).pipe(
-      Effect.mapError(
-        (cause) =>
-          new RemoteError({
-            operation,
-            message: `network request failed (${cause.reason._tag})`,
-            retryable: true,
-          }),
-      ),
-      timeout(operation, requestTimeout),
-    )
+  const execute = (
+    operation: string,
+    request: HttpClientRequest.HttpClientRequest,
+    options: { readonly allowFallback?: boolean } = {},
+  ): Effect.Effect<HttpClientResponse.HttpClientResponse, RemoteError> => {
+    const candidates = resolved ? [resolved] : fallbackCredentials()
+    const canFallback =
+      options.allowFallback === true && connection.credential.type === "unknown" && resolved === undefined
+    const attempts = canFallback ? candidates : candidates.slice(0, 1)
 
+    const attempt = (index: number): Effect.Effect<HttpClientResponse.HttpClientResponse, RemoteError> =>
+      client.execute(authorizeWith(request, attempts[index]!)).pipe(
+        Effect.mapError(
+          (cause) =>
+            new RemoteError({
+              operation,
+              message: `network request failed (${cause.reason._tag})`,
+              retryable: true,
+            }),
+        ),
+        timeout(operation, requestTimeout),
+        Effect.flatMap((response) => {
+          if (response.status === 401 && index + 1 < attempts.length) return attempt(index + 1)
+          if (response.status !== 401) resolved = attempts[index]!
+          return Effect.succeed(response)
+        }),
+      )
+
+    return attempt(0)
+  }
   const responseError = (operation: string, response: { status: number; text: Effect.Effect<string, unknown> }) =>
     Effect.gen(function* () {
       const text = yield* response.text.pipe(
@@ -147,7 +181,7 @@ export function make(
   const endpoint = (suffix: string) => `${base}/v1/users/${user}${suffix}`
 
   const headChunk = (sha256: string) =>
-    execute("headChunk", HttpClientRequest.head(endpoint(`/chunks/${encodeURIComponent(sha256)}`))).pipe(
+    execute("headChunk", HttpClientRequest.head(endpoint(`/chunks/${encodeURIComponent(sha256)}`)), { allowFallback: true }).pipe(
       Effect.flatMap((response) => {
         if (response.status === 200) return Effect.succeed("exists" as const)
         if (response.status === 404) return Effect.succeed("missing" as const)
@@ -176,7 +210,7 @@ export function make(
 
   const listSnapshots = () =>
     retry(
-      execute("listSnapshots", HttpClientRequest.acceptJson(HttpClientRequest.get(endpoint("/snapshots")))).pipe(
+      execute("listSnapshots", HttpClientRequest.acceptJson(HttpClientRequest.get(endpoint("/snapshots"))), { allowFallback: true }).pipe(
         Effect.flatMap((response) =>
           response.status === 200
             ? response.text.pipe(
@@ -224,6 +258,7 @@ export function make(
       execute(
         "getManifest",
         HttpClientRequest.acceptJson(HttpClientRequest.get(endpoint(`/snapshots/${encodeURIComponent(id)}`))),
+        { allowFallback: true },
       ).pipe(
         Effect.flatMap((response) =>
           response.status === 200
@@ -274,7 +309,7 @@ export function make(
 
   const getChunk = (sha256: string) =>
     retry(
-      execute("getChunk", HttpClientRequest.get(endpoint(`/chunks/${encodeURIComponent(sha256)}`))).pipe(
+      execute("getChunk", HttpClientRequest.get(endpoint(`/chunks/${encodeURIComponent(sha256)}`)), { allowFallback: true }).pipe(
         Effect.flatMap((response) =>
           response.status === 200
             ? response.arrayBuffer.pipe(
