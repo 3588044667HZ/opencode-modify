@@ -603,6 +603,7 @@ export const dict = {
   "toast.workspace.disabled.description": "Хажуугийн мөрөнд зөвхөн үндсэн Git worktree-г харуулав",
   "toast.permissions.autoaccept.on.title": "Зөвшөөрлийг автоматаар хүлээн авах",
   "toast.permissions.autoaccept.on.description": "Зөвшөөрлийн хүсэлт автоматаар батлагдах болно",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "Зөвшөөрлийг автоматаар хүлээн авахаа больсон",
   "toast.permissions.autoaccept.off.description": "Зөвшөөрлийн хүсэлтэд зөвшөөрөл шаардлагатай",
   "toast.model.none.title": "Ямар ч загвар сонгогдоогүй байна",

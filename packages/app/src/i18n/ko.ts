@@ -400,6 +400,7 @@ export const dict = {
   "toast.workspace.disabled.description": "사이드바에 메인 작업 트리만 표시됩니다",
   "toast.permissions.autoaccept.on.title": "권한 자동 수락 중",
   "toast.permissions.autoaccept.on.description": "권한 요청이 자동으로 승인됩니다",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "권한 자동 수락 중지됨",
   "toast.permissions.autoaccept.off.description": "권한 요청에 승인이 필요합니다",
   "toast.model.none.title": "선택된 모델 없음",

@@ -644,6 +644,7 @@ export const dict = {
   "toast.workspace.disabled.description": "侧边栏只显示主工作树",
   "toast.permissions.autoaccept.on.title": "正在自动接受权限",
   "toast.permissions.autoaccept.on.description": "权限请求将被自动批准",
+  "settings.general.row.autoAccept.global.description": "未选择项目：对所有项目生效。",
   "toast.permissions.autoaccept.off.title": "已停止自动接受权限",
   "toast.permissions.autoaccept.off.description": "权限请求将需要批准",
   "toast.model.none.title": "未选择模型",

@@ -600,6 +600,7 @@ export const dict = {
   "toast.workspace.disabled.description": "Gapdal panelde diňe esasy Git worktree görkezilýär",
   "toast.permissions.autoaccept.on.title": "Awto-kabul ediş rugsatlary",
   "toast.permissions.autoaccept.on.description": "Rugsat haýyşlary awtomatiki tassyklanar",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "Awto-kabul ediş rugsatlary bes edildi",
   "toast.permissions.autoaccept.off.description": "Rugsat haýyşlary tassyklamagy talap eder",
   "toast.model.none.title": "Hiç hili model saýlanmady",

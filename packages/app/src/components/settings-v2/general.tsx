@@ -71,11 +71,13 @@ const soundSettings = {
 
 const PermissionScopeSetting: Component<{ controller: PermissionScopeController }> = (props) => {
   const language = useLanguage()
+  const description = createMemo(() =>
+    props.controller.scope() === "global"
+      ? language.t("settings.general.row.autoAccept.global.description")
+      : language.t("toast.permissions.autoaccept.on.description"),
+  )
   return (
-    <SettingsRowV2
-      title={language.t("command.permissions.autoaccept.enable")}
-      description={language.t("toast.permissions.autoaccept.on.description")}
-    >
+    <SettingsRowV2 title={language.t("command.permissions.autoaccept.enable")} description={description()}>
       <div data-action="settings-auto-accept-permissions">
         <Switch
           checked={props.controller.accepting()}

@@ -598,6 +598,7 @@ export const dict = {
   "toast.workspace.disabled.description": "មានតែ Git worktree ចម្បងប៉ុណ្ណោះដែលត្រូវបានបង្ហាញក្នុងរបារចំហៀង",
   "toast.permissions.autoaccept.on.title": "ការអនុញ្ញាតដោយស្វ័យប្រវត្តិ",
   "toast.permissions.autoaccept.on.description": "សំណើការអនុញ្ញាតនឹងត្រូវបានអនុម័តដោយស្វ័យប្រវត្តិ",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "បានបញ្ឈប់ការអនុញ្ញាតដោយស្វ័យប្រវត្តិ",
   "toast.permissions.autoaccept.off.description": "សំណើសុំការអនុញ្ញាតនឹងទាមទារការយល់ព្រម",
   "toast.model.none.title": "មិនបានជ្រើសរើសម៉ូដែលទេ។",

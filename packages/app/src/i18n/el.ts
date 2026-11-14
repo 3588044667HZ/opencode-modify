@@ -603,6 +603,7 @@ export const dict = {
   "toast.workspace.disabled.description": "Μόνο το κύριο δέντρο εργασίας εμφανίζεται στην πλαϊνή γραμμή",
   "toast.permissions.autoaccept.on.title": "Αυτόματη αποδοχή δικαιωμάτων",
   "toast.permissions.autoaccept.on.description": "Τα αιτήματα άδειας θα εγκρίνονται αυτόματα",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "Διακοπή αυτόματης αποδοχής δικαιωμάτων",
   "toast.permissions.autoaccept.off.description": "Τα αιτήματα άδειας απαιτούν έγκριση",
   "toast.model.none.title": "Δεν έχει επιλεγεί μοντέλο",

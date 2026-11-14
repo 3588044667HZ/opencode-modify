@@ -604,6 +604,7 @@ export const dict = {
   "toast.workspace.disabled.description": "В страничната лента се показва само основното работно дърво",
   "toast.permissions.autoaccept.on.title": "Автоматично приемане на разрешения",
   "toast.permissions.autoaccept.on.description": "Заявките за разрешение ще бъдат автоматично одобрени",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "Автоматичното приемане на разрешения е спряно",
   "toast.permissions.autoaccept.off.description": "Исканията за разрешение ще изискват одобрение",
   "toast.model.none.title": "Няма избран модел",

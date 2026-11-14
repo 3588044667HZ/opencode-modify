@@ -600,6 +600,7 @@ export const dict = {
   "toast.workspace.disabled.description": "Tylko główne drzewo robocze jest wyświetlane na pasku bocznym",
   "toast.permissions.autoaccept.on.title": "Automatyczne akceptowanie uprawnień",
   "toast.permissions.autoaccept.on.description": "Żądania uprawnień będą automatycznie zatwierdzane",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "Zatrzymano automatyczne akceptowanie uprawnień",
   "toast.permissions.autoaccept.off.description": "Żądania uprawnień będą wymagały zatwierdzenia",
   "toast.model.none.title": "Nie wybrano modelu",

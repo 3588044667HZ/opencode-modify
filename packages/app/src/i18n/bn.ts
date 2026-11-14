@@ -599,6 +599,7 @@ export const dict: Record<string, string> = {
   "toast.workspace.disabled.description": "সাইডবারে শুধুমাত্র প্রধান ওয়ার্কট্রি দেখানো হয়েছে",
   "toast.permissions.autoaccept.on.title": "স্বয়ংক্রিয়ভাবে গ্রহণযোগ্য অনুমতি",
   "toast.permissions.autoaccept.on.description": "অনুমতি অনুরোধ স্বয়ংক্রিয়ভাবে অনুমোদিত হবে",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "স্বয়ংক্রিয়ভাবে গ্রহণযোগ্য অনুমতি বন্ধ করা হয়েছে৷",
   "toast.permissions.autoaccept.off.description": "অনুমতি অনুরোধ অনুমোদন প্রয়োজন হবে",
   "toast.model.none.title": "কোনো মডেল নির্বাচন করা হয়নি",

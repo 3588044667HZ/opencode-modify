@@ -608,6 +608,7 @@ export const dict = {
   "toast.workspace.disabled.description": "साइडबार में केवल मुख्य वर्कट्री दिखाया गया है",
   "toast.permissions.autoaccept.on.title": "अनुमतियाँ स्वतः स्वीकार करना",
   "toast.permissions.autoaccept.on.description": "अनुमति अनुरोध स्वचालित रूप से स्वीकृत हो जाएंगे",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "अनुमतियों को स्वतः स्वीकार करना बंद कर दिया गया",
   "toast.permissions.autoaccept.off.description": "अनुमति अनुरोधों के लिए अनुमोदन की आवश्यकता होगी",
   "toast.model.none.title": "कोई मॉडल चयनित नहीं",

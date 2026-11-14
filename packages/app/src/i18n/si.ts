@@ -598,6 +598,7 @@ export const dict: Record<string, string> = {
   "toast.workspace.disabled.description": "පැති තීරුවේ ප්‍රධාන Git වර්ක්ට්‍රී එක පමණක් පෙන්වයි",
   "toast.permissions.autoaccept.on.title": "ස්වයං-පිළිගැනීමේ අවසර",
   "toast.permissions.autoaccept.on.description": "අවසර ඉල්ලීම් ස්වයංක්‍රීයව අනුමත වේ",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "අවසර ස්වයංක්‍රීයව පිළිගැනීම නතර විය",
   "toast.permissions.autoaccept.off.description": "අවසර ඉල්ලීම් සඳහා අනුමැතිය අවශ්‍ය වනු ඇත",
   "toast.model.none.title": "ආකෘතියක් තෝරා නැත",

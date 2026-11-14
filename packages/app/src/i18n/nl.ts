@@ -605,6 +605,7 @@ export const dict = {
   "toast.workspace.disabled.description": "Alleen de hoofdworktree wordt weergegeven in de zijbalk",
   "toast.permissions.autoaccept.on.title": "Machtigingen automatisch accepteren",
   "toast.permissions.autoaccept.on.description": "Toestemmingsverzoeken worden automatisch goedgekeurd",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "Machtigingen niet meer automatisch accepteren",
   "toast.permissions.autoaccept.off.description": "Machtigingsverzoeken moeten worden goedgekeurd",
   "toast.model.none.title": "Geen model geselecteerd",

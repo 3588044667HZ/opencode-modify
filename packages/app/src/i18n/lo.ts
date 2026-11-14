@@ -596,6 +596,7 @@ export const dict = {
   "toast.workspace.disabled.description": "ສະແດງສະເພາະ Git worktree ຫຼັກໃນແຖບດ້ານຂ້າງ",
   "toast.permissions.autoaccept.on.title": "ການອະນຸຍາດອັດຕະໂນມັດ",
   "toast.permissions.autoaccept.on.description": "ການຮ້ອງຂໍການອະນຸຍາດຈະຖືກອະນຸມັດໂດຍອັດຕະໂນມັດ",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "ຢຸດການອະນຸຍາດອັດຕະໂນມັດ",
   "toast.permissions.autoaccept.off.description": "ການຮ້ອງຂໍການອະນຸຍາດຈະຕ້ອງມີການອະນຸມັດ",
   "toast.model.none.title": "ບໍ່ໄດ້ເລືອກຕົວແບບ",

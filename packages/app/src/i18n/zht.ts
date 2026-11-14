@@ -631,6 +631,7 @@ export const dict = {
 
   "toast.permissions.autoaccept.on.title": "正在自動接受權限",
   "toast.permissions.autoaccept.on.description": "權限要求將自動獲准",
+  "settings.general.row.autoAccept.global.description": "未選擇專案：對所有專案生效。",
   "toast.permissions.autoaccept.off.title": "已停止自動接受權限",
   "toast.permissions.autoaccept.off.description": "權限要求將需要核准",
 

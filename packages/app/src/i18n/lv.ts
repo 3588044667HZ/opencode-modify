@@ -599,6 +599,7 @@ export const dict = {
   "toast.workspace.disabled.description": "Sānu joslā redzama tikai galvenā darba kopija",
   "toast.permissions.autoaccept.on.title": "Atļaujas tiek automātiski apstiprinātas",
   "toast.permissions.autoaccept.on.description": "Atļauju pieprasījumi tiks apstiprināti automātiski",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "Automātiska atļauju apstiprināšana apturēta",
   "toast.permissions.autoaccept.off.description": "Atļauju pieprasījumiem būs nepieciešams apstiprinājums",
   "toast.model.none.title": "Nav izvēlēts modelis",

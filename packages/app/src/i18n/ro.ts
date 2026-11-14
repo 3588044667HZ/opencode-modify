@@ -599,6 +599,7 @@ export const dict = {
   "toast.workspace.disabled.description": "Doar worktree-ul principal este afișat în bara laterală",
   "toast.permissions.autoaccept.on.title": "Permisiuni acceptate automat",
   "toast.permissions.autoaccept.on.description": "Solicitările de permisiune vor fi aprobate automat",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "Oprire acceptare automată permisiuni",
   "toast.permissions.autoaccept.off.description": "Solicitările de permisiune vor necesita aprobare",
   "toast.model.none.title": "Niciun model selectat",

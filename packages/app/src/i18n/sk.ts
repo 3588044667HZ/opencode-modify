@@ -598,6 +598,7 @@ export const dict = {
   "toast.workspace.disabled.description": "V postrannom paneli je zobrazený len hlavný pracovný strom",
   "toast.permissions.autoaccept.on.title": "Automatické schvaľovanie povolení",
   "toast.permissions.autoaccept.on.description": "Žiadosti o povolenie budú automaticky schválené",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "Automatické schvaľovanie povolení zastavené",
   "toast.permissions.autoaccept.off.description": "Žiadosti o povolenie budú vyžadovať schválenie",
   "toast.model.none.title": "Nie je vybraný model",

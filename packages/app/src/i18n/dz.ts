@@ -608,6 +608,7 @@ export const dict: Record<string, string> = {
   "toast.workspace.disabled.description": "ཟུར་ཁའི་ཕྲ་རིང་ནང་ Git worktree ངོ་མ་རྐྱངམ་ཅིག་སྟོནམ་ཨིན།",
   "toast.permissions.autoaccept.on.title": "རང་བཞིན་དང་ལེན་གནང་བ་ཚུ།",
   "toast.permissions.autoaccept.on.description": "གནང་བ་ཞུ་བ་ཚུ་ རང་བཞིན་གྱིས་ ཆ་འཇོག་འབད་འོང་།",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "རང་བཞིན་དང་ལེན་གནང་བ་ཚུ་ བཀག་བཞག་ཡོདཔ།",
   "toast.permissions.autoaccept.off.description": "གནང་བ་ཞུ་བ་ཚུ་ལུ་ ཆ་འཇོག་དགོཔ་ཨིན།",
   "toast.model.none.title": "དཔེ་ཚད་སེལ་འཐུ་མ་འབད་བས།",

@@ -648,6 +648,7 @@ export const dict = {
 
   "toast.permissions.autoaccept.on.title": "Menerima izin secara otomatis",
   "toast.permissions.autoaccept.on.description": "Permintaan izin akan disetujui secara otomatis",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "Berhenti menerima izin otomatis",
   "toast.permissions.autoaccept.off.description": "Permintaan izin akan memerlukan persetujuan",
 

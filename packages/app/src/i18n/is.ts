@@ -603,6 +603,7 @@ export const dict = {
   "toast.workspace.disabled.description": "Aðeins aðalvinnutréð er sýnt í hliðarstikunni",
   "toast.permissions.autoaccept.on.title": "Sjálfvirkt samþykki heimilda",
   "toast.permissions.autoaccept.on.description": "Leyfibeiðnir verða sjálfkrafa samþykktar",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "Hætti að samþykkja heimildir sjálfkrafa",
   "toast.permissions.autoaccept.off.description": "Leyfisbeiðnir þurfa samþykki",
   "toast.model.none.title": "Engin gerð valin",

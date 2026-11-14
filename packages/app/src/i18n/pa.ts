@@ -609,6 +609,7 @@ export const dict = {
   "toast.workspace.disabled.description": "سائڈبار چ صرف مین ورک ٹری وکھایا گیا اے۔",
   "toast.permissions.autoaccept.on.title": "اجازتاں نوں خودکار قبول کرنا",
   "toast.permissions.autoaccept.on.description": "اجازت دی درخواستاں خود بخود منظور ہو جان گیاں",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "اجازتاں نوں خودکار قبول کرنا بند کر دتا گیا",
   "toast.permissions.autoaccept.off.description": "اجازت دی درخواستاں لئی منظوری دی لوڑ ہووے گی",
   "toast.model.none.title": "کوئی ماڈل نئیں چنیا گیا",

@@ -642,6 +642,7 @@ export const dict = {
 
   "toast.permissions.autoaccept.on.title": "İzinler otomatik kabul ediliyor",
   "toast.permissions.autoaccept.on.description": "İzin istekleri otomatik olarak onaylanacak",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "İzinleri otomatik kabul etme durduruldu",
   "toast.permissions.autoaccept.off.description": "İzin istekleri onay gerektirecek",
 

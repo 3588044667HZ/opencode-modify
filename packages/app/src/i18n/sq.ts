@@ -601,6 +601,7 @@ export const dict = {
   "toast.workspace.disabled.description": "Vetëm pema kryesore e punës shfaqet në shiritin anësor",
   "toast.permissions.autoaccept.on.title": "Auto-pranimi i lejeve",
   "toast.permissions.autoaccept.on.description": "Kërkesat për leje do të miratohen automatikisht",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "Ndaloi pranimin automatik të lejeve",
   "toast.permissions.autoaccept.off.description": "Kërkesat për leje do të kërkojnë miratim",
   "toast.model.none.title": "Asnjë model i zgjedhur",

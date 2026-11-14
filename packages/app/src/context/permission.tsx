@@ -16,8 +16,10 @@ import type { ServerScope } from "@/utils/server-scope"
 import { normalizePermissionRequest } from "./global-sync/utils"
 import {
   acceptKey,
+  applyGlobalAutoAccept,
   directoryAcceptKey,
   isDirectoryAutoAccepting,
+  isGlobalAutoAccepting,
   autoRespondsPermission,
   sessionAutoAccept,
 } from "./permission-auto-respond"
@@ -164,6 +166,18 @@ export const { use: usePermission, provider: PermissionProvider } = createSimple
       isAutoAcceptingDirectory(directory: string) {
         return selected().isAutoAcceptingDirectory(directory)
       },
+      isAutoAcceptingGlobal() {
+        return selected().isAutoAcceptingGlobal()
+      },
+      enableAutoAcceptGlobal() {
+        selected().enableAutoAcceptGlobal()
+      },
+      disableAutoAcceptGlobal() {
+        selected().disableAutoAcceptGlobal()
+      },
+      toggleAutoAcceptGlobal() {
+        selected().toggleAutoAcceptGlobal()
+      },
       toggleAutoAccept(sessionID: string, directory: string) {
         selected().toggleAutoAccept(sessionID, directory)
       },
@@ -295,6 +309,10 @@ function createServerPermissionState(input: { sdk: ServerSDK; sync: ServerSync }
     return isDirectoryAutoAccepting(store.autoAccept, directory)
   }
 
+  function isAutoAcceptingGlobal() {
+    return isGlobalAutoAccepting(store.autoAccept)
+  }
+
   function shouldAutoRespond(permission: PermissionRequest, directory?: string) {
     return autoRespondsPermission(store.autoAccept, sessions(directory), permission, directory)
   }
@@ -305,6 +323,7 @@ function createServerPermissionState(input: { sdk: ServerSDK; sync: ServerSync }
   }
 
   async function shouldAutoRespondResolved(permission: PermissionRequest, directory?: string) {
+    if (isGlobalAutoAccepting(store.autoAccept)) return true
     const override = sessionAutoAccept(store.autoAccept, sessions(directory), permission, directory)
     if (override !== undefined) return override
     if (input.sync.session.lineage.peek(permission.sessionID)) return shouldAutoRespond(permission, directory)
@@ -372,6 +391,31 @@ function createServerPermissionState(input: { sdk: ServerSDK; sync: ServerSync }
       .catch(() => undefined)
   }
 
+  function enableGlobal() {
+    if (meta.disposed) return
+    setStore(
+      produce((draft) => {
+        draft.autoAccept = applyGlobalAutoAccept(draft.autoAccept, true)
+      }),
+    )
+
+    for (const [sessionID, permissions] of Object.entries(input.sync.session.data.permission)) {
+      const directory = input.sync.session.lineage.peek(sessionID)?.session.directory
+      for (const permission of permissions ?? []) {
+        void respondPending(permission, directory, () => isGlobalAutoAccepting(store.autoAccept))
+      }
+    }
+  }
+
+  function disableGlobal() {
+    if (meta.disposed) return
+    setStore(
+      produce((draft) => {
+        draft.autoAccept = applyGlobalAutoAccept(draft.autoAccept, false)
+      }),
+    )
+  }
+
   function disableDirectory(directory: string) {
     if (meta.disposed) return
     const key = directoryAcceptKey(directory)
@@ -437,8 +481,32 @@ function createServerPermissionState(input: { sdk: ServerSDK; sync: ServerSync }
       if (meta.disposed) return false
       return isAutoAcceptingDirectory(directory)
     },
+    isAutoAcceptingGlobal() {
+      if (meta.disposed) return false
+      return isAutoAcceptingGlobal()
+    },
+    enableAutoAcceptGlobal() {
+      if (meta.disposed) return
+      enableGlobal()
+    },
+    disableAutoAcceptGlobal() {
+      if (meta.disposed) return
+      disableGlobal()
+    },
+    toggleAutoAcceptGlobal() {
+      if (meta.disposed) return
+      if (isGlobalAutoAccepting(store.autoAccept)) {
+        disableGlobal()
+        return
+      }
+      enableGlobal()
+    },
     toggleAutoAccept(sessionID: string, directory: string) {
       if (meta.disposed) return
+      if (isGlobalAutoAccepting(store.autoAccept)) {
+        disableGlobal()
+        return
+      }
       if (isAutoAccepting(sessionID, directory)) {
         disable(sessionID, directory)
         return
@@ -448,6 +516,10 @@ function createServerPermissionState(input: { sdk: ServerSDK; sync: ServerSync }
     },
     toggleAutoAcceptDirectory(directory: string) {
       if (meta.disposed) return
+      if (isGlobalAutoAccepting(store.autoAccept)) {
+        disableGlobal()
+        return
+      }
       if (isAutoAcceptingDirectory(directory)) {
         disableDirectory(directory)
         return

@@ -599,6 +599,7 @@ export const dict = {
   "toast.workspace.disabled.description": "فقط ورک‌تری اصلی در نوار کناری نشان داده شده است",
   "toast.permissions.autoaccept.on.title": "پذیرش خودکار مجوزها",
   "toast.permissions.autoaccept.on.description": "درخواست‌های مجوز به‌طور خودکار تأیید می‌شوند",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "پذیرش خودکار مجوزها متوقف شد",
   "toast.permissions.autoaccept.off.description": "درخواست های مجوز نیاز به تایید دارند",
   "toast.model.none.title": "هیچ مدلی انتخاب نشده است",

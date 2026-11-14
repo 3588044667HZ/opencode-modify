@@ -600,6 +600,7 @@ export const dict = {
   "toast.workspace.disabled.description": "На бочној траци је приказано само главно стабло рада",
   "toast.permissions.autoaccept.on.title": "Аутоматско прихватање дозвола",
   "toast.permissions.autoaccept.on.description": "Захтеви за дозволу ће бити аутоматски одобрени",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "Заустављено аутоматско прихватање дозвола",
   "toast.permissions.autoaccept.off.description": "Захтеви за дозволу ће захтевати одобрење",
   "toast.model.none.title": "Није изабран ниједан модел",

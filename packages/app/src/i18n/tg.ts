@@ -602,6 +602,7 @@ export const dict = {
   "toast.workspace.disabled.description": "Дар панели паҳлӯ танҳо Git worktree-и асосӣ нишон дода мешавад",
   "toast.permissions.autoaccept.on.title": "Қабули худкор иҷозатҳо",
   "toast.permissions.autoaccept.on.description": "Дархостҳои иҷозат ба таври худкор тасдиқ карда мешаванд",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "Қабули худкори иҷозатҳоро қатъ кард",
   "toast.permissions.autoaccept.off.description": "Дархостҳои иҷозат тасдиқро талаб мекунанд",
   "toast.model.none.title": "Ягон модел интихоб нашудааст",

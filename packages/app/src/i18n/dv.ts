@@ -607,6 +607,7 @@ export const dict = {
   "toast.workspace.disabled.description": "ސައިޑްބާރގައި ދައްކާފައިވަނީ ހަމައެކަނި މައިގަނޑު ވޯކްޓްރީއެވެ",
   "toast.permissions.autoaccept.on.title": "އޮޓޯ އެކްސެޕްޓިންގ ހުއްދަތައް",
   "toast.permissions.autoaccept.on.description": "ހުއްދައަށް އެދޭ ފަރާތްތަކުން އޮޓޮމެޓިކުން ފާސްކުރެވޭނެއެވެ",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "ހުއްދަތައް އޮޓޯ އެކްސެޕްޓްކުރުން ހުއްޓާލިއެވެ",
   "toast.permissions.autoaccept.off.description": "ހުއްދައަށް އެދޭ ފަރާތްތަކަށް ރުހުން ހޯދަން ޖެހޭނެއެވެ",
   "toast.model.none.title": "އެއްވެސް މޮޑެލްއެއް ހޮވިފައެއް ނުވެއެވެ",

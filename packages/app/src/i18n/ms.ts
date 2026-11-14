@@ -599,6 +599,7 @@ export const dict = {
   "toast.workspace.disabled.description": "Hanya worktree utama dipaparkan di bar sisi",
   "toast.permissions.autoaccept.on.title": "Kebenaran diterima secara automatik",
   "toast.permissions.autoaccept.on.description": "Permintaan kebenaran akan diluluskan secara automatik",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "Penerimaan kebenaran automatik dihentikan",
   "toast.permissions.autoaccept.off.description": "Permintaan kebenaran memerlukan kelulusan",
   "toast.model.none.title": "Tiada model dipilih",

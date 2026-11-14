@@ -590,6 +590,7 @@ export const dict = {
   "toast.workspace.disabled.description": "በጎን አሞሌው ላይ ዋናው Git worktree ብቻ ነው የሚታየው",
   "toast.permissions.autoaccept.on.title": "በራስ-ተቀባይ ፍቃዶች",
   "toast.permissions.autoaccept.on.description": "የፈቃድ ጥያቄዎች በራስ-ሰር ይጸድቃሉ",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "በራስ-መቀበል ፍቃዶችን አቁሟል",
   "toast.permissions.autoaccept.off.description": "የፈቃድ ጥያቄዎች መጽደቅ ያስፈልጋቸዋል",
   "toast.model.none.title": "ምንም ሞዴል አልተመረጠም",

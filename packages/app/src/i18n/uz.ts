@@ -602,6 +602,7 @@ export const dict = {
   "toast.workspace.disabled.description": "Yon panelda faqat asosiy ishchi daraxt ko'rsatilgan",
   "toast.permissions.autoaccept.on.title": "Ruxsatlarni avtomatik qabul qilish",
   "toast.permissions.autoaccept.on.description": "Ruxsat so'rovlari avtomatik ravishda tasdiqlanadi",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "Ruxsatlarni avtomatik qabul qilish toʻxtatildi",
   "toast.permissions.autoaccept.off.description": "Ruxsat so'rovlari tasdiqlashni talab qiladi",
   "toast.model.none.title": "Hech qanday model tanlanmagan",

@@ -605,6 +605,7 @@ export const dict = {
   "toast.workspace.disabled.description": "ပင်မ Git worktree ကိုသာ ဘေးဘားတွင် ပြသထားသည်။",
   "toast.permissions.autoaccept.on.title": "ခွင့်ပြုချက်များကို အလိုအလျောက် လက်ခံခြင်း။",
   "toast.permissions.autoaccept.on.description": "ခွင့်ပြုချက်တောင်းဆိုမှုများကို အလိုအလျောက် အတည်ပြုပေးမည်ဖြစ်သည်။",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "ခွင့်ပြုချက်များကို အလိုအလျောက်လက်ခံခြင်းကို ရပ်ထားသည်။",
   "toast.permissions.autoaccept.off.description": "ခွင့်ပြုချက်တောင်းခံမှုများသည် အတည်ပြုချက် လိုအပ်မည်ဖြစ်သည်။",
   "toast.model.none.title": "မော်ဒယ်ကို ရွေးထားခြင်းမရှိပါ။",

@@ -605,6 +605,7 @@ export const dict = {
   "toast.workspace.disabled.description": "Šoninėje juostoje rodomas tik pagrindinis darbo medis",
   "toast.permissions.autoaccept.on.title": "Automatinis leidimų priėmimas",
   "toast.permissions.autoaccept.on.description": "Leidimų prašymai bus patvirtinti automatiškai",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "Sustabdė automatinį leidimų priėmimą",
   "toast.permissions.autoaccept.off.description": "Reikės patvirtinti leidimo prašymus",
   "toast.model.none.title": "Nepasirinktas joks modelis",

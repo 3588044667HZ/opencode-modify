@@ -604,6 +604,7 @@ export const dict = {
   "toast.workspace.disabled.description": "Csak a fő munkafa jelenik meg az oldalsávban",
   "toast.permissions.autoaccept.on.title": "Engedélyek automatikus elfogadása",
   "toast.permissions.autoaccept.on.description": "Az engedélykérések automatikusan jóváhagyásra kerülnek",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "Az engedélyek automatikus elfogadása leállítva",
   "toast.permissions.autoaccept.off.description": "Az engedélykérésekhez jóváhagyás szükséges",
   "toast.model.none.title": "Nincs kiválasztott modell",

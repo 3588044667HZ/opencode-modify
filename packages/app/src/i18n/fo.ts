@@ -599,6 +599,7 @@ export const dict = {
   "toast.workspace.disabled.description": "Bert høvuðs-Git-worktree er víst í síðulinjuni.",
   "toast.permissions.autoaccept.on.title": "Sjálvvirkandi góðkenning av loyvum",
   "toast.permissions.autoaccept.on.description": "Loyvisumbønir verða sjálvvirkandi góðkendar",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "Steðgað sjálvvirkandi góðkenning av loyvum",
   "toast.permissions.autoaccept.off.description": "Loyvisumbønir krevja góðkenning.",
   "toast.model.none.title": "Einki modell valt",

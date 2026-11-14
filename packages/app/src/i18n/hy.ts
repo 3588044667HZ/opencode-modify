@@ -603,6 +603,7 @@ export const dict = {
   "toast.workspace.disabled.description": "Միայն հիմնական աշխատանքային ծառը ցուցադրված է կողագոտում",
   "toast.permissions.autoaccept.on.title": "Ավտոմատների ընդունում",
   "toast.permissions.autoaccept.on.description": "Թույլտվության հարցումներն ավտոմատ կերպով կհաստատվեն",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "Դադարեցվել է ավտոմատ ընդունելության թույլտվությունները",
   "toast.permissions.autoaccept.off.description": "Թույլտվության հարցումները կպահանջեն հաստատում",
   "toast.model.none.title": "Ընտրված չէ մոդել",

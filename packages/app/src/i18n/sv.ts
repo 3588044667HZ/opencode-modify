@@ -604,6 +604,7 @@ export const dict = {
   "toast.workspace.disabled.description": "Endast huvudworktreen visas i sidofältet",
   "toast.permissions.autoaccept.on.title": "Autoaccepterar behörigheter",
   "toast.permissions.autoaccept.on.description": "Behörighetsförfrågningar kommer att godkännas automatiskt",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "Slutade att automatiskt acceptera behörigheter",
   "toast.permissions.autoaccept.off.description": "Behörighetsförfrågningar kommer att kräva godkännande",
   "toast.model.none.title": "Ingen modell har valts",

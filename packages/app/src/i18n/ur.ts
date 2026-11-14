@@ -611,6 +611,7 @@ export const dict = {
   "toast.workspace.disabled.description": "سائڈبار میں صرف مین ورک ٹری کو دکھایا گیا ہے۔",
   "toast.permissions.autoaccept.on.title": "خودکار طور پر قبول کرنے کی اجازتیں۔",
   "toast.permissions.autoaccept.on.description": "اجازت کی درخواستیں خود بخود منظور ہو جائیں گی۔",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "اجازتوں کو خودکار طور پر قبول کرنا بند کر دیا گیا۔",
   "toast.permissions.autoaccept.off.description": "اجازت کی درخواستوں کو منظوری درکار ہوگی۔",
   "toast.model.none.title": "کوئی ماڈل منتخب نہیں کیا گیا۔",

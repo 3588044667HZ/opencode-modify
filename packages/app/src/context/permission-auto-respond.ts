@@ -9,12 +9,24 @@ export function directoryAcceptKey(directory: string) {
   return `${base64Encode(directory)}/*`
 }
 
+export const GLOBAL_ACCEPT_KEY = "*"
+
+export function isGlobalAutoAccepting(autoAccept: Record<string, boolean | undefined>) {
+  return autoAccept[GLOBAL_ACCEPT_KEY] === true
+}
+
+export function applyGlobalAutoAccept(autoAccept: Record<string, boolean>, enabled: boolean) {
+  if (!enabled) return {}
+  return { ...autoAccept, [GLOBAL_ACCEPT_KEY]: true }
+}
+
 function accepted(autoAccept: Record<string, boolean>, sessionID: string, directory?: string) {
   const key = acceptKey(sessionID, directory)
   return autoAccept[key] ?? autoAccept[sessionID]
 }
 
 export function isDirectoryAutoAccepting(autoAccept: Record<string, boolean>, directory: string) {
+  if (isGlobalAutoAccepting(autoAccept)) return true
   const key = directoryAcceptKey(directory)
   return autoAccept[key] ?? false
 }
@@ -43,6 +55,7 @@ export function autoRespondsPermission(
   permission: { sessionID: string },
   directory?: string,
 ) {
+  if (isGlobalAutoAccepting(autoAccept)) return true
   const value = sessionAutoAccept(autoAccept, session, permission, directory)
   if (value !== undefined) return value
   return directory ? isDirectoryAutoAccepting(autoAccept, directory) : false

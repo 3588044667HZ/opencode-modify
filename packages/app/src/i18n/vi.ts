@@ -609,6 +609,7 @@ export const dict = {
   "toast.workspace.disabled.description": "Chỉ worktree chính được hiển thị trong thanh bên",
   "toast.permissions.autoaccept.on.title": "Tự động chấp nhận quyền",
   "toast.permissions.autoaccept.on.description": "Yêu cầu quyền sẽ được tự động phê duyệt",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "Đã dừng quyền tự động chấp nhận",
   "toast.permissions.autoaccept.off.description": "Yêu cầu quyền sẽ cần được phê duyệt",
   "toast.model.none.title": "Không có mô hình nào được chọn",

@@ -600,6 +600,7 @@ export const dict: Record<string, string> = {
   "toast.workspace.disabled.description": "साइडबारमा मुख्य कार्य रूख मात्र देखाइएको छ",
   "toast.permissions.autoaccept.on.title": "स्वत: स्वीकार गर्ने अनुमतिहरू",
   "toast.permissions.autoaccept.on.description": "अनुमति अनुरोधहरू स्वचालित रूपमा स्वीकृत हुनेछन्",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "स्वत: स्वीकार गर्ने अनुमतिहरू रोकियो",
   "toast.permissions.autoaccept.off.description": "अनुमति अनुरोधहरू अनुमोदन आवश्यक हुनेछ",
   "toast.model.none.title": "कुनै मोडेल चयन गरिएको छैन",

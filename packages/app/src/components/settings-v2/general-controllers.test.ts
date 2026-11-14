@@ -6,23 +6,29 @@ import {
   createSoundPreviewController,
 } from "./general-controller-behavior"
 
-function createFakePermission() {
+function createFakePermission(initialGlobal = false) {
   const [directories, setDirectories] = createSignal(new Set<string>())
   const [sessions, setSessions] = createSignal(new Set<string>())
+  const [global, setGlobal] = createSignal(initialGlobal)
   const calls: string[] = []
   const key = (sessionID: string, directory: string) => `${directory}\u0000${sessionID}`
 
   return {
     directories,
     sessions,
+    global,
     calls,
     api: {
       isAutoAccepting(sessionID: string, directory?: string) {
+        if (global()) return true
         if (directory && sessions().has(key(sessionID, directory))) return true
         return !!directory && directories().has(directory)
       },
       isAutoAcceptingDirectory(directory: string) {
-        return directories().has(directory)
+        return global() || directories().has(directory)
+      },
+      isAutoAcceptingGlobal() {
+        return global()
       },
       enableAutoAccept(sessionID: string, directory: string) {
         calls.push(`enable:${sessionID}:${directory}`)
@@ -36,6 +42,16 @@ function createFakePermission() {
           next.delete(key(sessionID, directory))
           return next
         })
+      },
+      enableAutoAcceptGlobal() {
+        calls.push("enable-global")
+        setGlobal(true)
+      },
+      disableAutoAcceptGlobal() {
+        calls.push("disable-global")
+        setGlobal(false)
+        setSessions(new Set<string>())
+        setDirectories(new Set<string>())
       },
       toggleAutoAcceptDirectory(directory: string) {
         calls.push(`toggle-directory:${directory}`)
@@ -94,12 +110,16 @@ describe("permission scope state", () => {
       permission: {
         isAutoAccepting: () => false,
         isAutoAcceptingDirectory: (directory) => directory === "/on",
+        isAutoAcceptingGlobal: () => false,
         enableAutoAccept: () => undefined,
         disableAutoAccept: () => undefined,
+        enableAutoAcceptGlobal: () => undefined,
+        disableAutoAcceptGlobal: () => undefined,
         toggleAutoAcceptDirectory: (directory) => calls.push(directory),
       },
     })
 
+    expect(state.scope()).toBe("directory")
     expect(state.accepting()).toBe(false)
     state.set(true)
     expect(calls).toEqual(["/repo"])
@@ -113,33 +133,83 @@ describe("permission scope state", () => {
       permission: {
         isAutoAccepting: () => true,
         isAutoAcceptingDirectory: () => false,
+        isAutoAcceptingGlobal: () => false,
         enableAutoAccept: (sessionID, directory) => calls.push(`enable:${sessionID}:${directory}`),
         disableAutoAccept: (sessionID, directory) => calls.push(`disable:${sessionID}:${directory}`),
+        enableAutoAcceptGlobal: () => calls.push("enable-global"),
+        disableAutoAcceptGlobal: () => calls.push("disable-global"),
         toggleAutoAcceptDirectory: (directory) => calls.push(`toggle-directory:${directory}`),
       },
     })
 
+    expect(state.scope()).toBe("session")
     expect(state.accepting()).toBe(true)
     state.set(true)
     state.set(false)
     expect(calls).toEqual(["enable:ses_1:/repo", "disable:ses_1:/repo"])
   })
 
-  test("stays disabled without a directory", () => {
+  test("uses global auto-accept without a directory", () => {
+    const calls: string[] = []
+    let global = false
     const state = createPermissionScopeState({
       sessionID: () => "ses_1",
       directory: () => undefined,
       permission: {
-        isAutoAccepting: () => true,
-        isAutoAcceptingDirectory: () => true,
+        isAutoAccepting: () => global,
+        isAutoAcceptingDirectory: () => global,
+        isAutoAcceptingGlobal: () => global,
         enableAutoAccept: () => undefined,
         disableAutoAccept: () => undefined,
+        enableAutoAcceptGlobal: () => {
+          global = true
+          calls.push("enable-global")
+        },
+        disableAutoAcceptGlobal: () => {
+          global = false
+          calls.push("disable-global")
+        },
         toggleAutoAcceptDirectory: () => undefined,
       },
     })
 
-    expect(state.enabled()).toBe(false)
+    expect(state.scope()).toBe("global")
+    expect(state.enabled()).toBe(true)
     expect(state.accepting()).toBe(false)
+    state.set(true)
+    expect(calls).toEqual(["enable-global"])
+    state.set(false)
+    expect(calls).toEqual(["enable-global", "disable-global"])
+  })
+
+  test("global state wins with a directory and can be disabled", () => {
+    const calls: string[] = []
+    let global = true
+    const state = createPermissionScopeState({
+      sessionID: () => undefined,
+      directory: () => "/repo",
+      permission: {
+        isAutoAccepting: () => global,
+        isAutoAcceptingDirectory: () => global,
+        isAutoAcceptingGlobal: () => global,
+        enableAutoAccept: () => undefined,
+        disableAutoAccept: () => undefined,
+        enableAutoAcceptGlobal: () => {
+          global = true
+          calls.push("enable-global")
+        },
+        disableAutoAcceptGlobal: () => {
+          global = false
+          calls.push("disable-global")
+        },
+        toggleAutoAcceptDirectory: () => calls.push("toggle-directory"),
+      },
+    })
+
+    expect(state.enabled()).toBe(true)
+    expect(state.accepting()).toBe(true)
+    state.set(false)
+    expect(calls).toEqual(["disable-global"])
   })
 })
 
@@ -153,6 +223,7 @@ describe("permission scope controller", () => {
         () => "/route",
       )
 
+      expect(scope.scope()).toBe("session")
       expect(scope.enabled()).toBe(true)
       scope.set(true)
       expect(permission.calls).toEqual(["enable:ses_1:/route"])
@@ -169,6 +240,7 @@ describe("permission scope controller", () => {
         () => "/route",
       )
 
+      expect(scope.scope()).toBe("directory")
       expect(scope.enabled()).toBe(true)
       scope.set(true)
       expect(permission.calls).toEqual(["toggle-directory:/route"])
@@ -193,15 +265,60 @@ describe("permission scope controller", () => {
     })
   })
 
-  test("stays disabled when neither the route nor lineage has a directory", () => {
+  test("falls back to global auto-accept when neither the route nor lineage has a directory", () => {
     permission = createFakePermission()
     setLineage({})
     createRoot((dispose) => {
-      const scope = createPermissionScopeController(() => "ses_1")
+      const scope = createPermissionScopeController(
+        () => undefined,
+        () => undefined,
+      )
 
-      expect(scope.enabled()).toBe(false)
+      expect(scope.scope()).toBe("global")
+      expect(scope.enabled()).toBe(true)
+      expect(scope.accepting()).toBe(false)
       scope.set(true)
-      expect(permission.calls).toEqual([])
+      expect(permission.calls).toEqual(["enable-global"])
+      expect(permission.global()).toBe(true)
+      scope.set(false)
+      expect(permission.calls).toEqual(["enable-global", "disable-global"])
+      expect(permission.global()).toBe(false)
+      dispose()
+    })
+  })
+
+  test("shows global auto-accept with a directory and disables it", () => {
+    permission = createFakePermission(true)
+    setLineage({ ses_1: { session: { directory: "/lineage" } } })
+    createRoot((dispose) => {
+      const scope = createPermissionScopeController(
+        () => "ses_1",
+        () => "/route",
+      )
+
+      expect(scope.scope()).toBe("session")
+      expect(scope.enabled()).toBe(true)
+      expect(scope.accepting()).toBe(true)
+      scope.set(false)
+      expect(permission.calls).toEqual(["disable-global"])
+      dispose()
+    })
+  })
+
+  test("turning global off clears session auto-accept", () => {
+    permission = createFakePermission(true)
+    setLineage({ ses_1: { session: { directory: "/route" } } })
+    permission.api.enableAutoAccept("ses_1", "/route")
+    createRoot((dispose) => {
+      const scope = createPermissionScopeController(
+        () => "ses_1",
+        () => "/route",
+      )
+
+      expect(scope.accepting()).toBe(true)
+      scope.set(false)
+      expect(permission.calls).toEqual(["enable:ses_1:/route", "disable-global"])
+      expect(permission.api.isAutoAccepting("ses_1", "/route")).toBe(false)
       dispose()
     })
   })

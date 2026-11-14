@@ -606,6 +606,7 @@ export const dict = {
   "toast.workspace.disabled.description": "Yan paneldə yalnız əsas worktree göstərilir",
   "toast.permissions.autoaccept.on.title": "İcazələr avtomatik qəbul edilir",
   "toast.permissions.autoaccept.on.description": "İcazə sorğuları avtomatik təsdiqlənəcək",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "İcazələrin avtomatik qəbulu dayandırıldı",
   "toast.permissions.autoaccept.off.description": "İcazə sorğuları təsdiq tələb edəcək",
   "toast.model.none.title": "Model seçilməyib",

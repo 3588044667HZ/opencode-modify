@@ -599,6 +599,7 @@ export const dict = {
   "toast.workspace.disabled.description": "მხოლოდ ძირითადი სამუშაო ხე ნაჩვენებია გვერდითა ზოლში",
   "toast.permissions.autoaccept.on.title": "ნებართვების ავტომატური მიღება",
   "toast.permissions.autoaccept.on.description": "ნებართვის მოთხოვნები ავტომატურად დამტკიცდება",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "შეწყდა ნებართვების ავტომატური მიღება",
   "toast.permissions.autoaccept.off.description": "ნებართვის მოთხოვნა საჭიროებს დამტკიცებას",
   "toast.model.none.title": "მოდელი არ არის არჩეული",

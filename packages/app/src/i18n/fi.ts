@@ -495,6 +495,7 @@ export const dict = {
   "toast.workspace.disabled.description": "Vain päätyöpuu näkyy sivupalkissa",
   "toast.permissions.autoaccept.on.title": "Käyttöoikeudet hyväksytään automaattisesti",
   "toast.permissions.autoaccept.on.description": "Lupapyynnöt hyväksytään automaattisesti",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "Lupien automaattinen hyväksyminen lopetettu",
   "toast.permissions.autoaccept.off.description": "Lupapyynnöt vaativat hyväksynnän",
   "toast.model.none.title": "Mallia ei ole valittu",

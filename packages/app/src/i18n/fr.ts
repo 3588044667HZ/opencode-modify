@@ -606,6 +606,7 @@ export const dict = {
   "toast.workspace.disabled.description": "Seul l'arbre de travail principal est affiché dans la barre latérale",
   "toast.permissions.autoaccept.on.title": "Acceptation automatique des permissions",
   "toast.permissions.autoaccept.on.description": "Les demandes de permission seront approuvées automatiquement",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "Acceptation automatique des permissions désactivée",
   "toast.permissions.autoaccept.off.description": "Les demandes de permission nécessiteront une approbation",
   "toast.model.none.title": "Aucun modèle sélectionné",

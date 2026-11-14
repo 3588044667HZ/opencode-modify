@@ -1,7 +1,14 @@
 import { describe, expect, test } from "bun:test"
 import type { PermissionRequest, Session } from "@opencode-ai/sdk/v2/client"
 import { base64Encode } from "@opencode-ai/core/util/encode"
-import { autoRespondsPermission, isDirectoryAutoAccepting, sessionAutoAccept } from "./permission-auto-respond"
+import {
+  applyGlobalAutoAccept,
+  autoRespondsPermission,
+  GLOBAL_ACCEPT_KEY,
+  isDirectoryAutoAccepting,
+  isGlobalAutoAccepting,
+  sessionAutoAccept,
+} from "./permission-auto-respond"
 
 const session = (input: { id: string; parentID?: string }) =>
   ({
@@ -103,6 +110,47 @@ describe("autoRespondsPermission", () => {
     }
 
     expect(autoRespondsPermission(autoAccept, sessions, permission("child"), directory)).toBe(true)
+  })
+})
+
+describe("global auto-accept", () => {
+  test("takes precedence over session and directory overrides", () => {
+    const directory = "/tmp/project"
+    const sessions = [session({ id: "root" })]
+    const autoAccept = {
+      [GLOBAL_ACCEPT_KEY]: true,
+      [`${base64Encode(directory)}/root`]: false,
+      [`${base64Encode(directory)}/*`]: false,
+    }
+
+    expect(isGlobalAutoAccepting(autoAccept)).toBe(true)
+    expect(autoRespondsPermission(autoAccept, sessions, permission("root"), directory)).toBe(true)
+    expect(isDirectoryAutoAccepting(autoAccept, directory)).toBe(true)
+  })
+
+  test("applies without a known session or directory", () => {
+    expect(autoRespondsPermission({ [GLOBAL_ACCEPT_KEY]: true }, [], permission("ses_unknown"))).toBe(true)
+    expect(isGlobalAutoAccepting({ [GLOBAL_ACCEPT_KEY]: true })).toBe(true)
+    expect(isGlobalAutoAccepting({ [GLOBAL_ACCEPT_KEY]: false })).toBe(false)
+    expect(isGlobalAutoAccepting({})).toBe(false)
+  })
+
+  test("disabling global clears session and directory keys", () => {
+    const directory = "/tmp/project"
+    const sessions = [session({ id: "root" }), session({ id: "child", parentID: "root" })]
+    const enabled = applyGlobalAutoAccept(
+      {
+        root: true,
+        [`${base64Encode(directory)}/*`]: true,
+        other: true,
+      },
+      true,
+    )
+
+    expect(autoRespondsPermission(enabled, sessions, permission("child"), directory)).toBe(true)
+    const disabled = applyGlobalAutoAccept(enabled, false)
+    expect(disabled).toEqual({})
+    expect(autoRespondsPermission(disabled, sessions, permission("child"), directory)).toBe(false)
   })
 })
 

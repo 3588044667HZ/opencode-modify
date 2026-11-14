@@ -596,6 +596,7 @@ export const dict = {
   "toast.workspace.disabled.description": "Külgribal kuvatakse ainult peamine tööpuud",
   "toast.permissions.autoaccept.on.title": "Lubade automaatne aktsepteerimine",
   "toast.permissions.autoaccept.on.description": "Loataotlused kinnitatakse automaatselt",
+  "settings.general.row.autoAccept.global.description": "No project selected: applies to all projects.",
   "toast.permissions.autoaccept.off.title": "Lubade automaatne vastuvõtmine on peatatud",
   "toast.permissions.autoaccept.off.description": "Loataotlused nõuavad kinnitust",
   "toast.model.none.title": "Ühtegi mudelit pole valitud",
