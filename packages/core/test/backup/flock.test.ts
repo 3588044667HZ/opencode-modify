@@ -33,6 +33,36 @@ describe("backup flock", () => {
     await second.release()
   })
 
+  test("held checks a live lock without creating lock directories", async () => {
+    await using tmp = await tmpdir()
+    const missing = path.join(tmp.path, "missing-locks")
+    expect(await Flock.held("backup:run", { dir: missing })).toBe(false)
+    await expect(fs.stat(missing)).rejects.toThrow()
+
+    const dir = path.join(tmp.path, "locks")
+    const lease = await Flock.acquire("backup:run", { dir, timeoutMs: 1, baseDelayMs: 1 })
+    expect(await Flock.held("backup:run", { dir })).toBe(true)
+    await lease.release()
+    expect(await Flock.held("backup:run", { dir })).toBe(false)
+  })
+
+  test("held treats dead owners and stale heartbeats as not held", async () => {
+    await using tmp = await tmpdir()
+    const dir = path.join(tmp.path, "locks")
+    const lease = await Flock.acquire("backup:run", { dir, staleMs: 60_000, timeoutMs: 1, baseDelayMs: 1 })
+    const lockDir = path.join(dir, Hash.fast("backup:run") + ".lock")
+    const metaPath = path.join(lockDir, "meta.json")
+    const meta = JSON.parse(await fs.readFile(metaPath, "utf8"))
+    meta.pid = 2_147_483_647
+    await fs.writeFile(metaPath, JSON.stringify(meta))
+    expect(await Flock.held("backup:run", { dir, staleMs: 60_000 })).toBe(false)
+
+    await fs.writeFile(metaPath, JSON.stringify({ ...meta, pid: process.pid }))
+    const old = new Date(Date.now() - 60_000)
+    await fs.utimes(path.join(lockDir, "heartbeat"), old, old)
+    expect(await Flock.held("backup:run", { dir, staleMs: 50 })).toBe(false)
+    await lease.release().catch(() => undefined)
+  })
   test("withLock serializes callbacks on the same key", async () => {
     await using tmp = await tmpdir()
     const dir = path.join(tmp.path, "locks")

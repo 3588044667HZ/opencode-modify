@@ -83,7 +83,6 @@ export interface Interface {
 export class Service extends Context.Service<Service, Interface>()("@opencode/v2/Backup") {}
 
 const STAGING_PREFIX = "staging-"
-const STAGING_MAX_AGE = 24 * 60 * 60 * 1000
 // VACUUM runs in a worker so the main event loop and Flock heartbeat keep ticking.
 // A wider stale window absorbs other short synchronous stalls, and Flock
 // reclaims locks immediately when the recorded local owner PID is gone.
@@ -106,12 +105,18 @@ const layer = Layer.effect(
     })
 
     const status = Effect.fn("Backup.status")(function* () {
-      return BackupStatus.normalize(
+      const current = BackupStatus.normalize(
         yield* Effect.tryPromise({
           try: () => BackupStatus.read(roots.state),
           catch: (cause) => toBackupError("status", cause),
         }).pipe(Effect.catch(() => Effect.succeed(BackupStatus.empty))),
       )
+      if (!current.running) return current
+      const live = yield* Effect.tryPromise({
+        try: () => Flock.held("backup:run", { staleMs: BACKUP_LOCK_STALE_MS }),
+        catch: (cause) => toBackupError("lock", cause),
+      }).pipe(Effect.catch(() => Effect.succeed(false)))
+      return live ? current : { ...current, running: false }
     })
 
     const ready = Effect.fn("Backup.ready")(function* () {
@@ -727,15 +732,10 @@ async function cleanupStaging(cacheDirectory: string) {
     if (isCode(error, "ENOENT") || isCode(error, "ENOTDIR")) return []
     throw error
   })
-  const cutoff = Date.now() - STAGING_MAX_AGE
+  // Runs while holding the backup lock, so every staging-* directory is a leftover from an interrupted run.
   for (const entry of entries) {
     if (!entry.isDirectory() || !entry.name.startsWith(STAGING_PREFIX)) continue
-    const target = path.join(root, entry.name)
-    const info = await stat(target).catch((error: unknown) => {
-      if (isCode(error, "ENOENT") || isCode(error, "ENOTDIR")) return undefined
-      throw error
-    })
-    if (info && info.mtimeMs < cutoff) await rm(target, { recursive: true, force: true })
+    await rm(path.join(root, entry.name), { recursive: true, force: true })
   }
 }
 

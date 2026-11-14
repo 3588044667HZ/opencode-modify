@@ -332,6 +332,19 @@ export namespace Flock {
     }
   }
 
+  export async function held(key: string, input: Options = {}): Promise<boolean> {
+    const dir = input.dir ?? root()
+    const lockDir = path.join(dir, Hash.fast(key) + ".lock")
+    const info = await stats(lockDir)
+    if (!info?.isDirectory()) return false
+    return !(await stale(
+      lockDir,
+      path.join(lockDir, "heartbeat"),
+      path.join(lockDir, "meta.json"),
+      input.staleMs ?? defaultOpts.staleMs,
+    ))
+  }
+
   export async function acquire(key: string, input: Options = {}): Promise<Lease> {
     input.signal?.throwIfAborted()
     const cfg: Opts = {

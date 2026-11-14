@@ -219,4 +219,57 @@ describe("backup engine", () => {
       await tmp[Symbol.asyncDispose]()
     }
   })
+  test("status clears running when the backup lock is gone and keeps it while held", async () => {
+    const { tmp, roots } = await fixture()
+    const previous = Global.Path.state
+    try {
+      Flock.setGlobal({ state: roots.state })
+      await BackupStatus.write(roots.state, { running: true, lastRunAt: new Date().toISOString() })
+
+      const missing = await useBackup(roots, (backup) => backup.status())
+      expect(missing.running).toBe(false)
+
+      const lease = await Flock.acquire("backup:run", { timeoutMs: 1, baseDelayMs: 1 })
+      const live = await useBackup(roots, (backup) => backup.status())
+      expect(live.running).toBe(true)
+      await lease.release()
+
+      const released = await useBackup(roots, (backup) => backup.status())
+      expect(released.running).toBe(false)
+    } finally {
+      Flock.setGlobal({ state: previous })
+      await tmp[Symbol.asyncDispose]()
+    }
+  })
+
+  test("removes leftover staging directories on the next run", async () => {
+    const { tmp, roots, databasePath } = await fixture()
+    const server = await startFakeServer({ supportHead: true })
+    const previous = process.env.OPENCODE_BACKUP_TOKEN
+    process.env.OPENCODE_BACKUP_TOKEN = ""
+    try {
+      await write(
+        path.join(roots.config, "opencode.jsonc"),
+        JSON.stringify({ backup: { enabled: true, server: server.url, username: "alice" } }),
+      )
+      await BackupSettings.writeAuth(roots.state, { server: server.url, username: "alice", method: "token", secret: "test-token" })
+      const leftover = path.join(roots.cache, "backup", "staging-leftover")
+      await write(path.join(leftover, "data", "opencode.db"), "stale snapshot")
+      const now = new Date()
+      await fs.utimes(leftover, now, now)
+
+      const result = await runBackup(roots, {
+        databasePath,
+        quickCheck: true,
+        lockDir: path.join(roots.state, "locks"),
+      })
+      expect(result.skipped).toBe(false)
+      expect(await fs.readdir(path.join(roots.cache, "backup"))).toEqual([])
+    } finally {
+      if (previous === undefined) delete process.env.OPENCODE_BACKUP_TOKEN
+      else process.env.OPENCODE_BACKUP_TOKEN = previous
+      await server.stop()
+      await tmp[Symbol.asyncDispose]()
+    }
+  })
 })
