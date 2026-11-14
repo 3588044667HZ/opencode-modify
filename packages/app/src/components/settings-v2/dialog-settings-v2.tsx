@@ -14,6 +14,7 @@ import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { useLayout } from "@/context/layout"
 import { useTabs } from "@/context/tabs"
 import { useServerSync } from "@/context/server-sync"
+import { useServer } from "@/context/server"
 
 export const DialogSettings: Component<{
   sessionID?: string
@@ -25,16 +26,29 @@ export const DialogSettings: Component<{
   const layout = useLayout()
   const tabs = useTabs()
   const serverSync = useServerSync()
+  const server = useServer()
   const [tab, setTab] = createSignal(props.defaultValue ?? "general")
+  const sessionID = createMemo(() => {
+    const route = layout.route()
+    if (route.type === "session") return route.sessionId
+    return props.sessionID
+  })
   const directory = createMemo(() => {
     const route = layout.route()
+    if (route.type === "home") {
+      const selection = layout.home.selection()
+      if (selection.server !== server.key) return undefined
+      return selection.directory
+    }
     if (route.type === "dir-new-sesssion") return route.dir
     if (route.type === "draft") {
       const draft = tabs.store.find((item) => item.type === "draft" && item.draftID === route.draftID)
       return draft?.type === "draft" ? draft.directory : undefined
     }
-    if (route.type === "session") return serverSync().session.get(route.sessionId)?.directory
-    return undefined
+    if (route.type !== "session") return undefined
+    const id = sessionID()
+    if (!id) return undefined
+    return serverSync().session.get(id)?.directory
   })
 
   const showProviders = () => {
@@ -94,7 +108,7 @@ export const DialogSettings: Component<{
           </div>
         </TabsV2.List>
         <TabsV2.Content value="general" class="settings-v2-panel">
-          <SettingsGeneralV2 sessionID={props.sessionID} />
+          <SettingsGeneralV2 sessionID={sessionID()} directory={directory()} />
         </TabsV2.Content>
         <TabsV2.Content value="shortcuts" class="settings-v2-panel">
           <SettingsKeybinds v2 />

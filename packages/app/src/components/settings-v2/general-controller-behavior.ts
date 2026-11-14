@@ -1,4 +1,41 @@
-import { onCleanup } from "solid-js"
+import { createMemo, onCleanup, type Accessor } from "solid-js"
+
+export type PermissionScopeApi = {
+  isAutoAccepting: (sessionID: string, directory?: string) => boolean
+  isAutoAcceptingDirectory: (directory: string) => boolean
+  enableAutoAccept: (sessionID: string, directory: string) => void
+  disableAutoAccept: (sessionID: string, directory?: string) => void
+  toggleAutoAcceptDirectory: (directory: string) => void
+}
+
+export function createPermissionScopeState(input: {
+  sessionID: Accessor<string | undefined>
+  directory: Accessor<string | undefined>
+  permission: PermissionScopeApi
+}) {
+  return {
+    accepting: createMemo(() => {
+      const directory = input.directory()
+      if (!directory) return false
+      const sessionID = input.sessionID()
+      if (!sessionID) return input.permission.isAutoAcceptingDirectory(directory)
+      return input.permission.isAutoAccepting(sessionID, directory)
+    }),
+    enabled: createMemo(() => !!input.directory()),
+    set: (checked: boolean) => {
+      const directory = input.directory()
+      if (!directory) return
+      const sessionID = input.sessionID()
+      if (sessionID) {
+        if (checked) input.permission.enableAutoAccept(sessionID, directory)
+        else input.permission.disableAutoAccept(sessionID, directory)
+        return
+      }
+      if (input.permission.isAutoAcceptingDirectory(directory) === checked) return
+      input.permission.toggleAutoAcceptDirectory(directory)
+    },
+  }
+}
 
 export type ShellOption = {
   path: string
