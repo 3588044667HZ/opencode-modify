@@ -68,7 +68,39 @@ const GlobalUpgradeResult = Schema.Union([
   }),
 ])
 
+export const AuthLoginInput = Schema.Struct({
+  username: Schema.optional(Schema.String),
+  password: Schema.String,
+  deviceName: Schema.optional(Schema.String),
+})
+
+export const AuthRefreshInput = Schema.Struct({
+  refreshToken: Schema.String,
+})
+
+export const AuthSession = Schema.Struct({
+  id: Schema.String,
+  username: Schema.String,
+  deviceName: Schema.String,
+  createdAt: Schema.String,
+  accessExpiresAt: Schema.String,
+  refreshExpiresAt: Schema.String,
+}).annotate({ identifier: "AuthSession" })
+
+export const AuthTokens = Schema.Struct({
+  tokenType: Schema.Literal("Bearer"),
+  accessToken: Schema.String,
+  refreshToken: Schema.String,
+  expiresIn: Schema.Number,
+  refreshExpiresIn: Schema.Number,
+  session: AuthSession,
+}).annotate({ identifier: "AuthTokens" })
+
 export const GlobalPaths = {
+  authLogin: "/global/auth/login",
+  authRefresh: "/global/auth/refresh",
+  authLogout: "/global/auth/logout",
+  authSession: "/global/auth/session",
   health: "/global/health",
   event: "/global/event",
   config: "/global/config",
@@ -79,6 +111,48 @@ export const GlobalPaths = {
 export const GlobalApi = HttpApi.make("global").add(
   HttpApiGroup.make("global")
     .add(
+      HttpApiEndpoint.post("authLogin", GlobalPaths.authLogin, {
+        payload: AuthLoginInput,
+        success: described(AuthTokens, "Bearer tokens issued"),
+        error: HttpApiError.Unauthorized,
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.auth.login",
+          summary: "Log in to the server",
+          description: "Exchange the configured server username and password for a short-lived access token and rotating refresh token.",
+        }),
+      ),
+      HttpApiEndpoint.post("authRefresh", GlobalPaths.authRefresh, {
+        payload: AuthRefreshInput,
+        success: described(AuthTokens, "Bearer tokens rotated"),
+        error: HttpApiError.Unauthorized,
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.auth.refresh",
+          summary: "Refresh server tokens",
+          description: "Rotate an access token and refresh token using a valid refresh token.",
+        }),
+      ),
+      HttpApiEndpoint.post("authLogout", GlobalPaths.authLogout, {
+        success: described(Schema.Boolean, "Token revoked"),
+        error: HttpApiError.Unauthorized,
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.auth.logout",
+          summary: "Log out of the server",
+          description: "Revoke the current access token or the supplied refresh token.",
+        }),
+      ),
+      HttpApiEndpoint.get("authSession", GlobalPaths.authSession, {
+        success: described(AuthSession, "Current token session"),
+        error: HttpApiError.Unauthorized,
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.auth.session",
+          summary: "Get token session",
+          description: "Return metadata for the current bearer token.",
+        }),
+      ),
       HttpApiEndpoint.get("health", GlobalPaths.health, {
         success: described(GlobalHealth, "Health information"),
       }).annotateMerge(

@@ -1,4 +1,5 @@
 import { ServerAuth } from "@/server/auth"
+import { ServerAuth as ServerTokenAuth } from "@opencode-ai/server/auth"
 import { Effect, Encoding, Layer, Redacted } from "effect"
 import { HttpEffect, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiError, HttpApiMiddleware } from "effect/unstable/httpapi"
@@ -10,7 +11,6 @@ export {
 } from "@opencode-ai/server/middleware/authorization"
 
 const AUTH_TOKEN_QUERY = "auth_token"
-const UNAUTHORIZED = 401
 const WWW_AUTHENTICATE = 'Basic realm="Secure Area"'
 
 // Avoid HttpApiSecurity alternatives here: Effect security middleware wraps the
@@ -35,23 +35,6 @@ function emptyCredential() {
     username: "",
     password: Redacted.make(""),
   }
-}
-
-function validateCredential<A, E, R>(
-  effect: Effect.Effect<A, E, R>,
-  credential: ServerAuth.DecodedCredentials,
-  config: ServerAuth.Info,
-) {
-  return Effect.gen(function* () {
-    if (!ServerAuth.required(config)) return yield* effect
-    if (!ServerAuth.authorized(credential, config)) {
-      yield* HttpEffect.appendPreResponseHandler((_request, response) =>
-        Effect.succeed(HttpServerResponse.setHeader(response, "www-authenticate", WWW_AUTHENTICATE)),
-      )
-      return yield* new HttpApiError.Unauthorized({})
-    }
-    return yield* effect
-  })
 }
 
 function decodeCredential(input: string) {
@@ -82,6 +65,51 @@ function credentialFromURL(url: URL, request: HttpServerRequest.HttpServerReques
   return Effect.succeed(emptyCredential())
 }
 
+function accessTokenFromRequest(request: HttpServerRequest.HttpServerRequest) {
+  return ServerTokenAuth.accessTokenFromRequest({
+    authorization: request.headers.authorization,
+    url: new URL(request.url, "http://localhost"),
+  })
+}
+
+function unauthorized() {
+  return Effect.gen(function* () {
+    yield* HttpEffect.appendPreResponseHandler((_request, response) =>
+      Effect.succeed(HttpServerResponse.setHeader(response, "www-authenticate", WWW_AUTHENTICATE)),
+    )
+    return yield* new HttpApiError.Unauthorized({})
+  })
+}
+
+function validateToken<A, E, R>(effect: Effect.Effect<A, E, R>, token: string) {
+  return Effect.gen(function* () {
+    if (yield* Effect.promise(() => ServerTokenAuth.tokens.verifyAccess(token))) return yield* effect
+    return yield* unauthorized()
+  })
+}
+
+function validateRawToken<A, E, R>(effect: Effect.Effect<A, E, R>, token: string) {
+  return Effect.gen(function* () {
+    if (yield* Effect.promise(() => ServerTokenAuth.tokens.verifyAccess(token))) return yield* effect
+    return HttpServerResponse.empty({
+      status: 401,
+      headers: { "www-authenticate": WWW_AUTHENTICATE },
+    })
+  })
+}
+
+function validateCredential<A, E, R>(
+  effect: Effect.Effect<A, E, R>,
+  credential: ServerAuth.DecodedCredentials,
+  config: ServerAuth.Info,
+) {
+  return Effect.gen(function* () {
+    if (!ServerAuth.required(config)) return yield* effect
+    if (!ServerAuth.authorized(credential, config)) return yield* unauthorized()
+    return yield* effect
+  })
+}
+
 function validateRawCredential<A, E, R>(
   effect: Effect.Effect<A, E, R>,
   credential: ServerAuth.DecodedCredentials,
@@ -91,7 +119,7 @@ function validateRawCredential<A, E, R>(
   if (!ServerAuth.authorized(credential, config))
     return Effect.succeed(
       HttpServerResponse.empty({
-        status: UNAUTHORIZED,
+        status: 401,
         headers: { "www-authenticate": WWW_AUTHENTICATE },
       }),
     )
@@ -107,7 +135,10 @@ export const authorizationRouterMiddleware = HttpRouter.middleware()(
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest
         const url = new URL(request.url, "http://localhost")
+        if (ServerTokenAuth.isPublicAuthPath(request.method, url.pathname)) return yield* effect
         if (isPublicUIPath(request.method, url.pathname)) return yield* effect
+        const accessToken = accessTokenFromRequest(request)
+        if (accessToken) return yield* validateRawToken(effect, accessToken)
         return yield* credentialFromURL(url, request).pipe(
           Effect.flatMap((credential) => validateRawCredential(effect, credential, config)),
         )
@@ -123,6 +154,10 @@ export const authorizationLayer = Layer.effect(
     return Authorization.of((effect) =>
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest
+        const url = new URL(request.url, "http://localhost")
+        if (ServerTokenAuth.isPublicAuthPath(request.method, url.pathname)) return yield* effect
+        const accessToken = accessTokenFromRequest(request)
+        if (accessToken) return yield* validateToken(effect, accessToken)
         return yield* credentialFromRequest(request).pipe(
           Effect.flatMap((credential) => validateCredential(effect, credential, config)),
         )
@@ -141,6 +176,8 @@ export const ptyConnectAuthorizationLayer = Layer.effect(
         const request = yield* HttpServerRequest.HttpServerRequest
         const url = new URL(request.url, "http://localhost")
         if (hasPtyConnectTicketURL(url)) return yield* effect
+        const accessToken = accessTokenFromRequest(request)
+        if (accessToken) return yield* validateToken(effect, accessToken)
         return yield* credentialFromURL(url, request).pipe(
           Effect.flatMap((credential) => validateCredential(effect, credential, config)),
         )

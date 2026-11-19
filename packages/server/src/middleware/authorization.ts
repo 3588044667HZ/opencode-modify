@@ -35,6 +35,41 @@ function credentialFromRequest(request: HttpServerRequest.HttpServerRequest) {
   return Effect.succeed(emptyCredential())
 }
 
+function accessTokenFromRequest(request: HttpServerRequest.HttpServerRequest) {
+  return ServerAuth.accessTokenFromRequest({
+    authorization: request.headers.authorization,
+    url: new URL(request.url, "http://localhost"),
+  })
+}
+
+function unauthorized() {
+  return Effect.gen(function* () {
+    yield* HttpEffect.appendPreResponseHandler((_request, response) =>
+      Effect.succeed(HttpServerResponse.setHeader(response, "www-authenticate", WWW_AUTHENTICATE)),
+    )
+    return yield* new UnauthorizedError({ message: "Authentication required" })
+  })
+}
+
+function validateToken<A, E, R>(effect: Effect.Effect<A, E, R>, token: string) {
+  return Effect.gen(function* () {
+    if (yield* Effect.promise(() => ServerAuth.tokens.verifyAccess(token))) return yield* effect
+    return yield* unauthorized()
+  })
+}
+
+function validateCredential<A, E, R>(
+  effect: Effect.Effect<A, E, R>,
+  credential: ServerAuth.DecodedCredentials,
+  config: ServerAuth.Info,
+) {
+  return Effect.gen(function* () {
+    if (!ServerAuth.required(config)) return yield* effect
+    if (!ServerAuth.authorized(credential, config)) return yield* unauthorized()
+    return yield* effect
+  })
+}
+
 export const authorizationLayer = Layer.effect(
   Authorization,
   Effect.gen(function* () {
@@ -43,15 +78,15 @@ export const authorizationLayer = Layer.effect(
     return Authorization.of((effect) =>
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest
+        const url = new URL(request.url, "http://localhost")
+        if (ServerAuth.isPublicAuthPath(request.method, url.pathname)) return yield* effect
         // Browsers cannot set headers on WebSocket upgrades, so a ticketed PTY connect skips
         // credential checks here; the connect handler consumes and validates the ticket.
-        if (hasPtyConnectTicketURL(new URL(request.url, "http://localhost"))) return yield* effect
+        if (hasPtyConnectTicketURL(url)) return yield* effect
+        const accessToken = accessTokenFromRequest(request)
+        if (accessToken) return yield* validateToken(effect, accessToken)
         const credential = yield* credentialFromRequest(request)
-        if (ServerAuth.authorized(credential, config)) return yield* effect
-        yield* HttpEffect.appendPreResponseHandler((_request, response) =>
-          Effect.succeed(HttpServerResponse.setHeader(response, "www-authenticate", WWW_AUTHENTICATE)),
-        )
-        return yield* new UnauthorizedError({ message: "Authentication required" })
+        return yield* validateCredential(effect, credential, config)
       }),
     )
   }),

@@ -11,6 +11,10 @@ import {
   serverAuthorizationLayer,
 } from "../../src/server/routes/instance/httpapi/middleware/authorization"
 import { testEffect } from "../lib/effect"
+import { ServerAuth as ServerTokenAuth } from "@opencode-ai/server/auth"
+import { mkdtemp, rm } from "node:fs/promises"
+import os from "node:os"
+import path from "node:path"
 
 const Api = HttpApi.make("test-authorization").add(
   HttpApiGroup.make("test")
@@ -66,8 +70,8 @@ const itKitSecret = testEffect(apiLayer.pipe(Layer.provide(kitSecretLayer)))
 const itV2Secret = testEffect(v2ApiLayer.pipe(Layer.provide(secretLayer)))
 
 const basic = (username: string, password: string) => ServerAuth.header({ username, password }) ?? ""
-
 const token = (username: string, password: string) => Buffer.from(`${username}:${password}`).toString("base64")
+
 
 const getProbe = (headers?: Record<string, string>) =>
   HttpClientRequest.get("/probe").pipe(
@@ -153,11 +157,69 @@ describe("HttpApi authorization middleware", () => {
     }),
   )
 
+  itSecret.live("accepts bearer access tokens and access_token query tokens", () =>
+    Effect.gen(function* () {
+      const dir = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "opencode-auth-http-")))
+      const previous = process.env.OPENCODE_SERVER_AUTH_FILE
+      process.env.OPENCODE_SERVER_AUTH_FILE = path.join(dir, "tokens.json")
+      const pair = yield* Effect.promise(() =>
+        ServerTokenAuth.tokens.issue({ username: "opencode", deviceName: "http-test" }),
+      )
+      yield* Effect.addFinalizer(() =>
+        Effect.promise(async () => {
+          await ServerTokenAuth.tokens.revoke(pair.accessToken)
+          if (previous === undefined) delete process.env.OPENCODE_SERVER_AUTH_FILE
+          else process.env.OPENCODE_SERVER_AUTH_FILE = previous
+          await rm(dir, { recursive: true, force: true })
+        }),
+      )
+
+      const [byHeader, byQuery, invalid] = yield* Effect.all(
+        [
+          getProbe({ authorization: `Bearer ${pair.accessToken}` }),
+          HttpClient.get(`/probe?access_token=${encodeURIComponent(pair.accessToken)}`),
+          getProbe({ authorization: "Bearer invalid" }),
+        ],
+        { concurrency: "unbounded" },
+      )
+
+      expect(byHeader.status).toBe(200)
+      expect(byQuery.status).toBe(200)
+      expect(invalid.status).toBe(401)
+      expect(ServerTokenAuth.isPublicAuthPath("POST", ServerTokenAuth.AUTH_LOGIN_PATH)).toBe(true)
+    }),
+  )
+
   itSecret.live("rejects malformed auth token query credentials", () =>
     Effect.gen(function* () {
       const response = yield* HttpClient.get("/probe?auth_token=not-base64")
 
       expect(response.status).toBe(401)
+    }),
+  )
+
+  itV2Secret.live("accepts bearer access tokens on the server API", () =>
+    Effect.gen(function* () {
+      const dir = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "opencode-auth-v2-")))
+      const previous = process.env.OPENCODE_SERVER_AUTH_FILE
+      process.env.OPENCODE_SERVER_AUTH_FILE = path.join(dir, "tokens.json")
+      const pair = yield* Effect.promise(() =>
+        ServerTokenAuth.tokens.issue({ username: "opencode", deviceName: "v2-http-test" }),
+      )
+      yield* Effect.addFinalizer(() =>
+        Effect.promise(async () => {
+          await ServerTokenAuth.tokens.revoke(pair.accessToken)
+          if (previous === undefined) delete process.env.OPENCODE_SERVER_AUTH_FILE
+          else process.env.OPENCODE_SERVER_AUTH_FILE = previous
+          await rm(dir, { recursive: true, force: true })
+        }),
+      )
+
+      const response = yield* HttpClientRequest.get("/api/probe").pipe(
+        HttpClientRequest.setHeader("authorization", `Bearer ${pair.accessToken}`),
+        HttpClient.execute,
+      )
+      expect(response.status).toBe(200)
     }),
   )
 

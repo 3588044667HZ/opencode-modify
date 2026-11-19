@@ -6,13 +6,45 @@ import { Installation } from "@/installation"
 import { disposeAllInstancesAndEmitGlobalDisposed } from "@/server/global-lifecycle"
 import { InstallationBuild, InstallationVersion } from "@opencode-ai/core/installation/version"
 import { device } from "@opencode-ai/server/device"
-import { Effect, Queue } from "effect"
+import { Effect, Queue, Redacted } from "effect"
+import { HttpServerRequest } from "effect/unstable/http"
 import * as Stream from "effect/Stream"
 import { HttpServerResponse } from "effect/unstable/http"
-import { HttpApiBuilder } from "effect/unstable/httpapi"
+import { ServerAuth as ServerTokenAuth } from "@opencode-ai/server/auth"
+import { ServerAuth } from "@/server/auth"
+import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 import * as Sse from "effect/unstable/encoding/Sse"
 import { RootHttpApi } from "../api"
-import { GlobalUpgradeInput } from "../groups/global"
+import { AuthLoginInput, GlobalUpgradeInput } from "../groups/global"
+
+function toSession(session: ServerTokenAuth.TokenSession) {
+  return {
+    id: session.id,
+    username: session.username,
+    deviceName: session.deviceName,
+    createdAt: new Date(session.createdAt).toISOString(),
+    accessExpiresAt: new Date(session.accessExpiresAt).toISOString(),
+    refreshExpiresAt: new Date(session.refreshExpiresAt).toISOString(),
+  }
+}
+
+function toTokens(pair: ServerTokenAuth.TokenPair) {
+  return {
+    tokenType: "Bearer" as const,
+    accessToken: pair.accessToken,
+    refreshToken: pair.refreshToken,
+    expiresIn: Math.max(0, Math.floor((pair.accessExpiresAt - Date.now()) / 1000)),
+    refreshExpiresIn: Math.max(0, Math.floor((pair.refreshExpiresAt - Date.now()) / 1000)),
+    session: toSession(pair.session),
+  }
+}
+
+function requestToken(request: HttpServerRequest.HttpServerRequest) {
+  return ServerTokenAuth.accessTokenFromRequest({
+    authorization: request.headers.authorization,
+    url: new URL(request.url, "http://localhost"),
+  })
+}
 
 function eventData(data: unknown): Sse.Event {
   return {
@@ -63,6 +95,48 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
     const config = yield* Config.Service
     const installation = yield* Installation.Service
     const bridge = yield* EffectBridge.make()
+
+    const authLogin = Effect.fn("GlobalHttpApi.authLogin")(function* (ctx: { payload: typeof AuthLoginInput.Type }) {
+      const auth = yield* ServerAuth.Config
+      if (!ServerAuth.required(auth)) return yield* new HttpApiError.Unauthorized({})
+      const username = ctx.payload.username ?? auth.username
+      if (
+        !ServerAuth.authorized(
+          { username, password: Redacted.make(ctx.payload.password) },
+          auth,
+        )
+      ) {
+        return yield* new HttpApiError.Unauthorized({})
+      }
+      const pair = yield* Effect.promise(() =>
+        ServerTokenAuth.tokens.issue({ username, deviceName: ctx.payload.deviceName }),
+      )
+      return toTokens(pair)
+    })
+
+    const authRefresh = Effect.fn("GlobalHttpApi.authRefresh")(function* (ctx: { payload: { refreshToken: string } }) {
+      const auth = yield* ServerAuth.Config
+      if (!ServerAuth.required(auth)) return yield* new HttpApiError.Unauthorized({})
+      const pair = yield* Effect.promise(() => ServerTokenAuth.tokens.refresh(ctx.payload.refreshToken))
+      if (!pair) return yield* new HttpApiError.Unauthorized({})
+      return toTokens(pair)
+    })
+
+    const authLogout = Effect.fn("GlobalHttpApi.authLogout")(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest
+      const token = requestToken(request)
+      if (!token) return false
+      return yield* Effect.promise(() => ServerTokenAuth.tokens.revoke(token))
+    })
+
+    const authSession = Effect.fn("GlobalHttpApi.authSession")(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest
+      const token = requestToken(request)
+      if (!token) return yield* new HttpApiError.Unauthorized({})
+      const session = yield* Effect.promise(() => ServerTokenAuth.tokens.session(token))
+      if (!session) return yield* new HttpApiError.Unauthorized({})
+      return toSession(session)
+    })
 
     const health = Effect.fn("GlobalHttpApi.health")(function* () {
       return { healthy: true as const, version: InstallationVersion, build: InstallationBuild, device: device() }
@@ -117,6 +191,10 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
     })
 
     return handlers
+      .handle("authLogin", authLogin)
+      .handle("authRefresh", authRefresh)
+      .handle("authLogout", authLogout)
+      .handle("authSession", authSession)
       .handle("health", health)
       .handleRaw("event", event)
       .handle("configGet", configGet)
