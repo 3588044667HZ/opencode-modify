@@ -98,6 +98,7 @@ export const DialogSettings: Component<{
                       <Icon name="models" />
                       {language.t("settings.models.title")}
                     </TabsV2.Trigger>
+
                     <TabsV2.Trigger value="backup">
                       <Icon name="archive" />
                       {language.t("settings.backup.title")}
@@ -127,6 +128,7 @@ export const DialogSettings: Component<{
         <TabsV2.Content value="models" class="settings-v2-panel">
           <SettingsModelsV2 />
         </TabsV2.Content>
+
         <TabsV2.Content value="backup" class="settings-v2-panel">
           <SettingsBackupV2 />
         </TabsV2.Content>

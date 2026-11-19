@@ -17,7 +17,7 @@ import {
 import { Tabs } from "@opencode-ai/ui/tabs"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { Icon } from "@opencode-ai/ui/icon"
-import { TooltipKeybind } from "@opencode-ai/ui/tooltip"
+import { Tooltip, TooltipKeybind } from "@opencode-ai/ui/tooltip"
 import { ResizeHandle } from "@opencode-ai/ui/resize-handle"
 import { Mark } from "@opencode-ai/ui/logo"
 import { IconButtonV2 } from "@opencode-ai/ui/v2/icon-button-v2"
@@ -35,7 +35,7 @@ import { SessionContextUsage } from "@/components/session-context-usage"
 const reviewTabID = "session-side-panel-review-tab"
 const reviewTabPanelID = "session-side-panel-review-tabpanel"
 const fileBrowserTabPanelID = "session-side-panel-file-browser-tabpanel"
-import { SessionContextTab, SortableTab, SortableTabV2, FileVisual } from "@/components/session"
+import { SessionContextTab, SessionSemanticTab, SortableTab, SortableTabV2, FileVisual } from "@/components/session"
 import { OpenInAppV2 } from "@/components/session/open-in-app-v2"
 import { useCommand } from "@/context/command"
 import { useFile, type SelectedLineRange } from "@/context/file"
@@ -164,6 +164,11 @@ export function SessionSidePanel(props: {
     if (!view().reviewPanel.opened()) view().reviewPanel.open()
   }
 
+  const openSemantic = () => {
+    tabs().open("semantic")
+    tabs().setActive("semantic")
+    openReviewPanel()
+  }
   const openTab = createOpenSessionFileTab({
     normalizeTab,
     openTab: tabs().open,
@@ -182,6 +187,7 @@ export function SessionSidePanel(props: {
     fileBrowser: () => !!props.fileBrowserState,
   })
   const contextOpen = tabState.contextOpen
+  const semanticOpen = tabState.semanticOpen
   const openFileOpen = tabState.openFileOpen
   const panelTabs = tabState.panelTabs
   const openedTabs = tabState.openedTabs
@@ -238,7 +244,7 @@ export function SessionSidePanel(props: {
   })
   const fileBrowserVisible = createMemo(() => {
     const active = activeTab()
-    return active !== "review" && active !== "context" && active !== "empty"
+    return active !== "review" && active !== "context" && active !== "semantic" && active !== "empty"
   })
   const openFileKeybind = createMemo(() => command.keybindParts("file.open"))
   const closeTabKeybind = createMemo(() => command.keybindParts("tab.close"))
@@ -391,6 +397,14 @@ export function SessionSidePanel(props: {
                                   </div>
                                 </Tabs.Trigger>
                               </Show>
+                              <Show when={semanticOpen()}>
+                                <Tabs.Trigger value="semantic" onMiddleClick={() => tabs().close("semantic")}>
+                                  <div class="flex items-center gap-2">
+                                    <Icon name="brain" size="small" />
+                                    <div>{language.t("session.tab.semantic")}</div>
+                                  </div>
+                                </Tabs.Trigger>
+                              </Show>
                               <SortableProvider ids={openedTabs()}>
                                 <For each={panelTabs()}>
                                   {(tab) => (
@@ -442,6 +456,16 @@ export function SessionSidePanel(props: {
                                   "bg-background-stronger": !settings.general.newLayoutDesigns(),
                                 }}
                               >
+                                <Tooltip placement="bottom" value={language.t("session.tab.semantic")}>
+                                  <IconButton
+                                    icon="brain"
+                                    variant="ghost"
+                                    iconSize="large"
+                                    class="!rounded-md"
+                                    onClick={openSemantic}
+                                    aria-label={language.t("session.tab.semantic")}
+                                  />
+                                </Tooltip>
                                 <TooltipKeybind
                                   title={language.t("command.file.open")}
                                   keybind={command.keybind("file.open")}
@@ -494,6 +518,13 @@ export function SessionSidePanel(props: {
                             <Tabs.Content value="context" class="flex flex-col h-full overflow-hidden contain-strict">
                               <div class="relative pt-2 flex-1 min-h-0 overflow-hidden">
                                 <SessionContextTab />
+                              </div>
+                            </Tabs.Content>
+                          </Show>
+                          <Show when={activeTab() === "semantic"}>
+                            <Tabs.Content value="semantic" class="flex flex-col h-full overflow-hidden contain-strict">
+                              <div class="relative pt-2 flex-1 min-h-0 overflow-hidden">
+                                <SessionSemanticTab />
                               </div>
                             </Tabs.Content>
                           </Show>
@@ -605,6 +636,14 @@ export function SessionSidePanel(props: {
                                 </div>
                               </Tabs.Trigger>
                             </Show>
+                            <Show when={semanticOpen()}>
+                              <Tabs.Trigger value="semantic" onMiddleClick={() => tabs().close("semantic")}>
+                                <div class="flex items-center gap-2">
+                                  <Icon name="brain" size="small" />
+                                  <div>{language.t("session.tab.semantic")}</div>
+                                </div>
+                              </Tabs.Trigger>
+                            </Show>
                             <For each={panelTabs()}>
                               {(tab) => (
                                 <Show
@@ -661,6 +700,15 @@ export function SessionSidePanel(props: {
                                 "bg-background-stronger": !settings.general.newLayoutDesigns(),
                               }}
                             >
+                                <TooltipV2 value={language.t("session.tab.semantic")} placement="bottom" class="flex items-center">
+                                <IconButtonV2
+                                  icon={<Icon name="brain" />}
+                                  variant="ghost-muted"
+                                  size="large"
+                                  onClick={openSemantic}
+                                  aria-label={language.t("session.tab.semantic")}
+                                />
+                              </TooltipV2>
                               <TooltipV2
                                 value={
                                   <>
@@ -722,6 +770,13 @@ export function SessionSidePanel(props: {
                           <Tabs.Content value="context" class="flex flex-col h-full overflow-hidden contain-strict">
                             <div class="relative pt-2 flex-1 min-h-0 overflow-hidden">
                               <SessionContextTab />
+                            </div>
+                          </Tabs.Content>
+                        </Show>
+                        <Show when={activeTab() === "semantic"}>
+                          <Tabs.Content value="semantic" class="flex flex-col h-full overflow-hidden contain-strict">
+                            <div class="relative pt-2 flex-1 min-h-0 overflow-hidden">
+                              <SessionSemanticTab />
                             </div>
                           </Tabs.Content>
                         </Show>

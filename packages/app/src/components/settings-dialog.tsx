@@ -37,6 +37,7 @@ export function useSettingsCommand() {
       keybind: "mod+comma",
       onSelect: show,
     },
+
   ])
 
   return show

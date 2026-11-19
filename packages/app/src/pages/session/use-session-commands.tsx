@@ -349,6 +349,13 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     )
   }
 
+  const openSemantic = () => {
+    const id = params.id
+    if (!id) return
+    tabs().open("semantic")
+    tabs().setActive("semantic")
+    view().reviewPanel.open()
+  }
   const openBlackboard = () => openAgentTeams("blackboard")
 
   const openInbox = () => openAgentTeams("inbox")
@@ -561,6 +568,13 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
       description: language.t("command.session.team.description"),
       disabled: !params.id,
       onSelect: openTeam,
+    }),
+    sessionCommand({
+      id: "session.semantic",
+      title: language.t("command.session.semantic"),
+      description: language.t("command.session.semantic.description"),
+      disabled: !params.id,
+      onSelect: openSemantic,
     }),
     sessionCommand({
       id: "session.archive",

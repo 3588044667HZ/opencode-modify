@@ -117,7 +117,29 @@ const getCurrentUrl = () => {
   return location.origin
 }
 
+const getShellServer = (): ServerConnection.Http | undefined => {
+  if (typeof location === "undefined") return
+  const params = new URLSearchParams(location.search)
+  const value = params.get("server")
+  if (!value) return
+  const url = (/^https?:\/\//i.test(value) ? value : `http://${value}`).replace(/\/+$/, "")
+  try {
+    new URL(url)
+  } catch {
+    return
+  }
+  return {
+    type: "http",
+    http: {
+      url,
+      ...(authFromToken(params.get("auth_token")) ?? {}),
+    },
+  }
+}
+
 const getDefaultUrl = () => {
+  const shell = getShellServer()
+  if (shell) return shell.http.url
   const lsDefault = readDefaultServerUrl()
   if (lsDefault) return lsDefault
   return getCurrentUrl()
@@ -139,6 +161,8 @@ const platform: Platform = {
   restart,
   notify,
   getDefaultServer: async () => {
+    const shell = getShellServer()
+    if (shell) return ServerConnection.Key.make(shell.http.url)
     const stored = readDefaultServerUrl()
     return stored ? ServerConnection.Key.make(stored) : null
   },
@@ -166,6 +190,7 @@ if (import.meta.env.VITE_SENTRY_DSN) {
 
 if (root instanceof HTMLElement) {
   void loadInitialLocale().then((locale) => {
+    const shellServer = getShellServer()
     const auth = authFromToken(new URLSearchParams(location.search).get("auth_token"))
     clearAuthToken()
     const server: ServerConnection.Http = {
@@ -181,9 +206,13 @@ if (root instanceof HTMLElement) {
         <PlatformProvider value={platform}>
           <AppBaseProviders locale={locale}>
             <AppInterface
-              defaultServer={ServerConnection.Key.make(getDefaultUrl())}
+              defaultServer={shellServer ? ServerConnection.key(shellServer) : ServerConnection.Key.make(getDefaultUrl())}
               canonicalLocalServer={ServerConnection.key(server)}
-              servers={[server]}
+              servers={
+                shellServer && ServerConnection.key(shellServer) !== ServerConnection.key(server)
+                  ? [server, shellServer]
+                  : [server]
+              }
               disableHealthCheck
             />
           </AppBaseProviders>
