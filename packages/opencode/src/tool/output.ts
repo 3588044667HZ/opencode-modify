@@ -1,9 +1,9 @@
 import { Effect, Schema } from "effect"
 import * as Tool from "./tool"
 
-const DESCRIPTION = `Display a message to the user without performing any action.
+const DESCRIPTION = `Send a visible message to the user while continuing to work, without ending your turn.
 
-Use this when you want to show a progress update, intermediate result, or question while continuing to work. This tool does not read files, run commands, or change anything; it only prints the provided text to the user.`
+Use this for progress updates, decisions, warnings, and interim results during long tasks. This tool does not read files, run commands, or change anything; it only displays the provided text to the user. Do not use it for your final answer.`
 
 export const Parameters = Schema.Struct({
   text: Schema.String.annotate({
@@ -21,16 +21,16 @@ type Metadata = {
   title?: string
 }
 
-export const OutputTool = Tool.define<typeof Parameters, Metadata, never>(
-  "output",
+export const TellUserTool = Tool.define<typeof Parameters, Metadata, never>(
+  "tell_user",
   Effect.sync(() => ({
     description: DESCRIPTION,
     parameters: Parameters,
     execute: (params: Schema.Schema.Type<typeof Parameters>) => {
       const text = params.text.trim()
-      if (!text) throw new Error("output text must not be empty")
+      if (!text) throw new Error("tell_user text must not be empty")
       return Effect.succeed({
-        title: params.title ?? "Output",
+        title: params.title ?? "Message to user",
         output: text,
         metadata: {
           text,
@@ -40,3 +40,4 @@ export const OutputTool = Tool.define<typeof Parameters, Metadata, never>(
     },
   })),
 )
+export const OutputTool = TellUserTool

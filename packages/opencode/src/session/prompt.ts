@@ -1343,7 +1343,14 @@ const layer = Layer.effect(
                 yield* sessions.updateMessage(handle.message)
                 return "break" as const
               }
-            }
+              const lastUserParts = msgs.findLast((msg) => msg.info.role === "user" && msg.info.id === lastUser.id)?.parts
+              if (!handle.hasVisibleContent() && !userRequestedNoReply(lastUserParts)) {
+                handle.message.error = new NamedError.Unknown({
+                  message: "The model returned an empty response. Retry the request or send \"continue\".",
+                }).toObject()
+                yield* sessions.updateMessage(handle.message)
+                yield* events.publish(Session.Event.Error, { sessionID, error: handle.message.error })
+              }            }
 
             if (result === "stop") return "break" as const
             if (result === "compact") {
@@ -1671,3 +1678,15 @@ export const node = LayerNode.make({
 })
 
 export * as SessionPrompt from "./prompt"
+
+function userRequestedNoReply(parts: readonly SessionV1.Part[] | undefined) {
+  if (!parts) return false
+  const text = parts
+    .filter((part): part is SessionV1.TextPart => part.type === "text" && !part.synthetic)
+    .map((part) => part.text)
+    .join(" ")
+    .trim()
+  return /^(?:stop|停止|结束|不用回复|不要回复|无需回复|不需要回复|no reply|don't reply|do not reply)[.!！。]?$/i.test(
+    text,
+  )
+}

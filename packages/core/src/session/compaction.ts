@@ -65,6 +65,13 @@ type Settings = {
   readonly tokens: number
 }
 
+type Reason = "auto" | "manual"
+
+type Options = {
+  readonly reason: Reason
+  readonly focus?: string
+}
+
 type Dependencies = {
   readonly events: EventV2.Interface
   readonly llm: {
@@ -157,43 +164,68 @@ const select = (
   }
 }
 
-export const buildPrompt = (input: { readonly previousSummary?: string; readonly context: readonly string[] }) => {
+export const buildPrompt = (input: {
+  readonly previousSummary?: string
+  readonly context: readonly string[]
+  readonly focus?: string
+}) => {
   const conversation = `Here is the conversation so far:\n\n<conversation>\n${input.context.join("\n\n")}\n</conversation>`
+  const focus = input.focus?.trim()
+    ? `Additional focus for this summary:\n\n<focus>\n${input.focus.trim()}\n</focus>`
+    : undefined
   if (!input.previousSummary)
     return [
       conversation,
+      focus,
       "Create a new anchored summary from the conversation history in the <conversation> tags above so another coding agent can continue the work.",
       SUMMARY_TEMPLATE,
-    ].join("\n\n")
+    ]
+      .filter((part): part is string => part !== undefined)
+      .join("\n\n")
   return [
     conversation,
     `Here is the summary of the conversation before the <conversation> above:\n\n<prior-summary>\n${input.previousSummary}\n</prior-summary>`,
+    focus,
     SUMMARY_UPDATE_INSTRUCTIONS,
     SUMMARY_TEMPLATE,
-  ].join("\n\n")
+  ]
+    .filter((part): part is string => part !== undefined)
+    .join("\n\n")
 }
 
 export const make = (dependencies: Dependencies) => {
   const config = settings(dependencies.config)
-  const compactAfterOverflow = Effect.fn("SessionCompaction.compactAfterOverflow")(function* (input: Input) {
+  const skip = (input: Input, options: Options, reason: string) =>
+    options.reason === "manual"
+      ? Effect.logWarning("Manual context compaction skipped", {
+          sessionID: input.sessionID,
+          reason,
+        }).pipe(Effect.as(false))
+      : Effect.succeed(false)
+  const compact = Effect.fn("SessionCompaction.compact")(function* (input: Input, options: Options) {
     const context = input.model.route.defaults.limits?.context
-    if (context === undefined || context <= 0) return false
+    if (context === undefined || context <= 0)
+      return yield* skip(input, options, "the selected model has no context limit")
     const output = input.request.generation?.maxTokens ?? input.model.route.defaults.limits?.output ?? 0
     const selected = select(input.entries, config.tokens)
     const previousSummary = input.entries.find((entry) => entry.message.type === "compaction")?.message
-    if (!selected || (selected.head.length === 0 && previousSummary?.type !== "compaction")) return false
+    if (!selected) return yield* skip(input, options, "there is no conversation to compact")
+    if (selected.head.length === 0 && previousSummary?.type !== "compaction")
+      return yield* skip(input, options, "there is no older conversation to summarize")
     const summaryPrompt = buildPrompt({
       previousSummary: previousSummary?.type === "compaction" ? previousSummary.summary : undefined,
       context: [previousSummary?.type === "compaction" ? previousSummary.recent : "", selected.head].filter(Boolean),
+      focus: options.focus,
     })
     const summaryOutput = Math.min(output || SUMMARY_OUTPUT_TOKENS, SUMMARY_OUTPUT_TOKENS)
-    if (Token.estimate(summaryPrompt) > context - summaryOutput) return false
+    if (Token.estimate(summaryPrompt) > context - summaryOutput)
+      return yield* skip(input, options, "the summary prompt exceeds the model context window")
     const messageID = SessionMessage.ID.create()
     yield* dependencies.events.publish(SessionEvent.Compaction.Started, {
       sessionID: input.sessionID,
       messageID,
       timestamp: yield* DateTime.now,
-      reason: "auto",
+      reason: options.reason,
     })
 
     const chunks: string[] = []
@@ -218,16 +250,24 @@ export const make = (dependencies: Dependencies) => {
         Effect.catchTag("LLM.Error", () => Effect.succeed(false)),
       )
     const summary = chunks.join("")
-    if (!summarized || failed || !summary.trim()) return false
+    if (!summarized) return yield* skip(input, options, "the summary provider failed")
+    if (failed) return yield* skip(input, options, "the summary provider returned an error")
+    if (!summary.trim()) return yield* skip(input, options, "the summary provider returned no text")
     yield* dependencies.events.publish(SessionEvent.Compaction.Ended, {
       sessionID: input.sessionID,
       messageID,
       timestamp: yield* DateTime.now,
-      reason: "auto",
+      reason: options.reason,
       text: summary,
       recent: selected.recent,
     })
     return true
+  })
+  const compactAfterOverflow = Effect.fn("SessionCompaction.compactAfterOverflow")(function* (input: Input) {
+    return yield* compact(input, { reason: "auto" })
+  })
+  const compactManually = Effect.fn("SessionCompaction.compactManually")(function* (input: Input, focus?: string) {
+    return yield* compact(input, { reason: "manual", focus })
   })
   const compactIfNeeded = Effect.fn("SessionCompaction.compactIfNeeded")(function* (input: Input) {
     if (!config.auto) return false
@@ -239,10 +279,11 @@ export const make = (dependencies: Dependencies) => {
       context - Math.max(output, config.buffer)
     )
       return false
-    return yield* compactAfterOverflow(input)
+    return yield* compact(input, { reason: "auto" })
   })
   return {
     compactIfNeeded,
     compactAfterOverflow,
+    compactManually,
   }
 }

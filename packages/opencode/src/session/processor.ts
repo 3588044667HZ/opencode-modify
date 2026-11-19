@@ -45,6 +45,7 @@ export interface Handle {
     },
   ) => Effect.Effect<void>
   readonly process: (streamInput: LLM.StreamInput) => Effect.Effect<Result>
+  readonly hasVisibleContent: () => boolean
 }
 
 type Input = {
@@ -72,6 +73,7 @@ interface ProcessorContext extends Input {
   needsCompaction: boolean
   currentText: SessionV1.TextPart | undefined
   reasoningMap: Record<string, SessionV1.ReasoningPart>
+  sawVisibleContent: boolean
 }
 
 type StreamEvent = LLMEvent
@@ -111,6 +113,7 @@ const layer = Layer.effect(
         needsCompaction: false,
         currentText: undefined,
         reasoningMap: {},
+        sawVisibleContent: false,
       }
       let aborted = false
 
@@ -313,6 +316,7 @@ const layer = Layer.effect(
             return
 
           case "tool-input-start":
+            ctx.sawVisibleContent = true
             if (ctx.assistantMessage.summary) {
               throw new Error(`Tool call not allowed while generating summary: ${value.name}`)
             }
@@ -513,6 +517,7 @@ const layer = Layer.effect(
           case "text-delta":
             if (!ctx.currentText) return
             ctx.currentText.text += value.text
+            if (value.text.trim()) ctx.sawVisibleContent = true
             if (value.providerMetadata) ctx.currentText.metadata = value.providerMetadata
             yield* session.updatePartDelta({
               sessionID: ctx.currentText.sessionID,
@@ -541,6 +546,7 @@ const layer = Layer.effect(
               ctx.currentText.time = { start: ctx.currentText.time?.start ?? end, end }
             }
             if (value.providerMetadata) ctx.currentText.metadata = value.providerMetadata
+            if (ctx.currentText.text.trim()) ctx.sawVisibleContent = true
             yield* session.updatePart(ctx.currentText)
             ctx.currentText = undefined
             return
@@ -650,6 +656,7 @@ const layer = Layer.effect(
           yield* Effect.gen(function* () {
             ctx.currentText = undefined
             ctx.reasoningMap = {}
+            ctx.sawVisibleContent = false
             yield* status.set(ctx.sessionID, { type: "busy" })
             const stream = llm.stream(streamInput)
 
@@ -703,6 +710,7 @@ const layer = Layer.effect(
         updateToolCall,
         completeToolCall,
         process,
+        hasVisibleContent: () => ctx.sawVisibleContent,
       } satisfies Handle
     })
 

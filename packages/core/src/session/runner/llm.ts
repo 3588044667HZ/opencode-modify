@@ -26,6 +26,7 @@ import { ToolRegistry } from "../../tool/registry"
 import { ToolOutputStore } from "../../tool-output-store"
 import { SessionContextEpoch } from "../context-epoch"
 import { SessionCompaction } from "../compaction"
+import { SessionCompactionRequest } from "../compaction-request"
 import { SessionEvent } from "../event"
 import { SessionHistory } from "../history"
 import { SessionInput } from "../input"
@@ -99,6 +100,7 @@ const layer = Layer.effect(
     const tools = yield* ToolRegistry.Service
     const models = yield* SessionRunnerModel.Service
     const store = yield* SessionStore.Service
+    const compactionRequests = yield* SessionCompactionRequest.Service
     const location = yield* Location.Service
     const systemContext = yield* SystemContextRegistry.Service
     const skillGuidance = yield* SkillGuidance.Service
@@ -150,7 +152,7 @@ const layer = Layer.effect(
       )
 
     type TurnTransition =
-      // Automatic compaction completed; rebuild the request from compacted history.
+      // Automatic or manual compaction completed; rebuild the request from compacted history.
       | { readonly _tag: "ContinueAfterCompaction"; readonly step: number }
       // Overflow compaction completed; rebuild once through the path without overflow recovery.
       | { readonly _tag: "ContinueAfterOverflowCompaction"; readonly step: number }
@@ -219,6 +221,12 @@ const layer = Layer.effect(
         tools: toolMaterialization?.definitions ?? [],
         toolChoice: isLastStep ? "none" : undefined,
       })
+      const manualCompaction = yield* compactionRequests.take(session.id)
+      if (
+        manualCompaction &&
+        (yield* compaction.compactManually({ sessionID: session.id, entries, model, request }, manualCompaction.focus))
+      )
+        return yield* Effect.die(continueAfterCompaction(currentStep))
       if (yield* compaction.compactIfNeeded({ sessionID: session.id, entries, model, request }))
         return yield* Effect.die(continueAfterCompaction(currentStep))
       const startSnapshot = yield* snapshots.capture()
@@ -428,6 +436,7 @@ export const node = makeLocationNode({
     ToolRegistry.node,
     SessionRunnerModel.node,
     SessionStore.node,
+    SessionCompactionRequest.node,
     Location.node,
     SystemContextRegistry.node,
     SkillGuidance.node,

@@ -25,6 +25,7 @@ import { AbsolutePath } from "@opencode-ai/core/schema"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { Snapshot } from "@opencode-ai/core/snapshot"
 import { ContextSnapshotDecodeError } from "@opencode-ai/core/session/error"
+import { SessionCompactionRequest } from "@opencode-ai/core/session/compaction-request"
 import { SessionEvent } from "@opencode-ai/core/session/event"
 import { SessionInput } from "@opencode-ai/core/session/input"
 import { SessionMessage } from "@opencode-ai/core/session/message"
@@ -110,6 +111,21 @@ const recoveryModel = Model.make({
 })
 const authorizations: Tool.Context[] = []
 const executions: string[] = []
+let pendingManualCompaction: SessionCompactionRequest.Request | undefined
+let compactionTakeCalls = 0
+const compactionRequests = Layer.succeed(
+  SessionCompactionRequest.Service,
+  SessionCompactionRequest.Service.of({
+    request: () => Effect.die("unused"),
+    take: () =>
+      Effect.sync(() => {
+        compactionTakeCalls++
+        const request = pendingManualCompaction
+        pendingManualCompaction = undefined
+        return request
+      }),
+  }),
+)
 const permission = Layer.succeed(
   PermissionV2.Service,
   PermissionV2.Service.of({
@@ -235,6 +251,7 @@ const runnerLayer = AppNodeBuilder.build(SessionRunnerLLM.node, [
   [ReferenceGuidance.node, referenceGuidance],
   [PermissionV2.node, permission],
   [Config.node, config],
+  [SessionCompactionRequest.node, compactionRequests],
 ])
 const execution = Layer.effect(
   SessionExecution.Service,
@@ -285,6 +302,7 @@ const it = testEffect(
       [Snapshot.node, Snapshot.noopLayer],
       [SessionExecution.node, execution],
       [Config.node, config],
+      [SessionCompactionRequest.node, compactionRequests],
     ],
   ),
 )
@@ -329,6 +347,8 @@ const setup = Effect.gen(function* () {
   toolExecutionsReady = 5
   activeToolExecutions = 0
   maxActiveToolExecutions = 0
+  pendingManualCompaction = undefined
+  compactionTakeCalls = 0
   yield* db
     .insert(ProjectTable)
     .values({ id: Project.ID.global, worktree: AbsolutePath.make("/project"), sandboxes: [] })
@@ -1145,6 +1165,71 @@ describe("SessionRunnerLLM", () => {
         type: "compaction",
         summary: "## Objective\n- Preserve the updated task",
       })
+    }),
+  )
+
+  it.effect("consumes a queued manual compaction before the next provider turn", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      response = fragmentFixture("text", "text-earlier", ["Earlier answer"]).completeEvents
+      yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Earlier question ".repeat(700) }),
+        resume: false,
+      })
+      yield* session.resume(sessionID)
+
+      currentModel = recoveryModel
+      pendingManualCompaction = { focus: "Keep the API decisions" }
+      requests.length = 0
+      responses = [
+        fragmentFixture("text", "text-summary", ["## Objective\n- Manual summary"]).completeEvents,
+        fragmentFixture("text", "text-final", ["Continued"]).completeEvents,
+      ]
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Continue" }), resume: false })
+      yield* session.resume(sessionID)
+
+      expect(compactionTakeCalls).toBeGreaterThan(0)
+      expect(requests).toHaveLength(2)
+      expect(userTexts(requests[0]!)[0]).toContain("<focus>\nKeep the API decisions\n</focus>")
+      expect(userTexts(requests[1]!)[0]).toContain("<summary>\n## Objective\n- Manual summary\n</summary>")
+      expect(yield* session.context(sessionID)).toMatchObject([
+        { type: "compaction", reason: "manual", summary: "## Objective\n- Manual summary" },
+        { type: "assistant", finish: "stop" },
+      ])
+    }),
+  )
+
+  it.effect("continues the provider turn when a queued manual compaction fails", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      response = fragmentFixture("text", "text-earlier", ["Earlier answer"]).completeEvents
+      yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Earlier question ".repeat(700) }),
+        resume: false,
+      })
+      yield* session.resume(sessionID)
+
+      currentModel = recoveryModel
+      pendingManualCompaction = { focus: "Keep the API decisions" }
+      requests.length = 0
+      responses = [
+        [LLMEvent.providerError({ message: "summary unavailable" })],
+        fragmentFixture("text", "text-final", ["Continued"]).completeEvents,
+      ]
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Continue" }), resume: false })
+      yield* session.resume(sessionID)
+
+      expect(requests).toHaveLength(2)
+      expect(yield* session.context(sessionID)).toMatchObject([
+        { type: "user", text: "Earlier question ".repeat(700) },
+        { type: "assistant", finish: "stop" },
+        { type: "user", text: "Continue" },
+        { type: "assistant", finish: "stop" },
+      ])
     }),
   )
 
