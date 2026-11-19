@@ -204,10 +204,37 @@ jar 解析顺序：`semantic.jar` > `OPENCODE_SEMANTIC_JAR`/`SEMANTIC_JAR` > 打
 }
 ```
 
+### 最小启用与工具
+
+全局配置 `~/.config/opencode/opencode.jsonc` 的最小启用配置：
+
+```jsonc
+{
+  "semantic": {
+    "enabled": true
+  }
+}
+```
+
+`semantic.enabled` 默认是 false；未启用时服务端状态为 `disabled`，语义工具不注册，模型只能退回 shell / `require('fs')` / `Get-Content` 读写代码。
+
+默认只暴露 `read_view`。如果希望模型优先使用语义读写而不是 shell，把需要的工具显式加入：
+
+```jsonc
+{
+  "semantic": {
+    "enabled": true,
+    "tools": ["read_view", "blast_radius", "project_map", "edit_batch", "edit_transaction", "verify_test"]
+  }
+}
+```
+
+修改配置后新开一个 session；若预热条仍未出现，完全退出并重开 desktop app，再点击“预热语义引擎”。IDE/JDK 默认自动发现，通常不需要额外配置；需要覆盖时再设置 `semantic.ide` / `semantic.ide_home` / `semantic.jdk_home`。
+
 ### 分发与许可边界
 
 - 先运行 `bash semantic-server/script/build-local.sh` 生成引擎 jar，再执行
-  `bun run build:local -- --package`，jar 会放进 `win-unpacked/resources/semantic-server/`；
+  `bun run build:desktop`（或 `bun run build:backend --semantic` 后 `bun run build:desk`），jar 会放进 `win-unpacked/resources/semantic-server/`；
   对方机器只需**自己安装并授权 JetBrains IDE**，开启 `semantic.enabled` 即可（默认仅暴露 read_view，无需 JDK）。
 - 显式 `semantic.command` 仍完全优先，适合自定义运行时或已有 JDK 的环境。
 - 引擎**不打包、不下载、不修改** JetBrains IDE/JBR/插件，不读取授权状态；IDE 与授权均由使用者
@@ -261,13 +288,31 @@ bun dev              # CLI（TUI）
 bun dev:desktop      # 桌面端（agent-teams UI 默认开启）
 bun dev:web          # Web 版
 
-bun run build:server # 只构建 standalone server + 内嵌 Web UI
-bun run build:local  # 构建 Desktop + 内置 sidecar server + Web UI
+bun run build:server    # 独立无头 server + 内嵌 Web UI
+bun run build:backend   # 构建后端（dist/node + standalone CLI）
+bun run build:frontend  # 构建 Web UI + desktop GUI（GUI 内嵌后端）
+bun run build:desk      # 只打包 desktop 产物
+bun run build:desktop   # 后端 + 前端 + 打包 desktop
 
-# Desktop 可选：--package 仅打包 win-unpacked（本地部署用）；--installer 额外产出 NSIS 安装器；--deploy <dir> 覆盖部署到运行目录
+bun run deploy:headless # 部署无头 server
 ```
 
-Desktop 验证前请执行 `bun run build:local`；只用浏览器访问时执行 `bun run build:server`。两条命令的产物目录相互独立，不会互相覆盖。
+### Desktop 构建拆分
+
+| 命令 | 作用 | 依赖 |
+| --- | --- | --- |
+| `bun run build:backend` | 构建 `dist/node`，并把 standalone CLI 复制到 `packages/desktop/resources/opencode-cli.exe` | 无 |
+| `bun run build:frontend` | 构建 `packages/app/dist` 和 `packages/desktop/out` | 需要先有 backend 产物 |
+| `bun run build:desk` | 只打包/部署现有 desktop 产物，不编译 | backend + frontend build ID 必须一致 |
+| `bun run build:desktop` | 依次执行 backend、frontend、desk | 完整 desktop 链路 |
+| `bun run build:server` | 独立无头 server + 内嵌 Web UI | 与 desktop 产物独立 |
+| `bun run deploy:headless` | 在远端同步、构建并部署无头 server | 与 desktop 产物独立 |
+
+- Desktop GUI（`out/main`）会内嵌 backend 的 `dist/node`；**后端变了必须跑 `build:frontend`**，不能只跑 `build:desk`。
+- 只改前端：`build:frontend` → `build:desk`。
+- 只打包：`build:desk`；`--installer` 生成 NSIS 安装器，`--deploy <dir>` 覆盖部署到运行目录（目标 app 必须先完全退出）。
+- 语义 jar 属于 desktop 资源；`build:desktop` 默认构建，`build:backend --semantic` 也可单独构建。
+- `bun run build:local` 仍保留为旧的 all-in-one 构建；拆分命令不会自动写入完整的 desktop 构建记录；需要时用 `build:local` 或手工追加。
 
 ### 独立 Server（浏览器 GUI）
 
@@ -363,11 +408,11 @@ bun test --timeout 30000 test/tool/context.test.ts test/tool/task.test.ts test/t
 
 **每次代码修改后必须留下构建标记；GUI 与服务端必须来自同一次构建。**
 
-1. 修改完成后运行对应构建：Desktop/Web 用 `bun run build:local`，独立 server 用 `bun run build:server`；两者都会在仓库根 **`BUILD.md`** 追加一行（时间、Build ID、提交、本次更改、构建标记）。若手工构建，也必须手动追加说明。
+1. 修改完成后运行对应构建：Desktop/Web 用 `bun run build:desktop`（或按 backend/frontend/desk 拆分），独立 server 用 `bun run build:server` + `bun run deploy:headless`；需要构建记录时在仓库根 **`BUILD.md`** 追加一行（时间、Build ID、提交、本次更改、构建标记）。
 2. 运行时核对两端标记：
    - 服务端：启动日志出现 `server listening build=<id>`，`GET /global/health` 返回 `build` 字段；
    - GUI：Agent Teams 窗口页头显示 `build <id>`；
-   - 两者不一致时 GUI 会显示警示条——此时先重新构建（`bun run build:local`），再复验，禁止用旧客户端验证新改动。
+   - 两者不一致时 GUI 会显示警示条——此时先重新构建（`bun run build:desktop`），再复验，禁止用旧客户端验证新改动。
 3. `BUILD.md` 是唯一权威记录：同一「提交 + dirty 状态」只保留一行；排查“改动不生效”时，先对照这里的标记与正在运行的版本是否一致。
 
 详见 `specs/build-markers.md`。
@@ -409,6 +454,48 @@ bun test --timeout 30000 test/tool/context.test.ts test/tool/task.test.ts test/t
 
 ## 独立维护声明
 
-- 本仓库独立维护：不跟踪上游、不下载官方 CLI、不检查官方更新、不执行官方升级；桌面端、独立 server 与 CLI 的代码一律来自本仓库构建（`build:local` / `build:server`）。
+- 本仓库独立维护：不跟踪上游、不下载官方 CLI、不检查官方更新、不执行官方升级；桌面端、独立 server 与 CLI 的代码一律来自本仓库构建（`build:desktop` / `build:server`）。
 - 升级方式只有一种：`git pull` 本仓库后重新构建。`opencode upgrade` 在该分支会被明确拒绝。
 - 仅保留必要的开源许可与版权声明（见 [LICENSE](LICENSE)，MIT）；其余与上游发行渠道的关系均已移除。
+
+### 服务器 Token 认证
+
+除了原有 HTTP Basic，server 现在支持短期 access token + 长期 refresh token。登录使用配置的 `OPENCODE_SERVER_USERNAME` / `OPENCODE_SERVER_PASSWORD`：
+
+```bash
+curl -X POST http://127.0.0.1:4096/global/auth/login \
+  -H 'content-type: application/json' \
+  -d '{"username":"opencode","password":"YOUR_PASSWORD","deviceName":"phone"}'
+```
+
+响应包含 `accessToken`、`refreshToken`、`expiresIn`、`refreshExpiresIn` 和 `session`。后续请求使用：
+
+```http
+Authorization: Bearer <accessToken>
+```
+
+刷新和注销：
+
+```bash
+curl -X POST http://127.0.0.1:4096/global/auth/refresh \
+  -H 'content-type: application/json' \
+  -d '{"refreshToken":"<refreshToken>"}'
+
+curl -X POST http://127.0.0.1:4096/global/auth/logout \
+  -H 'Authorization: Bearer <accessToken>'
+```
+
+查询当前 token：
+
+```bash
+curl http://127.0.0.1:4096/global/auth/session \
+  -H 'Authorization: Bearer <accessToken>'
+```
+
+约束：
+
+- access token 默认 15 分钟，refresh token 默认 30 天；刷新会轮换两者，旧 token 立即失效。
+- token 以 SHA-256 哈希保存在 server 的 state 目录 `server-auth.json`，文件权限尽量设为 `0600`。
+- Basic 和 `?auth_token=` 仍兼容；新客户端不要再用 URL 传密码。
+- 无法设置请求头的 SSE/WebSocket 场景可使用 `?access_token=<accessToken>`。不要把长期 refresh token 放进 URL。
+- 登录接口仅使用 server 的单一账号；没有自助注册。生产环境请使用 HTTPS/Tailscale，并限制登录频率。

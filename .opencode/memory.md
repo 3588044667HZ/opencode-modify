@@ -24,6 +24,8 @@
 - 安装保持解压即用；开机自启默认关闭；权限模型保持现状，不新增 MCP 权限 key。
 - 自动项目记忆只做确定性生成，不调用模型；不覆盖已有 `AGENTS.md`/`CLAUDE.md`/`CONTEXT.md`。
 
+- 服务端认证采用单用户全权模型：不引入多用户、RBAC、scope 或设备 ACL；token 等同 owner 凭证，必须按密码级保护、可撤销，并优先走 Tailscale/HTTPS。
+
 ## 工程
 
 - 不直接 merge upstream；保持源码可控，改动以可审查的小步提交为主。
@@ -31,3 +33,10 @@
 - 遵循仓库现有代码风格和构建方式；提交使用 conventional commits。
 - 代码变更后按需更新 `BUILD.md` 构建标记。
 - 不把密钥、密码、token 或部署凭据写入 memory、源码或提交历史。
+
+## 暂停事项
+
+- Android 客户端自 2026-11-19 起暂停，除非用户明确要求恢复，否则不继续开发、构建或修改。
+- 独立工程：`F:\my_oppo_note\opencode-android`；目标是本地打包 OpenCode Web UI、多 LAN server profile、版本不匹配时加载服务器自带 UI。
+- 当前只到 debug APK/README 原型阶段；未真机验证、未提交。审计仍存在远程 UI 认证白屏、`/index.html` 路由丢参、reload 后 shell 配置丢失等高危问题。
+- 架构结论：server、LAN、desktop 继续留在 monorepo；desktop 作为薄壳复用 server；Android 独立；暂不拆成三个源码仓库。

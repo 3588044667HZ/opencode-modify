@@ -94,6 +94,17 @@ semantic_toolbox_and_common_idea_dirs() {
   done
 }
 
+# 非标准盘符安装：扫描固定盘根目录下的 JetBrains 产品目录（E:\IntelliJ IDEA ... 等）
+semantic_drive_idea_dirs() {
+  local root entry
+  for root in /c /d /e /f /g; do
+    [ -d "$root" ] || continue
+    for entry in "$root"/*IDEA* "$root"/*IntelliJ* "$root"/*PyCharm* "$root"/*WebStorm* "$root"/*CLion* "$root"/*GoLand* "$root"/*DataGrip*; do
+      [ -d "$entry" ] || continue
+      if [ -f "$entry/product-info.json" ] && [ -d "$entry/lib" ]; then printf '%s\n' "$entry"; fi
+    done
+  done
+}
 # Android Studio 安装目录（Gradle 自带 JBR 的通用回退源；注册表 DisplayIcon 反推）
 semantic_android_studio_dirs() {
   if [ -n "${ProgramFiles:-}" ] && [ -d "$ProgramFiles/Android Studio" ]; then
@@ -122,6 +133,7 @@ semantic_resolve_idea_dir() {
       semantic_path_idea_dirs
       semantic_registry_idea_dirs
       semantic_toolbox_and_common_idea_dirs
+      semantic_drive_idea_dirs
     } | while IFS= read -r candidate; do
       [ -f "$candidate/product-info.json" ] || continue
       if [ "$require_java" = "1" ] && [ ! -d "$candidate/plugins/java" ]; then continue; fi
@@ -134,11 +146,22 @@ semantic_resolve_idea_dir() {
 }
 
 # JDK 候选：SEMANTIC_JDK_HOME > JAVA_HOME > 通用安装目录（新版本优先）
+semantic_drive_jdk_dirs() {
+  local root candidate
+  for root in /c /d /e /f /g; do
+    [ -d "$root" ] || continue
+    for candidate in "$root"/*jdk* "$root"/*JDK*; do
+      [ -d "$candidate" ] || continue
+      if [ -x "$candidate/bin/javac.exe" ] && [ -x "$candidate/bin/jar.exe" ]; then printf '%s\n' "$candidate"; fi
+    done
+  done
+}
 semantic_jdk_candidates() {
   local candidate home
   for candidate in "${SEMANTIC_JDK_HOME:-}" "${JAVA_HOME:-}"; do
     if [ -n "$candidate" ]; then printf '%s\n' "$candidate"; fi
   done
+  semantic_drive_jdk_dirs | sort -r
   local bases=()
   if [ -n "${ProgramFiles:-}" ]; then
     bases+=("$ProgramFiles/Java" "$ProgramFiles/Eclipse Adoptium" "$ProgramFiles/Microsoft")
@@ -178,6 +201,7 @@ semantic_ide_jbr_candidates() {
     semantic_path_idea_dirs
     semantic_registry_idea_dirs
     semantic_toolbox_and_common_idea_dirs
+    semantic_drive_idea_dirs
     semantic_android_studio_dirs
   } | while IFS= read -r dir; do
     if [ -x "$dir/jbr/bin/java.exe" ] || [ -x "$dir/jbr/bin/java" ]; then printf '%s\n' "$dir/jbr"; fi

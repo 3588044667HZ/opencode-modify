@@ -19,20 +19,33 @@ if (args.has("--skip") || process.env.OPENCODE_SKIP_SEMANTIC === "1") {
   process.exit(0)
 }
 
-const bash = Bun.which("bash")
+const bashCandidates = [
+  process.env.OPENCODE_BASH,
+  Bun.which("bash"),
+  process.platform === "win32" ? "C:\\Program Files\\Git\\bin\\bash.exe" : undefined,
+  process.platform === "win32" ? "C:\\Program Files\\Git\\usr\\bin\\bash.exe" : undefined,
+]
+const bash = bashCandidates.find((candidate): candidate is string => !!candidate && existsSync(candidate))
 if (!bash) {
-  const message = "semantic: bash not found; skipping semantic jar build"
+  const message = "semantic: bash not found; set OPENCODE_BASH or install Git Bash"
   if (required) throw new Error(message)
   console.warn(message)
   process.exit(0)
+}
+const bashEnv = { ...process.env }
+if (process.platform === "win32" && /[\\/]Git[\\/]/i.test(bash)) {
+  const gitRoot = path.dirname(path.dirname(bash))
+  bashEnv.PATH = [path.join(gitRoot, "bin"), path.join(gitRoot, "usr", "bin"), bashEnv.PATH ?? ""]
+    .filter(Boolean)
+    .join(";")
 }
 
 await mkdir(dir, { recursive: true })
 console.log("semantic: building semantic-server.jar")
 
 try {
-  await $`bash semantic-server/script/build-local.sh`.cwd(root).env({
-    ...process.env,
+  await $`${bash} semantic-server/script/build-local.sh`.cwd(root).env({
+    ...bashEnv,
     SEMANTIC_OUTPUT_JAR: next,
   })
 } catch (error) {

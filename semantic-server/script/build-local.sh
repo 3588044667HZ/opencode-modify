@@ -12,6 +12,13 @@ ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # shellcheck source=resolve-env.sh
 source "$SCRIPT_DIR/resolve-env.sh"
 
+if ! IDEA_DIR="$(semantic_resolve_idea_dir --require-java)"; then
+  echo "ERROR: no Java-capable IntelliJ IDE found; set SEMANTIC_IDE_HOME / IDEA_HOME / IDEA_DIR" >&2
+  exit 1
+fi
+if [ -z "${TOOL_JAVA_HOME:-}" ] && ! semantic_resolve_jdk_home --require-javac >/dev/null 2>&1 && { [ -x "$IDEA_DIR/jbr/bin/javac.exe" ] || [ -x "$IDEA_DIR/jbr/bin/javac" ]; }; then
+  TOOL_JAVA_HOME="$IDEA_DIR/jbr"
+fi
 if [ -n "${TOOL_JAVA_HOME:-}" ] && { [ -x "$TOOL_JAVA_HOME/bin/javac.exe" ] || [ -x "$TOOL_JAVA_HOME/bin/javac" ]; }; then
   TOOL_HOME="$TOOL_JAVA_HOME"
 elif TOOL_HOME="$(semantic_resolve_jdk_home --require-javac)"; then
